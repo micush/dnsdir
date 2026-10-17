@@ -1,5 +1,21 @@
 # Changelog
 
+## [v439] - 2026-10-17 — The online update is for one node when auto-update is on
+
+### Changed
+- **With auto-update on, the `Update from online` task is for one node of a cluster.** The task fetches the newest release and stages it on the node it runs on; with auto-update on, every other node then updates itself from that. On every node, each would fetch the release itself and queue its own update outside the cluster's one-at-a-time order. So in the task form, when the action is `Update from online`, auto-update is on and the cluster has more than one node, `Runs on` offers only one node at a time (this node is the default) and no `Every node`. The server refuses the task for every node (or for several) in the same situation, with a message that says what to do. A cluster of one node, or auto-update off, is not asked anything.
+- The scheduler's status says whether auto-update is on (`auto_update`), which is how the form knows. `TestOnlineUpdateNeedsOneNode`; the help says it.
+
+### Notes
+- Nothing is checked for a task saved before this version, or when auto-update is turned on after the task was made: it keeps its nodes until it is edited.
+
+### Verified
+- gofmt clean, `go build`, `go vet`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet` and `go test`, cross-builds for linux/amd64, arm64, arm, 386, riscv64; `node --check` on `app.js` and `help.js`.
+- One `-race` run of the dnsdir tests failed in a test whose name I did not capture; the next run passed. The tests that look for a free port and bind it later (`freeAddr`) are known to lose the port now and then; not changed here.
+
+### Not verified
+- The task form in a browser, and the refusal on a real cluster with auto-update on: the rule is covered as a function (`onlineUpdateNeedsOneNode`), not through two clustered nodes.
+
 ## [v438] - 2026-10-17 — Clearing a To time now clears it
 
 ### Fixed

@@ -4556,8 +4556,9 @@
       const someNodes = h("input", { type: "radio", name: "sched-where", checked: (t.nodes || []).length > 0 });
       const nodeBoxes = state.nodes.map((n) => ({ n, el: h("input", { type: "checkbox", checked: (t.nodes || []).includes(n.node_id), disabled: !n.node_id }) }));
       const nodesList = h("div", { class: "sched-nodes" }, nodeBoxes.map(({ n, el }) => h("label", { class: "f check" }, el, nodeLabel(n) + (n.self ? " (this node)" : ""))));
+      const allLabel = h("label", { class: "f check" }, allNodes, "Every node of the cluster");
       const where = state.nodes.length > 1
-        ? h("div", { class: "f wide" }, h("span", {}, "Runs on"), h("label", { class: "f check" }, allNodes, "Every node of the cluster"), h("label", { class: "f check" }, someNodes, "Only these nodes:"), nodesList)
+        ? h("div", { class: "f wide" }, h("span", {}, "Runs on"), allLabel, h("label", { class: "f check" }, someNodes, "Only these nodes:"), nodesList)
         : h("div", { class: "hint" }, "Runs on this node.");
       const freq = h("select", { "aria-label": "How often" }, [["once", "Once"], ["hourly", "Hourly"], ["daily", "Daily"], ["weekly", "Weekly"], ["monthly", "Monthly"], ["yearly", "Yearly"]].map(([k, l]) => h("option", { value: k, selected: k === t.freq }, l)));
       const dateIn = h("input", { type: "date", value: t.date || new Date(Date.now() + 86400000).toISOString().slice(0, 10), "aria-label": "Date (UTC)" });
@@ -4603,9 +4604,19 @@
         rows.at.hidden = f === "hourly"; rows.minute.hidden = f !== "hourly";
         rows.days.hidden = f !== "weekly"; rows.month.hidden = f !== "yearly"; rows.day.hidden = f !== "monthly" && f !== "yearly";
         dom.disabled = !byDay.checked; nths.concat(wds).forEach((x) => { x.el.disabled = !byNth.checked; }); eachSel.disabled = !byNth.checked;
+        // with auto-update on, the online update is for one node: the release staged on it reaches the others
+        const oneNode = action.value === "update_online" && editorAuto && state.nodes.length > 1;
+        allLabel.hidden = oneNode;
+        if (oneNode) {
+          someNodes.checked = true;
+          const on = nodeBoxes.filter((x) => x.el.checked);
+          if (!on.length) { const me = nodeBoxes.find((x) => x.n.self) || nodeBoxes[0]; if (me) me.el.checked = true; }
+          else on.slice(1).forEach((x) => { x.el.checked = false; });
+        }
         nodesList.hidden = !someNodes.checked;
       };
       [action, freq, every, byDay, byNth, allNodes, someNodes, until].forEach((el) => el.addEventListener("change", sync));
+      nodeBoxes.forEach(({ el }) => el.addEventListener("change", () => { if (action.value === "update_online" && editorAuto && state.nodes.length > 1 && el.checked) nodeBoxes.forEach((x) => { if (x.el !== el) x.el.checked = false; }); }));
       every.addEventListener("input", sync); until.addEventListener("input", sync);
       const submit = (ev) => {
         ev.preventDefault();
@@ -4639,14 +4650,14 @@
           h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "submit" }, isNew ? "Add task" : "Save"), h("button", { class: "btn", type: "button", onclick: close }, "Cancel"))));
       root.append(d); sync(); d.showModal(); name.focus();
     }
-    let editorActions = {};
+    let editorActions = {}, editorAuto = false;
 
     const openRuns = new Set();   // history rows whose output is expanded: kept open when the page redraws
     function draw(st) {
       const sig = JSON.stringify([Object.assign({}, st, { now: 0 }), localTimes, openRuns.size, clip && clip.name, state.nodes.map((n) => [n.node_id, nodeLabel(n)])]);
       if (sig === last) return;
       last = sig;
-      editorActions = st.actions || {};
+      editorActions = st.actions || {}; editorAuto = !!st.auto_update;
       const tasks = st.tasks.map((v) => v.task);
       const real = box; box = h("div", {});
       try {

@@ -8,6 +8,12 @@ import (
 
 var schedEditMu sync.Mutex
 
+// onlineUpdateNeedsOneNode says the task is an online update meant for every node while auto-update is on in a cluster:
+// that is refused, it is to name exactly one node.
+func onlineUpdateNeedsOneNode(t SchedTask, autoUpdate, clustered bool) bool {
+	return t.Action == "update_online" && autoUpdate && clustered && len(t.Nodes) != 1
+}
+
 // SchedSet adds a task, or replaces the one with the same id (Operate ▸ Scheduler, --schedule-set).  The whole list goes
 // through PutConfig, so a replica sends it to the primary like any other shared change.
 func (m *Mgmt) SchedSet(t SchedTask, actor string) (SchedTask, error) {
@@ -19,6 +25,11 @@ func (m *Mgmt) SchedSet(t SchedTask, actor string) (SchedTask, error) {
 	}
 	if err := t.validate(); err != nil {
 		return t, err
+	}
+	// With auto-update on, one node staging the release is all it takes (every node then updates itself), so the online
+	// update is for one node: on each node, each would fetch it and queue its own update, outside the cluster's order.
+	if onlineUpdateNeedsOneNode(t, m.upd.Intent().AutoAll, m.cl != nil && len(m.cl.node.Snapshot().Peers) > 0) {
+		return t, errors.New("auto-update is on, so the online update runs on one node: choose that node under Runs on, or turn auto-update off")
 	}
 	replaced := false
 	for i := range dc.DNS.Schedule {

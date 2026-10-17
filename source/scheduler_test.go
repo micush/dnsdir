@@ -613,3 +613,28 @@ func TestPickDayPerNode(t *testing.T) {
 		t.Fatal("pick_day kept on a daily task")
 	}
 }
+
+// With auto-update on, the online update task is for one node of a cluster; alone, or with auto-update off, it is not asked.
+func TestOnlineUpdateNeedsOneNode(t *testing.T) {
+	every := SchedTask{Action: "update_online"}
+	one := SchedTask{Action: "update_online", Nodes: []string{"a"}}
+	two := SchedTask{Action: "update_online", Nodes: []string{"a", "b"}}
+	other := SchedTask{Action: "stats_clear"}
+	for _, c := range []struct {
+		t       SchedTask
+		auto    bool
+		cluster bool
+		want    bool
+	}{
+		{every, true, true, true}, {two, true, true, true}, {one, true, true, false},
+		{every, false, true, false}, {every, true, false, false}, {other, true, true, false},
+	} {
+		if got := onlineUpdateNeedsOneNode(c.t, c.auto, c.cluster); got != c.want {
+			t.Errorf("%+v auto=%v cluster=%v: got %v", c.t, c.auto, c.cluster, got)
+		}
+	}
+	mg := newPowerMgmt(t)
+	if st := mg.sched.Status(); st.AutoUpdate != mg.upd.Intent().AutoAll {
+		t.Errorf("status says auto-update %v, the intent %v", st.AutoUpdate, mg.upd.Intent().AutoAll)
+	}
+}

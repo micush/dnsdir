@@ -941,6 +941,8 @@ type SchedStatus struct {
 	Tasks   []SchedTaskView   `json:"tasks"`
 	History []SchedRun        `json:"history"`
 	Actions map[string]string `json:"actions"`
+	// AutoUpdate says auto-update is on: the form then lets the online update run on one node only.
+	AutoUpdate bool `json:"auto_update,omitempty"`
 }
 
 func (s *Scheduler) Status() SchedStatus {
@@ -948,7 +950,7 @@ func (s *Scheduler) Status() SchedStatus {
 	now := s.now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := SchedStatus{NodeID: node, Now: now.Unix(), Tasks: []SchedTaskView{}, History: []SchedRun{}, Actions: schedActions}
+	out := SchedStatus{NodeID: node, Now: now.Unix(), Tasks: []SchedTaskView{}, History: []SchedRun{}, Actions: schedActions, AutoUpdate: s.m != nil && s.m.upd != nil && s.m.upd.Intent().AutoAll}
 	for _, t := range s.tasks {
 		t := t
 		v := SchedTaskView{ID: t.ID, Name: t.Name, Action: t.Action, Disabled: t.Disabled, Task: t, Describe: t.describe(), Applies: t.appliesTo(node), Running: s.running[t.ID], Queued: s.queuedLocked(t.ID)}

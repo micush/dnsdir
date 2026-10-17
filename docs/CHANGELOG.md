@@ -1,5 +1,14 @@
 # Changelog
 
+## [v440] - 2026-10-17 — Only in these months
+
+### Added
+- **Daily, weekly and monthly tasks can be limited to months of the year** (`months`, 1 to 12; the form's `Only in` row has a box for each month, none ticked meaning every month). A task for the 2nd or 3rd Saturday or Sunday, 01:00 to 06:00, April to October is now one task. All twelve ticked is saved as none; the field is dropped from other frequencies; the description ends with e.g. `April to October`. `TestMonthsLimitATask`.
+
+### Notes
+- A node on an older version ignores `months` and would run the task in every month until it is upgraded.
+- Not seen in a real browser; not tried on a live multi-node cluster.
+
 ## [v439] - 2026-10-17 — The online update is for one node when auto-update is on
 
 ### Changed

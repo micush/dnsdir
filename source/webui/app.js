@@ -4578,6 +4578,9 @@
       const wdRow = h("span", { class: "sched-days" }, wds.map(({ i, el }) => h("label", { class: "f check" }, el, WD[i].slice(0, 3))));
       const month = h("select", { "aria-label": "Month" }, MON.map((m, i) => h("option", { value: String(i + 1), selected: t.month === i + 1 }, m)));
       const monthRow = h("label", { class: "f" }, "Month", month);
+      const months = MON.map((m, i) => ({ i, el: h("input", { type: "checkbox", checked: (t.months || []).includes(i + 1) }) }));
+      const monthsRow = h("div", { class: "f wide", title: "Tick the months it runs in; none ticked means every month" }, h("span", {}, "Only in"),
+        h("div", { class: "sched-days" }, months.map(({ i, el }) => h("label", { class: "f check" }, el, MON[i].slice(0, 3)))));
       const dayBox = h("div", { class: "f wide" }, h("span", {}, "On"),
         h("label", { class: "f check" }, byDay, "day", dom, " of the month"),
         h("div", { class: "f check sched-nthrow" }, byNth, "the", nthRow, wdRow, "of the month, run on", eachSel));
@@ -4592,7 +4595,7 @@
       const enabled = h("input", { type: "checkbox", checked: !t.disabled });
       const rows = {
         shell: shellBox, date: h("label", { class: "f" }, "On (UTC)", dateIn), every: h("label", { class: "f" }, "Every", h("span", { class: "sched-every" }, every, everyUnit)),
-        at: h("div", { class: "f sched-range" }, h("label", { class: "f" }, "At (UTC)", at), h("label", { class: "f" }, "To (optional)", until)), minute: h("div", { class: "f sched-range" }, h("label", { class: "f" }, "At minute", minute), h("label", { class: "f" }, "To minute (optional)", untilMin)), days: h("div", { class: "f wide" }, h("span", {}, "On"), dayRow), month: monthRow, day: dayBox,
+        at: h("div", { class: "f sched-range" }, h("label", { class: "f" }, "At (UTC)", at), h("label", { class: "f" }, "To (optional)", until)), minute: h("div", { class: "f sched-range" }, h("label", { class: "f" }, "At minute", minute), h("label", { class: "f" }, "To minute (optional)", untilMin)), days: h("div", { class: "f wide" }, h("span", {}, "On"), dayRow), month: monthRow, day: dayBox, months: monthsRow,
       };
       const sync = () => {
         const f = freq.value;
@@ -4602,7 +4605,7 @@
         every.max = { hourly: 720, daily: 366, weekly: 52, monthly: 24, yearly: 10 }[f];
         rows.date.hidden = f !== "once"; rows.every.hidden = f === "once";
         rows.at.hidden = f === "hourly"; rows.minute.hidden = f !== "hourly";
-        rows.days.hidden = f !== "weekly"; rows.month.hidden = f !== "yearly"; rows.day.hidden = f !== "monthly" && f !== "yearly";
+        rows.months.hidden = !["daily", "weekly", "monthly"].includes(f); rows.days.hidden = f !== "weekly"; rows.month.hidden = f !== "yearly"; rows.day.hidden = f !== "monthly" && f !== "yearly";
         dom.disabled = !byDay.checked; nths.concat(wds).forEach((x) => { x.el.disabled = !byNth.checked; }); eachSel.disabled = !byNth.checked;
         // with auto-update on, the online update is for one node: the release staged on it reaches the others
         const oneNode = action.value === "update_online" && editorAuto && state.nodes.length > 1;
@@ -4629,6 +4632,7 @@
         if (f === "weekly") task.days = days.filter((x) => x.el.checked).map((x) => x.i);
         if (f === "monthly" || f === "yearly") { if (byNth.checked) { task.nths = nths.filter((x) => x.el.checked).map((x) => x.v); task.weekdays = wds.filter((x) => x.el.checked).map((x) => x.i); if (!task.nths.length || !task.weekdays.length) { errorBox(err, "Pick at least one occurrence and one weekday."); return; } task.each_day = eachSel.value === "each"; task.pick_day = eachSel.value === "pick"; } else task.day = +dom.value; }
         if (f === "yearly") task.month = +month.value;
+        if (["daily", "weekly", "monthly"].includes(f)) { const ms = months.filter((x) => x.el.checked).map((x) => x.i + 1); if (ms.length && ms.length < 12) task.months = ms; }
         if (f === "hourly" && untilMin.value !== "") {
           const um = Math.min(59, Math.max(0, +untilMin.value || 0));
           if (um === Math.min(59, Math.max(0, +minute.value || 0))) { errorBox(err, "The To minute must differ from the At minute."); return; }
@@ -4644,7 +4648,7 @@
           h("div", { class: "grid" },
             h("label", { class: "f wide" }, "Name", name),
             h("label", { class: "f wide" }, "Does", action), rows.shell, where,
-            h("label", { class: "f" }, "How often", freq), rows.date, rows.every, rows.at, rows.minute, rows.days, rows.month, rows.day,
+            h("label", { class: "f" }, "How often", freq), rows.date, rows.every, rows.at, rows.minute, rows.days, rows.month, rows.day, rows.months,
             h("label", { class: "f check wide" }, enabled, "Enabled")),
           err,
           h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "submit" }, isNew ? "Add task" : "Save"), h("button", { class: "btn", type: "button", onclick: close }, "Cancel"))));

@@ -72,6 +72,9 @@ type SchedTask struct {
 	// PickDay (with Nths and Weekdays) runs the task on one of the matching days of the month, a different one on each
 	// node (chosen from the node, the task and the month), so the nodes do not all act on the same day.
 	PickDay bool `json:"pick_day,omitempty"`
+	// Months (1 = January) limits a daily, weekly or monthly task to those months of the year (April to October: 4 to 10).
+	// Empty means every month.  validate drops it from other frequencies and when it names all twelve.
+	Months []int `json:"months,omitempty"`
 }
 
 const (
@@ -236,6 +239,26 @@ func (t *SchedTask) validate() error {
 	if len(t.Nths) == 0 || t.Freq != "monthly" && t.Freq != "yearly" {
 		t.EachDay, t.PickDay = false, false
 	}
+	if t.Freq == "daily" || t.Freq == "weekly" || t.Freq == "monthly" {
+		seen := map[int]bool{}
+		var ms []int
+		for _, m := range t.Months {
+			if m < 1 || m > 12 {
+				return fmt.Errorf("scheduler: %q: a month is 1 (January) to 12 (December)", t.Name)
+			}
+			if !seen[m] {
+				seen[m] = true
+				ms = append(ms, m)
+			}
+		}
+		sort.Ints(ms)
+		if len(ms) == 12 {
+			ms = nil
+		}
+		t.Months = ms
+	} else {
+		t.Months = nil
+	}
 	if t.EachDay && t.PickDay {
 		return fmt.Errorf("scheduler: %q: run on each of the days, or on one day chosen per node, not both", t.Name)
 	}
@@ -347,6 +370,17 @@ func (t *SchedTask) nthDay(y int, m time.Month, dd int) bool {
 func (t *SchedTask) dayMatches(d time.Time) bool {
 	y, m, dd := d.Date()
 	dim := daysIn(y, m)
+	if len(t.Months) > 0 && (t.Freq == "daily" || t.Freq == "weekly" || t.Freq == "monthly") {
+		in := false
+		for _, mo := range t.Months {
+			if time.Month(mo) == m {
+				in = true
+			}
+		}
+		if !in {
+			return false
+		}
+	}
 	byDay := func() bool {
 		if len(t.Nths) > 0 {
 			// Several ordinals/weekdays name the days a run may happen on; it runs once a month, on the first of them.
@@ -579,7 +613,27 @@ func (t *SchedTask) describe() string {
 			out += ", within " + fmtSchedWindow(t.WindowSec)
 		}
 	}
+	if len(t.Months) > 0 {
+		out += ", " + monthsText(t.Months)
+	}
 	return out
+}
+
+// monthsText names the months of a task: "April to October" for a run of three or more, else "March and May".
+func monthsText(ms []int) string {
+	names := []string{"", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"}
+	n := len(ms)
+	switch {
+	case n == 1:
+		return names[ms[0]]
+	case n >= 3 && ms[n-1]-ms[0] == n-1:
+		return names[ms[0]] + " to " + names[ms[n-1]]
+	}
+	var l []string
+	for _, m := range ms {
+		l = append(l, names[m])
+	}
+	return strings.Join(l[:n-1], ", ") + " and " + l[n-1]
 }
 
 // joinOr lists "a", "a or b", "a, b or c".

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -636,5 +637,36 @@ func TestOnlineUpdateNeedsOneNode(t *testing.T) {
 	mg := newPowerMgmt(t)
 	if st := mg.sched.Status(); st.AutoUpdate != mg.upd.Intent().AutoAll {
 		t.Errorf("status says auto-update %v, the intent %v", st.AutoUpdate, mg.upd.Intent().AutoAll)
+	}
+}
+
+func TestMonthsLimitATask(t *testing.T) {
+	task := mustTask(t, SchedTask{ID: "mo1", Freq: "monthly", Nths: []int{2, 3}, Weekdays: []int{0, 6}, At: "01:00", Until: "06:00", EachDay: true, Months: []int{10, 4, 4, 5, 6, 7, 8, 9}})
+	if want := []int{4, 5, 6, 7, 8, 9, 10}; fmt.Sprint(task.Months) != fmt.Sprint(want) {
+		t.Fatalf("months %v, want %v", task.Months, want)
+	}
+	if d := task.describe(); !strings.Contains(d, "April to October") {
+		t.Fatalf("describe %q lacks the months", d)
+	}
+	n := 0
+	for _, b := range task.bases(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		if m := b.Month(); m < 4 || m > 10 {
+			t.Fatalf("runs in %v", b)
+		}
+		n++
+	}
+	if n != 7*4 {
+		t.Fatalf("%d runs, want 28 (4 days a month for 7 months)", n)
+	}
+	all := mustTask(t, SchedTask{ID: "mo2", Freq: "daily", At: "01:00", Months: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}})
+	if all.Months != nil {
+		t.Fatalf("all twelve should clear: %v", all.Months)
+	}
+	if one := mustTask(t, SchedTask{ID: "mo3", Freq: "hourly", At: "00:05", Months: []int{3}}); one.Months != nil {
+		t.Fatalf("hourly keeps months: %v", one.Months)
+	}
+	bad := SchedTask{ID: "mo4", Freq: "daily", At: "01:00", Months: []int{13}}
+	if bad.validate() == nil {
+		t.Fatal("month 13 accepted")
 	}
 }

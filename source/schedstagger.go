@@ -49,7 +49,7 @@ func (s *Scheduler) runOffset(node string, t SchedTask, base time.Time) time.Dur
 				continue
 			}
 			w := int64(u.WindowSec)
-			for _, b := range u.bases(time.Unix(lo-w-gap, 0), time.Unix(hi+gap, 0)) {
+			for _, b := range u.basesFor(node, time.Unix(lo-w-gap, 0), time.Unix(hi+gap, 0)) {
 				k := u.ID + "|" + strconvI(b.Unix())
 				if _, ok := set[k]; ok {
 					continue

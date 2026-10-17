@@ -69,6 +69,9 @@ type SchedTask struct {
 	Until string `json:"until,omitempty"`
 	// EachDay (with Nths and Weekdays) runs the task on every matching day of the month instead of only the first one.
 	EachDay bool `json:"each_day,omitempty"`
+	// PickDay (with Nths and Weekdays) runs the task on one of the matching days of the month, a different one on each
+	// node (chosen from the node, the task and the month), so the nodes do not all act on the same day.
+	PickDay bool `json:"pick_day,omitempty"`
 }
 
 const (
@@ -231,7 +234,10 @@ func (t *SchedTask) validate() error {
 	}
 	t.Nth, t.Weekday = 0, 0
 	if len(t.Nths) == 0 || t.Freq != "monthly" && t.Freq != "yearly" {
-		t.EachDay = false
+		t.EachDay, t.PickDay = false, false
+	}
+	if t.EachDay && t.PickDay {
+		return fmt.Errorf("scheduler: %q: run on each of the days, or on one day chosen per node, not both", t.Name)
 	}
 	nths, wds := t.Nths, t.Weekdays
 	t.Nths, t.Weekdays = nil, nil
@@ -347,7 +353,7 @@ func (t *SchedTask) dayMatches(d time.Time) bool {
 			if !t.nthDay(y, m, dd) {
 				return false
 			}
-			for e := 1; e < dd && !t.EachDay; e++ {
+			for e := 1; e < dd && !t.EachDay && !t.PickDay; e++ {
 				if t.nthDay(y, m, e) {
 					return false
 				}
@@ -421,6 +427,54 @@ func (t *SchedTask) bases(from, to time.Time) []time.Time {
 	return out
 }
 
+// pickedBy says whether this node runs the occurrence b: always, except for a PickDay task, where each node runs only
+// on its own one of the matching days of the month (the same one every time it is asked).
+func (t *SchedTask) pickedBy(node string, b time.Time) bool {
+	if !t.PickDay {
+		return true
+	}
+	y, m, _ := b.Date()
+	var days []int
+	for d := 1; d <= daysIn(y, m); d++ {
+		if t.dayMatches(time.Date(y, m, d, 0, 0, 0, 0, time.UTC)) {
+			days = append(days, d)
+		}
+	}
+	if len(days) == 0 {
+		return true
+	}
+	h := sha256.Sum256([]byte(node + "|" + t.ID + "|day|" + b.Format("2006-01")))
+	return b.Day() == days[binary.BigEndian.Uint64(h[:8])%uint64(len(days))]
+}
+
+// basesFor is bases as this node sees them: for a PickDay task only the occurrences on the node's own day.
+func (t *SchedTask) basesFor(node string, from, to time.Time) []time.Time {
+	all := t.bases(from, to)
+	if !t.PickDay {
+		return all
+	}
+	var out []time.Time
+	for _, b := range all {
+		if t.pickedBy(node, b) {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// nextFor is next for this node.
+func (t *SchedTask) nextFor(node string, t0 time.Time) time.Time {
+	for i := 0; i < 80; i++ {
+		from := t0.Add(time.Duration(i) * 60 * 24 * time.Hour)
+		for _, b := range t.basesFor(node, from, from.Add(60*24*time.Hour)) {
+			if b.After(t0) {
+				return b
+			}
+		}
+	}
+	return time.Time{}
+}
+
 // next is the first scheduled time after t0 (zero when there is none in the next twelve years).
 func (t *SchedTask) next(t0 time.Time) time.Time {
 	for i := 0; i < 80; i++ {
@@ -474,6 +528,8 @@ func (t *SchedTask) describe() string {
 				return "the " + joinOr(o) + " " + joinOr(w)
 			case t.EachDay:
 				return "each of the " + joinOr(o) + " " + joinOr(w) + "s"
+			case t.PickDay:
+				return "one day per node out of the " + joinOr(o) + " " + joinOr(w) + "s"
 			}
 			return "the first of the " + joinOr(o) + " " + joinOr(w) + "s"
 		}
@@ -671,7 +727,7 @@ func (s *Scheduler) Tick(nodeID string) {
 		var due *time.Time
 		skipped := 0
 		var skipBase time.Time
-		for _, b := range t.bases(from, now) {
+		for _, b := range t.basesFor(nodeID, from, now) {
 			b := b
 			runAt := b.Add(s.runOffset(nodeID, t, b))
 			if now.Before(runAt) {
@@ -899,14 +955,14 @@ func (s *Scheduler) Status() SchedStatus {
 		if !t.Disabled {
 			// the next run of this node: an occurrence whose own time in the window has not yet passed counts too
 			from := now.Add(-time.Duration(t.WindowSec) * time.Second)
-			for _, b := range t.bases(from, now) {
+			for _, b := range t.basesFor(node, from, now) {
 				if runAt := b.Add(s.runOffset(node, t, b)); runAt.After(now) && b.Unix() > s.st.Last[t.ID] {
 					v.Next, v.NextRun = b.Unix(), runAt.Unix()
 					break
 				}
 			}
 			if v.Next == 0 {
-				if b := t.next(now); !b.IsZero() {
+				if b := t.nextFor(node, now); !b.IsZero() {
 					v.Next, v.NextRun = b.Unix(), b.Add(s.runOffset(node, t, b)).Unix()
 				}
 			}

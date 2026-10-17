@@ -1,5 +1,22 @@
 # Changelog
 
+## [v437] - 2026-10-17 — One of those days, chosen per node
+
+### Added
+- **A monthly or yearly task that names several days (the 1st or 2nd Friday or Saturday) can run on one of them, a different one on each node.** In the task form, `run on` has a third choice, `one of those days, chosen per node` (`"pick_day": true` in the settings). Each node takes one matching day of the month, worked out from the node, the task and the month, so a node keeps its day all month and the nodes do not all act on the same day. `At` and `To` still set the time of day. Before, the choices were the first of those days (every node on the same day) or each of them (every node on every one).
+- The task list says it as `one day per node out of the 1st, 2nd, 3rd or 4th Sunday or Saturdays`. The next-run time shown is the node's own. `TestPickDayPerNode`; help and README say it.
+
+### Notes
+- The day is picked by a hash, not handed out in turn, so with few nodes two can land on the same day. Nodes on the same day run it at the same time unless `To` spreads them.
+- A cluster of mixed versions: a node older than v437 does not know `pick_day` and runs the task on the first of the days.
+
+### Verified
+- gofmt clean, `go build`, `go vet`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet` and `go test`, cross-builds for linux/amd64, arm64, arm, 386, riscv64; `node --check` on `app.js` and `help.js`.
+- One run of the `CGO_ENABLED=0` tests in dnsdir failed in `TestRegisterHostNameSigned` ("bind: address already in use"): a test that looks for a free port and binds it afterwards, which can lose the port to another test. It passed on the next run. Not changed here.
+
+### Not verified
+- The task form was not looked at in a browser, and the day choice was not seen across a real cluster. The mixed-version behaviour above is from reading the code, not tried.
+
 ## [v436] - 2026-10-17 — The web page reloads itself after an upgrade
 
 ### Added

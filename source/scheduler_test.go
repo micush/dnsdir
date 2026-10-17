@@ -562,3 +562,54 @@ func TestHourlyToMinute(t *testing.T) {
 		t.Fatal("To equal to At on an hourly task must be refused (it would be a 60 minute window)")
 	}
 }
+
+// PickDay: every node runs the task once a month, on one of the matching days, and the nodes do not all pick the same.
+func TestPickDayPerNode(t *testing.T) {
+	task := mustTask(t, SchedTask{ID: "pk1", Freq: "monthly", Nths: []int{1, 2, 3, 4}, Weekdays: []int{0, 6}, At: "09:00", Until: "12:00", PickDay: true})
+	from, to := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
+	all := map[string]bool{}
+	for _, b := range task.bases(from, to) {
+		all[b.Format("2006-01-02")] = true
+	}
+	days := map[string]bool{}
+	for _, node := range []string{"n1", "n2", "n3", "n4", "n5", "n6", "n7", "n8"} {
+		perMonth := map[string]int{}
+		for _, b := range task.basesFor(node, from, to) {
+			if !all[b.Format("2006-01-02")] {
+				t.Fatalf("%s: %v is not one of the matching days", node, b)
+			}
+			perMonth[b.Format("2006-01")]++
+			days[b.Format("2006-01-02")] = true
+		}
+		if len(perMonth) != 6 {
+			t.Fatalf("%s: runs in %d months, want 6: %v", node, len(perMonth), perMonth)
+		}
+		for m, n := range perMonth {
+			if n != 1 {
+				t.Fatalf("%s: %d runs in %s, want one", node, n, m)
+			}
+		}
+		again := task.basesFor(node, from, to)
+		first := task.basesFor(node, from, to)
+		if len(again) != len(first) || again[0] != first[0] {
+			t.Fatal("the choice is not stable")
+		}
+	}
+	if len(days) < 6 {
+		t.Fatalf("8 nodes over 6 months picked only %d different days", len(days))
+	}
+	if n := task.nextFor("n1", time.Date(2026, 10, 17, 20, 0, 0, 0, time.UTC)); n.IsZero() || !all[n.Format("2006-01-02")] {
+		t.Fatalf("nextFor: %v", n)
+	}
+	if !strings.Contains(task.describe(), "one day per node out of the 1st, 2nd, 3rd or 4th Sunday or Saturdays") {
+		t.Fatalf("describe: %q", task.describe())
+	}
+	both := SchedTask{ID: "x", Name: "n", Action: "stats_clear", Freq: "monthly", Nths: []int{1}, Weekdays: []int{0, 6}, EachDay: true, PickDay: true}
+	if err := both.validate(); err == nil {
+		t.Fatal("each_day and pick_day together must be refused")
+	}
+	daily := mustTask(t, SchedTask{Freq: "daily", PickDay: true})
+	if daily.PickDay {
+		t.Fatal("pick_day kept on a daily task")
+	}
+}

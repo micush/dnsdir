@@ -4580,7 +4580,7 @@
       const monthRow = h("label", { class: "f" }, "Month", month);
       const months = MON.map((m, i) => ({ i, el: h("input", { type: "checkbox", checked: (t.months || []).includes(i + 1) }) }));
       const monthsRow = h("div", { class: "f wide", title: "Tick the months it runs in; none ticked means every month" }, h("span", {}, "Only in"),
-        h("div", { class: "sched-days" }, months.map(({ i, el }) => h("label", { class: "f check" }, el, MON[i].slice(0, 3)))));
+        h("div", { class: "sched-days sched-months" }, months.map(({ i, el }) => h("label", { class: "f check" }, el, MON[i].slice(0, 3)))));
       const dayBox = h("div", { class: "f wide" }, h("span", {}, "On"),
         h("label", { class: "f check" }, byDay, "day", dom, " of the month"),
         h("div", { class: "f check sched-nthrow" }, byNth, "the", nthRow, wdRow, "of the month, run on", eachSel));
@@ -4681,7 +4681,7 @@
         box.append(section("Scheduled tasks",
           h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "button", onclick: () => editor(null, tasks) }, "New task")),
           h("div", { class: "scroll", oncontextmenu: emptyMenu }, h("table", { class: "sched" },
-            h("thead", {}, h("tr", {}, ["Task", "Does", "Runs on", "Schedule", "Next run (this node)", "Last run (this node)"].map((x) => h("th", {}, x)))),
+            h("thead", {}, h("tr", {}, ["Task", "Does", "Runs on", "Schedule", ["Next run", "(this node)"], ["Last run", "(this node)"]].map((x) => (Array.isArray(x) ? h("th", {}, x[0], h("br"), x[1]) : h("th", {}, x))))),
             h("tbody", {}, st.tasks.length ? st.tasks.map(row) : h("tr", {}, h("td", { colspan: 6, class: "empty" }, "No tasks yet. Add one with New task, or right-click here.")))))));
         const localBox = h("input", { type: "checkbox", checked: localTimes });
         localBox.addEventListener("change", () => { localTimes = localBox.checked; try { localStorage.setItem("sched_local_times", localTimes ? "1" : "0"); } catch (_) { /* no storage */ } last = ""; draw(st); });

@@ -605,6 +605,7 @@ dialog.sched-dialog { width: min(40rem, calc(100vw - 2rem)); }
 .sched-every { display: inline-flex; align-items: center; gap: .4rem; flex-wrap: wrap; color: var(--text); }
 .sched-every input[type=number] { width: 6rem; }
 .sched-days, .sched-nodes { display: flex; flex-wrap: wrap; gap: .25rem .9rem; }
+.sched-days.sched-months { display: grid; grid-template-columns: repeat(6, auto); justify-content: start; }
 .sched-nodes { flex-direction: column; margin-left: 1.6rem; gap: .1rem; }
 .sched-dialog [hidden] { display: none !important; }
 table.sched td { vertical-align: top; }

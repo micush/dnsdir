@@ -1,5 +1,15 @@
 # Changelog
 
+## [v442] - 2026-10-17 — Months in two even rows
+
+### Changed
+- The `Only in` months are laid out as two rows of six (Jan to Jun, Jul to Dec) instead of wrapping wherever the width ran out.
+
+## [v441] - 2026-10-17 — Scheduler column headings
+
+### Changed
+- The scheduler table's headings read `Next run` / `Last run` with `(this node)` on a second line, instead of wrapping in the middle of the phrase.
+
 ## [v440] - 2026-10-17 — Only in these months
 
 ### Added

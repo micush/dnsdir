@@ -1,5 +1,16 @@
 # Changelog
 
+## [v438] - 2026-10-17 — Clearing a To time now clears it
+
+### Fixed
+- **Removing the To time of a task and saving kept the old window.** The task form sent back the window the server had worked out from the To time (4 hours for 09:00 to 13:00, say), so the task came back with a To time again and it had to be removed a second time. A task that has a To time now sends no window when To is cleared.
+
+### Verified
+- gofmt clean, `go build`, `go vet`, `go test -race` for the web, session, scheduler and help tests, `node --check` on `app.js`. The full suite was not run again: only `app.js` changed since v437, which passed it.
+
+### Not verified
+- The fix itself in a browser: the form is JavaScript with no test; checked by reading the code path (the stored window is dropped when the task has a To time).
+
 ## [v437] - 2026-10-17 — One of those days, chosen per node
 
 ### Added

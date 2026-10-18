@@ -547,6 +547,8 @@
     if (!document.hidden && state.timer && VIEWS[state.tab].poll) VIEWS[state.tab].poll().catch(() => {});
   });
 
+  // partialLast: the range ends inside the last bucket (more than one bucket, so there is something left to draw)
+  const partialLast = (d, len) => len > 2 && d.to < d.start + len * d.step;
   // 2,710,532 -> 2.71M, 100,555,111 -> 100.56M: rounded to two decimals (a trailing 0 dropped), M, B, T from a million up; below a million in full
   const shortCount = (v) => {
     v = Number(v || 0);
@@ -1218,8 +1220,6 @@
       const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
       return step >= 3600 || long ? d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + hm : hm;
     };
-    // partialLast: the range ends inside the last bucket (more than one bucket, so there is something left to draw)
-    const partialLast = (d, len) => len > 2 && d.to < d.start + len * d.step;
     function tsChart(title, d, series, o) {
       // the last bucket is still filling (it holds only part of a step), so it is left out: plotted, it would be a drop to nearly nothing
       const n = series[0].values.length - (partialLast(d, series[0].values.length) ? 1 : 0);

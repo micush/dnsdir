@@ -414,7 +414,13 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return m.clusterHost(context.Background(), actor, from, to)
+		gid := 0
+		if a.QGW != "" {
+			if gid, err = strconv.Atoi(a.QGW); err != nil || gid < 1 {
+				return nil, errors.New("bad gateway number")
+			}
+		}
+		return m.clusterHostGW(context.Background(), actor, from, to, gid)
 	// host statistics: CPU, memory, disk, network
 	case "host.get":
 		from, to, err := hostRange(a.QFrom, a.QTo)

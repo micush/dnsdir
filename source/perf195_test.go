@@ -74,8 +74,17 @@ func TestQStatsCountsUnchangedByAddressReuse(t *testing.T) {
 	defer s.mu.Unlock()
 	top := &s.fine[(now/60/qsFineSpan)%qsFineSlots]
 	if top.c[qcNoError].clients["192.0.2.1"] != 50 || top.c[qcNXDomain].clients["192.0.2.2"] != 50 ||
-		top.c[qcNXDomain].pairs["192.0.2.2"]["b.example"] != 50 || top.c[qcNXDomain].tcp != 50 {
+		top.c[qcNXDomain].tcp != 50 {
 		t.Fatalf("unexpected counts: %+v", top.c[qcNoError].clients)
+	}
+	var pair uint32
+	s.pairs.scan(now/60/pairUnitMin-1, now/60/pairUnitMin+1, func(kind int, c, name string, v uint32) {
+		if kind == qcNXDomain && c == "192.0.2.2" && name == "b.example" {
+			pair += v
+		}
+	})
+	if pair != 50 {
+		t.Fatalf("the pair counted %d, want 50", pair)
 	}
 }
 

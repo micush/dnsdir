@@ -48,6 +48,8 @@ func TestPersistRoundTrip(t *testing.T) {
 	h.start = t0.Add(-72 * time.Hour)
 	swapStats(t, q, h)
 	dir := t.TempDir()
+	pdir := t.TempDir() // the pairs are files of their own
+	q.pairs.setDir(pdir)
 	if err := savePersisted(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -65,6 +67,7 @@ func TestPersistRoundTrip(t *testing.T) {
 	q2, _ := qsTestStats(t0)
 	q2.now = func() time.Time { return *cur }
 	q2.start = *cur
+	q2.pairs.setDir(pdir)
 	h2, hcur2, _ := fakeHost(t0)
 	*hcur2 = t0.Add(2 * time.Minute)
 	swapStats(t, q2, h2)

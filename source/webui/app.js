@@ -108,6 +108,7 @@
   // Statistics also offers each gateway: the nodes that serve it, added together like Cluster.  (The numbers are kept per node,
   // so a node that serves several gateways counts all its traffic in each.)
   const GW = "*gw:";
+  const GW_TABS = ["stats", "host"];   // the pages that offer the gateways
   const isGw = () => typeof state.target === "string" && state.target.startsWith(GW);
   const gwItems = () => (state.gws || []).map((g) => {
     const n = state.nodes.filter((p) => !(g.excluded_nodes || []).includes(p.node_id)).length;
@@ -117,7 +118,7 @@
   const CLUSTER_TABS = ["stats", "host", "capture"];
   const CLUSTER_API = [[/^\/api\/qstats(\?|$)/, "/api/clusterstats"], [/^\/api\/host(\?|$)/, "/api/clusterhost"], [/^\/api\/qstats\/clear$/, "/api/clusterstats"]];
   function route(path) {
-    if (isGw()) return /^\/api\/qstats(\?|$)/.test(path) ? path.replace(/^\/api\/qstats/, "/api/clusterstats") + (path.includes("?") ? "&" : "?") + "gw=" + encodeURIComponent(state.target.slice(GW.length)) : path;
+    if (isGw()) { const to = /^\/api\/qstats(\?|$)/.test(path) ? "/api/clusterstats" : /^\/api\/host(\?|$)/.test(path) ? "/api/clusterhost" : ""; return to ? path.replace(/^\/api\/[a-z]+/, to) + (path.includes("?") ? "&" : "?") + "gw=" + encodeURIComponent(state.target.slice(GW.length)) : path; }
     if (state.target === CLUSTER) {
       for (const [re, to] of CLUSTER_API) if (re.test(path)) return path.replace(/^\/api\/[a-z]+/, to);
       return path;
@@ -353,7 +354,7 @@
   function selectTab(id) {
     state.tab = id;
     if (state.target === CLUSTER && !CLUSTER_TABS.includes(id)) state.target = null;   // the other pages are about one node: back to this one
-    if (isGw() && id !== "stats") state.target = null;
+    if (isGw() && !GW_TABS.includes(id)) state.target = null;
     renderTopbar();   // the Cluster entry is on the menu for Statistics and Host only
     history.replaceState(null, "", "#" + id);
     for (const b of root.querySelectorAll("nav.side .nav-item[data-tab]")) {
@@ -491,7 +492,7 @@
     try { v = (await api("GET", "/api/cluster", undefined, true)).data; } catch (_) { return; }
     state.clustered = !!(v && v.enabled && (v.peers || []).length > 1);
     state.nodes = state.clustered ? v.peers : [];
-    if (state.tab === "stats" && state.nodes.length >= 2 && Date.now() - (state.gwsAt || 0) > 20000) {   // the gateways for the Node menu
+    if (GW_TABS.includes(state.tab) && state.nodes.length >= 2 && Date.now() - (state.gwsAt || 0) > 20000) {   // the gateways for the Node menu
       state.gwsAt = Date.now();
       try { state.gws = ((await api("GET", "/api/config", undefined, true)).config || {}).groups || []; } catch (_) { /* the last list stays */ }
     }
@@ -509,7 +510,7 @@
     const hidden = state.nodes.length < 2;
     const items = hidden ? [] : [["", nodeLabel(selfNode()) + " (this node)", false]].concat(state.nodes.filter((x) => !x.self).map((n) =>
       [n.addr, nodeLabel(n) + (n.is_primary ? " · primary" : "") + (n.reachable ? "" : " · unreachable"), !n.reachable && n.addr !== state.target]));
-    if (!hidden && state.tab === "stats") items.push(...gwItems());   // nodes, then gateways, then the whole cluster
+    if (!hidden && GW_TABS.includes(state.tab)) items.push(...gwItems());   // nodes, then gateways, then the whole cluster
     if (!hidden && CLUSTER_TABS.includes(state.tab)) items.push([CLUSTER, "Cluster (" + state.nodes.length + ")", false]);
     const sig = JSON.stringify([hidden, items, state.target || ""]);
     const cur = bar.querySelector("select");

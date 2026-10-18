@@ -293,27 +293,16 @@ func TestQStatsClientDomainPairs(t *testing.T) {
 	if r := s.Query(from, *cur, QFilter{Client: "192.0.2.9"}); len(r.Domains) != 0 {
 		t.Fatalf("unknown client: %+v", r.Domains)
 	}
-	// past the pair cap the difference shows as (others) and the client total stays exact
-	for i := 0; i < qsPairCaps[qcNoError]+40; i++ {
+	// every pair is kept: they go to disk, not into a capped table
+	for i := 0; i < 5000; i++ {
 		s.Record(b, "p"+fmtN(i)+".example", 1, false, 0)
 	}
-	r = s.Query(from, *cur, QFilter{Client: "192.0.2.2", Rcode: "noerror"})
-	var sum uint64
-	for _, d := range r.Domains {
-		sum += d.Count
-	}
-	if sum != uint64(qsPairCaps[qcNoError]+40+1) && len(r.Domains) < qsKeepResult {
-		t.Fatalf("counts not preserved: %d over %d rows", sum, len(r.Domains))
-	}
-	s.flush() // the events are counted in batches; this test reads the tables directly
-	s.mu.Lock()
-	n := 0
-	for _, tp := range s.fine {
-		n += tp.c[qcNoError].npairs
-	}
-	s.mu.Unlock()
-	if n > qsPairCaps[qcNoError] {
-		t.Fatalf("pair cap exceeded: %d", n)
+	s.flush()
+	u := cur.Unix() / 60 / pairUnitMin
+	rows := 0
+	s.pairs.scan(u-1, u+1, func(kind int, c, name string, v uint32) { rows++ })
+	if rows < 5000 {
+		t.Fatalf("%d pairs kept, want at least 5000", rows)
 	}
 }
 

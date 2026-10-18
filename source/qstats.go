@@ -91,35 +91,11 @@ var qsCaps = [qcCount][2]int{
 	qcUpdate:   {100, 100},
 }
 
-// qsPairCaps are the most distinct (client, domain) pairs one slot keeps per kind of answer.
-// They answer "what did this client ask for" and "who asked for this".  A pair beyond the cap
-// is not kept; the reply makes up the difference as "(others)" from the client and domain totals.
-var qsPairCaps = [qcCount]int{
-	qcNoError:  3000,
-	qcServFail: 300,
-	qcNXDomain: 600,
-	qcRefused:  150,
-	qcOther:    60,
-	qcUpdate:   200,
-}
-
-// qsPairCapsCoarse is the same for the hour slots (the longer ranges), which are many more and so get less each.
-var qsPairCapsCoarse = [qcCount]int{
-	qcNoError:  1000,
-	qcServFail: 150,
-	qcNXDomain: 300,
-	qcRefused:  100,
-	qcOther:    30,
-	qcUpdate:   100,
-}
-
 // qsKind is the top lists of one kind of answer in one slot.
 type qsKind struct {
 	clients  map[string]uint32
 	domains  map[string]uint32
 	types    map[string]uint32
-	pairs    map[string]map[string]uint32 // client → domain → count
-	npairs   int
 	udp, tcp uint32
 	// proto splits those by the IP version of the client: index 0 UDP over IPv4, 1 UDP over IPv6, 2 TCP over IPv4,
 	// 3 TCP over IPv6 (see protoIdx).  Counts saved by an older version have no split: what udp and tcp hold beyond
@@ -155,6 +131,7 @@ type qsTop struct {
 // QStats is the collector.  The zero value is not usable: call NewQStats.
 type QStats struct {
 	mu         sync.Mutex
+	pairs      *pairStore            // who asked for what: on disk (qpairs.go)
 	who        map[netip.Addr]string // client address strings in use (whoString)
 	start      time.Time
 	now        func() time.Time
@@ -179,7 +156,7 @@ type rdnsEntry struct {
 }
 
 func NewQStats() *QStats {
-	return &QStats{start: time.Now(), now: time.Now, rdns: map[string]rdnsEntry{}, rwork: map[string]bool{}}
+	return &QStats{pairs: newPairStore(), start: time.Now(), now: time.Now, rdns: map[string]rdnsEntry{}, rwork: map[string]bool{}}
 }
 
 // qstats is the daemon-wide collector, fed by every DNS frontend.
@@ -353,11 +330,11 @@ func (s *QStats) apply(e qEvent) {
 		ms.other++
 	}
 	tn := qtypeName(qtype)
+	s.pairs.add(e.t, kind, who, name, 1)
 	for _, tier := range []struct {
 		slots []qsTop
 		span  int64
-		caps  *[qcCount]int
-	}{{s.fine[:], qsFineSpan, &qsPairCaps}, {s.coarse[:], qsCoarseSpan, &qsPairCapsCoarse}} {
+	}{{s.fine[:], qsFineSpan}, {s.coarse[:], qsCoarseSpan}} {
 		p := m / tier.span
 		tp := &tier.slots[p%int64(len(tier.slots))]
 		if tp.stamp != p {
@@ -366,21 +343,10 @@ func (s *QStats) apply(e qEvent) {
 		k := &tp.c[kind]
 		if k.clients == nil {
 			k.clients, k.domains, k.types = map[string]uint32{}, map[string]uint32{}, map[string]uint32{}
-			k.pairs = map[string]map[string]uint32{}
 		}
 		bump(k.clients, who, qsCaps[kind][0])
 		bump(k.domains, name, qsCaps[kind][1])
 		k.types[tn]++
-		if dm := k.pairs[who]; dm != nil && dm[name] > 0 {
-			dm[name]++
-		} else if k.npairs < tier.caps[kind] {
-			if dm == nil {
-				dm = map[string]uint32{}
-				k.pairs[who] = dm
-			}
-			dm[name]++
-			k.npairs++
-		}
 		if tcp {
 			k.tcp++
 		} else {
@@ -621,21 +587,22 @@ func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
 			for i, n := range k.proto {
 				protos[i] += uint64(n)
 			}
-			if f.Client != "" {
-				for n, v := range k.pairs[f.Client] {
-					pairDomains[n] += uint64(v)
-				}
-			}
-			if f.Domain != "" {
-				for c, m := range k.pairs {
-					if v := m[f.Domain]; v > 0 {
-						pairClients[c] += uint64(v)
-					}
-				}
-			}
 		}
 	}
 	s.mu.Unlock()
+	if f.Client != "" || f.Domain != "" { // the pairs are on disk: read the units the slots above cover
+		s.pairs.scan(from.Unix()/60/span*span/pairUnitMin, (to.Unix()/60/span+1)*span/pairUnitMin-1, func(kind int, c, name string, v uint32) {
+			if rcode != "" && qcNames[kind] != rcode {
+				return
+			}
+			if f.Client != "" && c == f.Client {
+				pairDomains[name] += uint64(v)
+			}
+			if f.Domain != "" && name == f.Domain {
+				pairClients[c] += uint64(v)
+			}
+		})
+	}
 
 	for i := 0; i < n; i++ {
 		r.Sums.Total += r.Total[i]
@@ -970,4 +937,5 @@ func (s *QStats) Clear() {
 	s.coarse = [qsCoarseSlots]qsTop{}
 	s.who = nil
 	s.start = s.now()
+	s.pairs.clear()
 }

@@ -104,13 +104,9 @@ func (s *QStats) persistTo(emit func(pRec) error) error {
 					continue
 				}
 				used = true
-				rec.Top[ci] = pKind{Clients: copyU32(k.clients), Domains: copyU32(k.domains), Types: copyU32(k.types), NPairs: k.npairs, UDP: k.udp, TCP: k.tcp,
-					Pairs: make(map[string]map[string]uint32, len(k.pairs))}
+				rec.Top[ci] = pKind{Clients: copyU32(k.clients), Domains: copyU32(k.domains), Types: copyU32(k.types), UDP: k.udp, TCP: k.tcp}
 				if k.proto != ([4]uint32{}) {
 					rec.Top[ci].Split = append([]uint32(nil), k.proto[:]...)
-				}
-				for c, dm := range k.pairs {
-					rec.Top[ci].Pairs[c] = copyU32(dm)
 				}
 			}
 			s.mu.Unlock()
@@ -195,6 +191,7 @@ func savePersistedOpt(dir string, durable bool) error {
 	if err := qstats.persistTo(emit); err != nil {
 		return err
 	}
+	qstats.pairs.saveOpen()
 	if err := hoststats.persistTo(emit); err != nil {
 		return err
 	}
@@ -312,8 +309,8 @@ func (s *QStats) restore(r pRec) int {
 				continue
 			}
 			q := &tp.c[ci]
-			q.clients, q.domains, q.types, q.pairs = k.Clients, k.Domains, k.Types, k.Pairs
-			q.npairs, q.udp, q.tcp = k.NPairs, k.UDP, k.TCP
+			q.clients, q.domains, q.types = k.Clients, k.Domains, k.Types
+			q.udp, q.tcp = k.UDP, k.TCP
 			if len(k.Split) == len(q.proto) {
 				copy(q.proto[:], k.Split)
 			}
@@ -323,9 +320,12 @@ func (s *QStats) restore(r pRec) int {
 			if q.types == nil {
 				q.types = map[string]uint32{}
 			}
-			if q.pairs == nil {
-				q.pairs = map[string]map[string]uint32{}
-			}
+		}
+		// pairs saved by an older version become the files of their units (a newer one keeps them there to begin with)
+		if r.K == "fine" {
+			s.pairs.importUnit(p, r.Top)
+		} else if p*qsCoarseSpan < nowMin-qsFineSlots*qsFineSpan {
+			s.pairs.importUnit(p*qsCoarseSpan/pairUnitMin, r.Top)
 		}
 		slots[p%int64(len(slots))] = tp
 		return 1
@@ -366,6 +366,7 @@ func (h *HostStats) restore(r pRec) int {
 // startPersistence loads the saved statistics and keeps saving them until stop is closed.  The returned
 // function stops the saver and writes the file one last time; call it once the DNS frontends have stopped.
 func startPersistence(dir string, stop <-chan struct{}) (final func()) {
+	qstats.pairs.setDir(filepath.Join(dir, "pairs"))
 	if n, err := loadPersisted(dir); err != nil {
 		warnf("statistics: reading %s: %v (kept %d entries)", filepath.Join(dir, persistFile), err, n)
 	} else if n > 0 {

@@ -1,5 +1,21 @@
 # Changelog
 
+## [v461] - 2026-10-18 — Who asked for what is kept on disk, all of it
+
+### Changed
+- **Picking a domain in Top Domains (or a client in Top Clients) now lists every client (or domain), not the first few and "(others)".** The (client, domain) pairs behind it are no longer a capped table in memory: each 10-minute unit is written to its own file, `<state-dir>/pairs/p<unit>.gz` (gzip, a string table and varint rows, private to root), and read back only when you pick something. The 30 days of the statistics are kept; older files are deleted as new ones are written. A unit stops taking new pairs after 400,000 (a flood of random names), and what it could not keep still shows as "(others)". Memory for the statistics drops by what the pair tables took, and the open unit's pairs are saved with the statistics every five minutes and at stop.
+- **Clear removes the pair files too**, with the rest of the statistics.
+- The pairs the earlier versions had saved in `stats.json.gz` are moved into the new files at the first start; from then on the file does not hold them. Pairs already dropped by the old caps are not recoverable: the lists fill in properly from this version on.
+- Replaces the larger pair caps of v456.
+
+### Notes
+- Disk use grows with the number of distinct pairs: roughly 5 bytes per pair per 10-minute unit before compression, so a busy server can use hundreds of MB over 30 days (an estimate, not measured).
+
+## [v460] - 2026-10-18 — Gateways in the Node menu of Host
+
+### Added
+- **Monitor ▸ Host offers the gateways in the Node menu too**, as Statistics does: the nodes that serve the gateway, added together (`gw` on `/api/clusterhost`).
+
 ## [v459] - 2026-10-18 — Gateway entries in the Node menu
 
 ### Changed

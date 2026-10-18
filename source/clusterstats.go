@@ -216,8 +216,26 @@ func (m *Mgmt) clusterQStatsGW(ctx context.Context, actor string, from, to time.
 
 // clusterHost is host.get for the whole cluster.
 func (m *Mgmt) clusterHost(ctx context.Context, actor string, from, to time.Time) (*HostResult, error) {
+	return m.clusterHostGW(ctx, actor, from, to, 0)
+}
+
+// clusterHostGW is clusterHost for the nodes of one gateway (gid > 0), or every node (0).
+func (m *Mgmt) clusterHostGW(ctx context.Context, actor string, from, to time.Time, gid int) (*HostResult, error) {
+	var keep func(PeerView) bool
+	if gid > 0 {
+		dc, _, err := m.LiveConfig()
+		if err != nil {
+			return nil, err
+		}
+		g, err := findGroup(dc, gid)
+		if err != nil {
+			return nil, err
+		}
+		keep = gatewayNodes(g)
+	}
 	q := url.Values{"from": {strconv.FormatInt(from.Unix(), 10)}, "to": {strconv.FormatInt(to.Unix(), 10)}}
-	parts, infos := clusterGather(ctx, m, actor, "/api/host?"+q.Encode(), func() *HostResult { return hoststats.Query(from, to) })
+	parts, infos := clusterGatherSel(ctx, m, proxyReq{User: actor, Method: "GET", Path: "/api/host?" + q.Encode()}, clusterStatsTimeout,
+		func() (*HostResult, error) { return hoststats.Query(from, to), nil }, keep)
 	if len(parts) == 0 {
 		return nil, errors.New("no node answered")
 	}

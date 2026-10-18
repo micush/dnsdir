@@ -1,5 +1,20 @@
 # Changelog
 
+## [v457] - 2026-10-18 — Node menu order on Statistics
+
+### Changed
+- **The Node menu on Statistics lists the nodes first, then the gateways, then Cluster last.**
+
+## [v456] - 2026-10-18 — Who asked for a domain: more of them listed
+
+### Changed
+- **Picking a domain in Top Domains (or a client in Top Clients) showed most of the answer as "(others)".** Each 10-minute slot kept only the first 500 client / domain pairs, so on a busy server everything after them was lumped together. A short-range slot (up to the last day) now keeps up to 3000 pairs and an hour slot (longer ranges) 1000; the failure kinds scale the same way. Memory for the statistics grows with it (up to roughly 100 MB when every slot is full). A pair beyond the cap is still counted under "(others)", so on a very busy server some of it can remain.
+
+## [v455] - 2026-10-18 — Gateways in the Node menu of Statistics
+
+### Added
+- **Monitor ▸ Statistics: the Node menu lists each gateway after Cluster** ("Gateway ptx.int (2 nodes)"). It shows the statistics of the nodes that serve that gateway (every node except those removed from it) added together, the way Cluster adds all of them. The numbers are kept per node, not per gateway, so a node that serves several gateways counts all of its traffic in each. Clear is not offered for a gateway (pick the node or Cluster). `gw` on `/api/clusterstats`. `TestGatewayNodesSkipsTheRemovedOnes`.
+
 ## [v454] - 2026-10-18 — Statistics page error fixed
 
 ### Fixed

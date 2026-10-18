@@ -50,6 +50,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		QName    string     `json:"name"`
 		QOld     string     `json:"old"`
 		QCMatch  string     `json:"cmatch"`
+		QGW      string     `json:"gw"` // qstats.cluster: only the nodes of this gateway (group number)
 		QDMatch  string     `json:"dmatch"`
 		Lookup   string     `json:"lookup"`
 		Paused   bool       `json:"paused"`
@@ -401,7 +402,13 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 			return nil, err
 		}
 		f = f.withMatch(a.QCMatch, a.QDMatch)
-		return m.clusterQStats(context.Background(), actor, from, to, f)
+		gid := 0
+		if a.QGW != "" {
+			if gid, err = strconv.Atoi(a.QGW); err != nil || gid < 1 {
+				return nil, errors.New("bad gateway number")
+			}
+		}
+		return m.clusterQStatsGW(context.Background(), actor, from, to, f, gid)
 	case "host.cluster":
 		from, to, err := hostRange(a.QFrom, a.QTo)
 		if err != nil {

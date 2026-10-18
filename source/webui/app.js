@@ -105,9 +105,19 @@
   // (the node you are logged in to asks the others).  Only those two pages offer it, and only their two requests change;
   // anything else a page asks goes to this node as before.
   const CLUSTER = "*cluster";
+  // Statistics also offers each gateway: the nodes that serve it, added together like Cluster.  (The numbers are kept per node,
+  // so a node that serves several gateways counts all its traffic in each.)
+  const GW = "*gw:";
+  const isGw = () => typeof state.target === "string" && state.target.startsWith(GW);
+  const gwItems = () => (state.gws || []).map((g) => {
+    const n = state.nodes.filter((p) => !(g.excluded_nodes || []).includes(p.node_id)).length;
+    const label = g.name || String(g.vip4 || g.vip6 || "").split("/")[0] || "gateway " + g.group_id;
+    return n ? [GW + g.group_id, "Gateway " + label + " (" + n + (n === 1 ? " node)" : " nodes)"), false] : null;
+  }).filter(Boolean);
   const CLUSTER_TABS = ["stats", "host", "capture"];
   const CLUSTER_API = [[/^\/api\/qstats(\?|$)/, "/api/clusterstats"], [/^\/api\/host(\?|$)/, "/api/clusterhost"], [/^\/api\/qstats\/clear$/, "/api/clusterstats"]];
   function route(path) {
+    if (isGw()) return /^\/api\/qstats(\?|$)/.test(path) ? path.replace(/^\/api\/qstats/, "/api/clusterstats") + (path.includes("?") ? "&" : "?") + "gw=" + encodeURIComponent(state.target.slice(GW.length)) : path;
     if (state.target === CLUSTER) {
       for (const [re, to] of CLUSTER_API) if (re.test(path)) return path.replace(/^\/api\/[a-z]+/, to);
       return path;
@@ -343,6 +353,7 @@
   function selectTab(id) {
     state.tab = id;
     if (state.target === CLUSTER && !CLUSTER_TABS.includes(id)) state.target = null;   // the other pages are about one node: back to this one
+    if (isGw() && id !== "stats") state.target = null;
     renderTopbar();   // the Cluster entry is on the menu for Statistics and Host only
     history.replaceState(null, "", "#" + id);
     for (const b of root.querySelectorAll("nav.side .nav-item[data-tab]")) {
@@ -480,7 +491,11 @@
     try { v = (await api("GET", "/api/cluster", undefined, true)).data; } catch (_) { return; }
     state.clustered = !!(v && v.enabled && (v.peers || []).length > 1);
     state.nodes = state.clustered ? v.peers : [];
-    if (state.target === CLUSTER ? state.nodes.length < 2 : state.target && !state.nodes.some((n) => n.addr === state.target && !n.self)) setTarget(null);
+    if (state.tab === "stats" && state.nodes.length >= 2 && Date.now() - (state.gwsAt || 0) > 20000) {   // the gateways for the Node menu
+      state.gwsAt = Date.now();
+      try { state.gws = ((await api("GET", "/api/config", undefined, true)).config || {}).groups || []; } catch (_) { /* the last list stays */ }
+    }
+    if (state.target === CLUSTER || isGw() ? state.nodes.length < 2 : state.target && !state.nodes.some((n) => n.addr === state.target && !n.self)) setTarget(null);
     renderTopbar();
   }
 
@@ -494,6 +509,7 @@
     const hidden = state.nodes.length < 2;
     const items = hidden ? [] : [["", nodeLabel(selfNode()) + " (this node)", false]].concat(state.nodes.filter((x) => !x.self).map((n) =>
       [n.addr, nodeLabel(n) + (n.is_primary ? " · primary" : "") + (n.reachable ? "" : " · unreachable"), !n.reachable && n.addr !== state.target]));
+    if (!hidden && state.tab === "stats") items.push(...gwItems());   // nodes, then gateways, then the whole cluster
     if (!hidden && CLUSTER_TABS.includes(state.tab)) items.push([CLUSTER, "Cluster (" + state.nodes.length + ")", false]);
     const sig = JSON.stringify([hidden, items, state.target || ""]);
     const cur = bar.querySelector("select");
@@ -519,7 +535,7 @@
   function setTarget(addr) {
     if ((addr || null) === state.target) return;
     state.target = addr || null;
-    document.body.classList.toggle("remote", !!state.target && state.target !== CLUSTER);   // another node's page is marked; the cluster's is no node
+    document.body.classList.toggle("remote", !!state.target && state.target !== CLUSTER && !isGw());   // another node's page is marked; the cluster's is no node
     renderTopbar(true);
     state.topo.action = null;   // the gateway picked stays picked: the sidebar list is the signed-in node's, whichever node is driven
     refreshTopoNav();
@@ -3848,7 +3864,7 @@
         customRow = h("span", { class: "qcustom hidden" }, fromIn, " to ", toIn,
           h("button", { class: "btn", type: "button", onclick: load }, "Apply"), h("span", { class: "muted small" }, " only the last 30 days exist"));
         bar = h("div", { class: "toolbar qbar" }, h("span", { class: "segs", role: "group", "aria-label": "Time range" }, [...rangeBtns.values()]),
-          h("button", { class: "btn", type: "button", title: "Forget the counts and top lists", onclick: clearStats }, "Clear"), customRow);
+          h("button", { class: "btn", type: "button", title: isGw() ? "Pick this node or Cluster to clear" : "Forget the counts and top lists", disabled: isGw() ? "" : null, onclick: clearStats }, "Clear"), customRow);
         tiles = h("div", { class: "qtiles" });
         chartBox = h("div", { class: "card qchartcard" });
         pies = h("div", { class: "qpies" });

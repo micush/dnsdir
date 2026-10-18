@@ -95,10 +95,20 @@ var qsCaps = [qcCount][2]int{
 // They answer "what did this client ask for" and "who asked for this".  A pair beyond the cap
 // is not kept; the reply makes up the difference as "(others)" from the client and domain totals.
 var qsPairCaps = [qcCount]int{
-	qcNoError:  500,
-	qcServFail: 100,
-	qcNXDomain: 200,
-	qcRefused:  50,
+	qcNoError:  3000,
+	qcServFail: 300,
+	qcNXDomain: 600,
+	qcRefused:  150,
+	qcOther:    60,
+	qcUpdate:   200,
+}
+
+// qsPairCapsCoarse is the same for the hour slots (the longer ranges), which are many more and so get less each.
+var qsPairCapsCoarse = [qcCount]int{
+	qcNoError:  1000,
+	qcServFail: 150,
+	qcNXDomain: 300,
+	qcRefused:  100,
 	qcOther:    30,
 	qcUpdate:   100,
 }
@@ -346,7 +356,8 @@ func (s *QStats) apply(e qEvent) {
 	for _, tier := range []struct {
 		slots []qsTop
 		span  int64
-	}{{s.fine[:], qsFineSpan}, {s.coarse[:], qsCoarseSpan}} {
+		caps  *[qcCount]int
+	}{{s.fine[:], qsFineSpan, &qsPairCaps}, {s.coarse[:], qsCoarseSpan, &qsPairCapsCoarse}} {
 		p := m / tier.span
 		tp := &tier.slots[p%int64(len(tier.slots))]
 		if tp.stamp != p {
@@ -362,7 +373,7 @@ func (s *QStats) apply(e qEvent) {
 		k.types[tn]++
 		if dm := k.pairs[who]; dm != nil && dm[name] > 0 {
 			dm[name]++
-		} else if k.npairs < qsPairCaps[kind] {
+		} else if k.npairs < tier.caps[kind] {
 			if dm == nil {
 				dm = map[string]uint32{}
 				k.pairs[who] = dm

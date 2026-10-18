@@ -86,6 +86,11 @@ func clusterGather[T any](ctx context.Context, m *Mgmt, actor, path string, loca
 // clusterGatherReq is clusterGather for any request (a POST with a body, say) and a longer time allowed.  Every node,
 // this one included, works at the same time, so a request that takes a while (a capture) takes that while for all of them.
 func clusterGatherReq[T any](ctx context.Context, m *Mgmt, req proxyReq, timeout time.Duration, local func() (*T, error)) ([]clusterPart[T], []ClusterNodeInfo) {
+	return clusterGatherSel(ctx, m, req, timeout, local, nil)
+}
+
+// clusterGatherSel is clusterGatherReq for the nodes keep accepts (nil: every node).  A cluster of one node is always asked.
+func clusterGatherSel[T any](ctx context.Context, m *Mgmt, req proxyReq, timeout time.Duration, local func() (*T, error), keep func(PeerView) bool) ([]clusterPart[T], []ClusterNodeInfo) {
 	var peers []PeerView
 	if m.cl != nil && m.cl.Enabled() {
 		peers = m.cl.View().Peers
@@ -111,6 +116,9 @@ func clusterGatherReq[T any](ctx context.Context, m *Mgmt, req proxyReq, timeout
 		slots = append(slots, slot{info: ClusterNodeInfo{Name: "this node"}, self: true})
 	}
 	for _, p := range peers {
+		if keep != nil && !keep(p) {
+			continue
+		}
 		sl := slot{info: ClusterNodeInfo{Name: label(p), Addr: p.Addr}, self: p.Self}
 		if !p.Self && !p.Reachable {
 			sl.info.Error = "not reachable"
@@ -173,9 +181,33 @@ func clusterGatherReq[T any](ctx context.Context, m *Mgmt, req proxyReq, timeout
 
 // clusterQStats is qstats.get for the whole cluster.
 func (m *Mgmt) clusterQStats(ctx context.Context, actor string, from, to time.Time, f QFilter) (*QStatsResult, error) {
+	return m.clusterQStatsGW(ctx, actor, from, to, f, 0)
+}
+
+// gatewayNodes accepts the cluster nodes that serve a gateway: every node but the ones removed from it.
+func gatewayNodes(g *GroupConfig) func(PeerView) bool {
+	return func(p PeerView) bool { return p.NodeID == "" || !containsStr(g.ExcludedNodes, p.NodeID) }
+}
+
+// clusterQStatsGW is clusterQStats for the nodes of one gateway (gid > 0), or every node (0).  Statistics are kept per node, not
+// per gateway, so a node that serves several gateways counts all its traffic in each of them.
+func (m *Mgmt) clusterQStatsGW(ctx context.Context, actor string, from, to time.Time, f QFilter, gid int) (*QStatsResult, error) {
+	var keep func(PeerView) bool
+	if gid > 0 {
+		dc, _, err := m.LiveConfig()
+		if err != nil {
+			return nil, err
+		}
+		g, err := findGroup(dc, gid)
+		if err != nil {
+			return nil, err
+		}
+		keep = gatewayNodes(g)
+	}
 	q := url.Values{"from": {strconv.FormatInt(from.Unix(), 10)}, "to": {strconv.FormatInt(to.Unix(), 10)},
 		"rcode": {f.Rcode}, "client": {f.Client}, "domain": {f.Domain}, "cmatch": {f.CMatch}, "dmatch": {f.DMatch}}
-	parts, infos := clusterGather(ctx, m, actor, "/api/qstats?"+q.Encode(), func() *QStatsResult { return qstats.Query(from, to, f) })
+	parts, infos := clusterGatherSel(ctx, m, proxyReq{User: actor, Method: "GET", Path: "/api/qstats?" + q.Encode()}, clusterStatsTimeout,
+		func() (*QStatsResult, error) { return qstats.Query(from, to, f), nil }, keep)
 	if len(parts) == 0 {
 		return nil, errors.New("no node answered")
 	}

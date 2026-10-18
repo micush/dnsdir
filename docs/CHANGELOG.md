@@ -1,5 +1,10 @@
 # Changelog
 
+## [v451] - 2026-10-18 — Version bump
+
+### Changed
+- No code change: the same tree as v450, released again as v451 so the tag and the release carry a new number.
+
 ## [v450] - 2026-10-18 — The Transport chart works for the whole cluster
 
 ### Fixed

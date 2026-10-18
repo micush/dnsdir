@@ -1,5 +1,10 @@
 # Changelog
 
+## [v458] - 2026-10-18 — Packaging only
+
+### Changed
+- No code change from the previous version. The source archive no longer carries a compiled program by mistake.
+
 ## [v457] - 2026-10-18 — Node menu order on Statistics
 
 ### Changed

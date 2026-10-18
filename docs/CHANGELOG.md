@@ -1,5 +1,10 @@
 # Changelog
 
+## [v459] - 2026-10-18 — Gateway entries in the Node menu
+
+### Changed
+- **A gateway in the Node menu of Statistics reads "Gateway ptx.int (4)"**, the number of nodes in brackets as Cluster has it, not "(4 nodes)".
+
 ## [v458] - 2026-10-18 — Packaging only
 
 ### Changed

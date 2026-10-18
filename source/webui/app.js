@@ -112,7 +112,7 @@
   const gwItems = () => (state.gws || []).map((g) => {
     const n = state.nodes.filter((p) => !(g.excluded_nodes || []).includes(p.node_id)).length;
     const label = g.name || String(g.vip4 || g.vip6 || "").split("/")[0] || "gateway " + g.group_id;
-    return n ? [GW + g.group_id, "Gateway " + label + " (" + n + (n === 1 ? " node)" : " nodes)"), false] : null;
+    return n ? [GW + g.group_id, "Gateway " + label + " (" + n + ")", false] : null;
   }).filter(Boolean);
   const CLUSTER_TABS = ["stats", "host", "capture"];
   const CLUSTER_API = [[/^\/api\/qstats(\?|$)/, "/api/clusterstats"], [/^\/api\/host(\?|$)/, "/api/clusterhost"], [/^\/api\/qstats\/clear$/, "/api/clusterstats"]];

@@ -3101,7 +3101,8 @@
     ];
     // a record type keeps its colour whatever its rank; the rest fold into "Other"
     const TYPE_CLS = { A: "t1", AAAA: "t2", HTTPS: "t3", PTR: "t4", SRV: "t5", TXT: "t6", SOA: "t7", MX: "t8" };
-    const PROTO_CLS = { UDP: "t1", TCP: "t2" };
+    // UDP in blue, TCP in orange, the IPv6 share of each in the lighter shade; plain UDP / TCP come from a node on an older version
+    const PROTO_CLS = { "UDP · IPv4": "t1", "UDP · IPv6": "t9", "TCP · IPv4": "t2", "TCP · IPv6": "t10", UDP: "t1", TCP: "t2" };
     const RANGES = [["now", "Now"], ["1h", "Last Hour"], ["1d", "Last Day"], ["7d", "Last Week"], ["30d", "Last Month"], ["custom", "Custom"]];
     const REFRESH_MS = 10000;
     const n0 = (n) => Number(n || 0).toLocaleString();
@@ -3271,9 +3272,8 @@
         return [w.domain, w.network && "Network: " + w.network, w.netname && "Name: " + w.netname, w.org && "Organization: " + w.org, w.country && "Country: " + w.country,
           w.origin && "Origin AS: " + w.origin, "From: " + w.server].filter(Boolean).join("\n");
       }
-      const addrs = w.name ? [w.name, w.ipv4 && "IPv4: " + w.ipv4, w.ipv6 && "IPv6: " + w.ipv6, !w.ipv4 && !w.ipv6 && "No address found", ""].filter((x) => x !== false && x !== undefined && x !== null && x !== 0).join("\n") + "\n" : "";
-      if (!w.found) return addrs + w.domain + " — " + w.note;
-      return addrs + [w.domain, w.registrar && "Registrar: " + w.registrar, w.registrant && "Registrant: " + w.registrant, w.registered && "Registered: " + w.registered,
+      if (!w.found) return w.domain + " — " + w.note;
+      return [w.domain, w.registrar && "Registrar: " + w.registrar, w.registrant && "Registrant: " + w.registrant, w.registered && "Registered: " + w.registered,
         w.updated && "Updated: " + w.updated, w.expires && "Expires: " + w.expires, (w.name_servers || []).length && "Name servers: " + w.name_servers.join(", "), "From: " + w.server].filter(Boolean).join("\n");
     };
     // A row is a button: picking a client lists what it asked for in Top Domains, picking a
@@ -3778,7 +3778,7 @@
       clear(status);
       drawTiles(d);
       drawChart(d);
-      clear(pies).append(donut("Query types" + kindLabel(), d.types, TYPE_CLS, 8), donut("Transport" + kindLabel(), d.protos, PROTO_CLS, 2));
+      clear(pies).append(donut("Query types" + kindLabel(), d.types, TYPE_CLS, 8), donut("Transport" + kindLabel(), d.protos, PROTO_CLS, 6));
       const sumOf = (l) => l.reduce((a, e) => a + e.count, 0);
       const tk = [range, sel, pickClient, pickDomain, cFilter, dFilter].join("|");   // a different question starts on page one
       if (tk !== topKey) { topKey = tk; topPage = { c: 0, d: 0 }; }

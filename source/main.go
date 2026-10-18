@@ -485,7 +485,6 @@ func run(dc *DaemonConfig, confFile, sockPath, stateDir string) error {
 	qstats.ptrVia = sup.ptrViaPools
 	qstats.SetNames(dc.DNS.ClientNames)
 	go applySNMP(dc.snmpSettings())
-	addrVia = sup.addrViaPools
 	go memguard.Run(ctx.Done())
 	go mg.sched.Run(ctx)
 

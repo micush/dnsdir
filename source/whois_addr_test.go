@@ -1,34 +1,29 @@
 package main
 
 import (
-	"context"
 	"strings"
 	"testing"
 )
 
-func TestWhoisWithAddrs(t *testing.T) {
-	old := addrVia
-	defer func() { addrVia = old }()
-	addrVia = func(ctx context.Context, name string) (string, string) { return "192.0.2.7", "2001:db8::7" }
-	// an internal name has no whois record but still gets its addresses
-	w, err := whoisWithAddrs("pbs1.cush.local.")
+func TestWhoisAnswerIsAboutTheDomainOnly(t *testing.T) {
+	// an internal name has no whois record: the reason, and nothing about the name's addresses
+	w, err := whoisAnswer("pbs1.cush.local.")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w.Found || w.Name != "pbs1.cush.local" || w.IPv4 != "192.0.2.7" || w.IPv6 != "2001:db8::7" {
+	if w.Found || w.Note == "" {
 		t.Fatalf("%+v", w)
 	}
-	txt := w.Text()
-	if !strings.HasPrefix(txt, "pbs1.cush.local\nIPv4: 192.0.2.7\nIPv6: 2001:db8::7\n\n") {
-		t.Fatalf("text:\n%s", txt)
+	if txt := w.Text(); strings.Contains(txt, "IPv4") || strings.Contains(txt, "IPv6") || strings.Contains(txt, "address found") {
+		t.Fatalf("a name's addresses are shown:\n%s", txt)
 	}
-	// only one family found
-	addrVia = func(ctx context.Context, name string) (string, string) { return "192.0.2.7", "" }
-	w, _ = whoisWithAddrs("pbs1.cush.local")
-	if strings.Contains(w.Text(), "IPv6") && w.IPv6 == "" {
-		t.Fatal("IPv6 line without an address")
+	// the name asked about is reduced to its registered domain
+	for in, want := range map[string]string{"www.microsoft.com": "microsoft.com", "us.pool.ntp.org": "ntp.org", "a.b.example.co.uk": "example.co.uk"} {
+		if got, _, err := whoisName(in); err != nil || got != want {
+			t.Fatalf("%s: asked as %q (%v), want %q", in, got, err, want)
+		}
 	}
-	if _, err := whoisWithAddrs(" "); err == nil {
+	if _, err := whoisAnswer(" "); err == nil {
 		t.Fatal("empty name accepted")
 	}
 }

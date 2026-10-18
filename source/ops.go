@@ -450,7 +450,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		}{updlog.recent()}, nil
 	// whois of a domain (asked of the registry from this node, only when requested)
 	case "whois.get":
-		return whoisWithAddrs(a.QDomain)
+		return whoisAnswer(a.QDomain)
 	// a name for an address (reverse DNS) or an address for a name, for the Add DNS server form
 	case "dns.lookup":
 		return hostLookup(a.Lookup)

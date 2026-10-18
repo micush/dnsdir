@@ -111,6 +111,26 @@ type qsKind struct {
 	pairs    map[string]map[string]uint32 // client → domain → count
 	npairs   int
 	udp, tcp uint32
+	// proto splits those by the IP version of the client: index 0 UDP over IPv4, 1 UDP over IPv6, 2 TCP over IPv4,
+	// 3 TCP over IPv6 (see protoIdx).  Counts saved by an older version have no split: what udp and tcp hold beyond
+	// the split is shown as plain UDP and TCP.
+	proto [4]uint32
+}
+
+// protoNames are the names of the proto counters, in index order.
+var protoNames = [4]string{"UDP · IPv4", "UDP · IPv6", "TCP · IPv4", "TCP · IPv6"}
+
+// protoIdx is the index into qsKind.proto of a query: its transport and whether the client address is IPv6 (an unknown
+// address counts as IPv4).
+func protoIdx(tcp bool, client netip.Addr) int {
+	i := 0
+	if tcp {
+		i = 2
+	}
+	if client.IsValid() && client.Unmap().Is6() {
+		i++
+	}
+	return i
 }
 
 type qsTop struct {
@@ -351,6 +371,7 @@ func (s *QStats) apply(e qEvent) {
 		} else {
 			k.udp++
 		}
+		k.proto[protoIdx(tcp, client)]++
 	}
 }
 
@@ -533,6 +554,7 @@ func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
 		Refused: make([]uint64, n), Other: make([]uint64, n), Updates: make([]uint64, n),
 		Types: []NameCount{}, Protos: []NameCount{}, Clients: []NameCount{}, Domains: []NameCount{}}
 	types, clients, domains := map[string]uint64{}, map[string]uint64{}, map[string]uint64{}
+	var protos [4]uint64
 	var udp, tcp uint64
 	pairDomains, pairClients := map[string]uint64{}, map[string]uint64{}
 
@@ -581,6 +603,9 @@ func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
 			}
 			udp += uint64(k.udp)
 			tcp += uint64(k.tcp)
+			for i, n := range k.proto {
+				protos[i] += uint64(n)
+			}
 			if f.Client != "" {
 				for n, v := range k.pairs[f.Client] {
 					pairDomains[n] += uint64(v)
@@ -612,12 +637,17 @@ func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
 		r.Sums.Clients--
 	}
 	r.Types = topList(types, 0)
-	if udp > 0 {
-		r.Protos = append(r.Protos, NameCount{Name: "UDP", Count: udp})
+	add := func(name string, n uint64) {
+		if n > 0 {
+			r.Protos = append(r.Protos, NameCount{Name: name, Count: n})
+		}
 	}
-	if tcp > 0 {
-		r.Protos = append(r.Protos, NameCount{Name: "TCP", Count: tcp})
-	}
+	add(protoNames[0], protos[0])
+	add(protoNames[1], protos[1])
+	add("UDP", udp-min(udp, protos[0]+protos[1])) // counted before the split existed
+	add(protoNames[2], protos[2])
+	add(protoNames[3], protos[3])
+	add("TCP", tcp-min(tcp, protos[2]+protos[3]))
 	if f.Client != "" {
 		domains = withRest(pairDomains, clients[f.Client])
 	}

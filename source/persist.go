@@ -42,6 +42,8 @@ type pKind struct {
 	NPairs  int                          `json:"np,omitempty"`
 	UDP     uint32                       `json:"u,omitempty"`
 	TCP     uint32                       `json:"tc,omitempty"`
+	// Split is UDP and TCP counted by the client's IP version (qsKind.proto), absent in a file of an older version
+	Split []uint32 `json:"ps,omitempty"`
 }
 
 type pHostRow struct {
@@ -104,6 +106,9 @@ func (s *QStats) persistTo(emit func(pRec) error) error {
 				used = true
 				rec.Top[ci] = pKind{Clients: copyU32(k.clients), Domains: copyU32(k.domains), Types: copyU32(k.types), NPairs: k.npairs, UDP: k.udp, TCP: k.tcp,
 					Pairs: make(map[string]map[string]uint32, len(k.pairs))}
+				if k.proto != ([4]uint32{}) {
+					rec.Top[ci].Split = append([]uint32(nil), k.proto[:]...)
+				}
 				for c, dm := range k.pairs {
 					rec.Top[ci].Pairs[c] = copyU32(dm)
 				}
@@ -309,6 +314,9 @@ func (s *QStats) restore(r pRec) int {
 			q := &tp.c[ci]
 			q.clients, q.domains, q.types, q.pairs = k.Clients, k.Domains, k.Types, k.Pairs
 			q.npairs, q.udp, q.tcp = k.NPairs, k.UDP, k.TCP
+			if len(k.Split) == len(q.proto) {
+				copy(q.proto[:], k.Split)
+			}
 			if q.domains == nil {
 				q.domains = map[string]uint32{}
 			}

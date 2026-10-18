@@ -1,5 +1,18 @@
 # Changelog
 
+## [v447] - 2026-10-18 — IPv4 and IPv6 in the Transport chart
+
+### Changed
+- **The Transport chart on Monitor ▸ Statistics has four slices: UDP · IPv4, UDP · IPv6, TCP · IPv4 and TCP · IPv6**, counted by the transport of the query and the address family of the client (a v4-mapped address counts as IPv4). `--stats` lists the same four. The IPv6 share of UDP and of TCP is drawn in a lighter shade of the same colour.
+
+### Notes
+- Counting starts at this version. The saved statistics of an older version have no split, so what they hold shows as plain `UDP` and `TCP` slices until it ages out of the range; the file stays readable by older versions (they ignore the new field). In a cluster, a node still on an older version reports plain `UDP` and `TCP`, which the chart shows as their own slices until it is upgraded. `TestTransportIPVersion`.
+
+## [v447] - 2026-10-18 — Whois is about the domain only
+
+### Changed
+- **The Whois popup (Statistics ▸ Top Domains, right-click) shows only the registered domain's whois**: `www.microsoft.com` is asked and shown as `microsoft.com`, `us.pool.ntp.org` as `ntp.org`. The hovered name itself and its IPv4 and IPv6 addresses are no longer shown, and the daemon no longer resolves the name. An address in Top Clients still gets the registry data of its block. `--whois` prints the same. `TestWhoisAnswerIsAboutTheDomainOnly`.
+
 ## [v446] - 2026-10-18 — The Age column is gone
 
 ### Changed

@@ -62,7 +62,7 @@ func TestQStatsRecordAndQuery(t *testing.T) {
 	if r.Domains[0].Name != "a.example" || r.Domains[0].Count != 3 {
 		t.Fatalf("domains: %+v", r.Domains)
 	}
-	if len(r.Protos) != 2 || r.Protos[0].Name != "UDP" || r.Protos[0].Count != 5 || r.Protos[1].Count != 1 {
+	if len(r.Protos) != 2 || r.Protos[0].Name != "UDP · IPv4" || r.Protos[0].Count != 5 || r.Protos[1].Count != 1 {
 		t.Fatalf("protos: %+v", r.Protos)
 	}
 	if r.Types[0].Name != "A" || r.Types[0].Count != 3 {

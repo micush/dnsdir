@@ -115,7 +115,7 @@ func TestVersionDiffAndGet(t *testing.T) {
 		t.Errorf("path traversal id must be rejected: %v", err)
 	}
 	_, cfg, err := vs.Get(a.ID)
-	if err != nil || !strings.Contains(string(cfg), `"hello_ms": 333`) {
+	if err != nil || !strings.Contains(string(cfg), `"hello_ms": 150`) {
 		t.Errorf("get: %v %s", err, cfg)
 	}
 }

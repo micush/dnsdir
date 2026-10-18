@@ -169,8 +169,8 @@ func defaultGroup() GroupConfig {
 		Priority:  100,
 		LBMethod:  lbRoundRobin,
 		Weight:    100,
-		HelloMS:   333,
-		HoldMS:    999,
+		HelloMS:   150,
+		HoldMS:    750,
 		MaxAFNs:   defaultMaxAFNs,
 		Key:       defaultGroupKey,
 		DNSProxy:  true, // always (see GroupConfig.DNSProxy)
@@ -390,6 +390,9 @@ func (g *GroupConfig) Validate() error {
 		if f.v < f.lo || f.v > f.hi {
 			return fmt.Errorf("%s: %s must be %d-%d", pre, f.name, f.lo, f.hi)
 		}
+	}
+	if g.HelloMS > g.HoldMS {
+		return fmt.Errorf("%s: hello_ms (%d) cannot be larger than hold_ms (%d): a neighbour would be declared gone between two hellos", pre, g.HelloMS, g.HoldMS)
 	}
 	if g.Interface == "" {
 		return fmt.Errorf("%s: interface must be set", pre)

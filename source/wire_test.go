@@ -29,6 +29,7 @@ func golden(t *testing.T, name string) []byte {
 func testCfg() GroupConfig {
 	g := defaultGroup()
 	g.GroupID, g.Priority, g.Weight, g.Preempt, g.Key = 7, 150, 60, true, "secret"
+	g.HelloMS, g.HoldMS = 333, 999 // what the golden vectors were made with, not the defaults
 	return g
 }
 

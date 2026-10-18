@@ -1,5 +1,14 @@
 # Changelog
 
+## [v444] - 2026-10-18 — Faster gateway timers; hello can no longer exceed hold
+
+### Changed
+- **New gateways start with hello 150 ms and hold 750 ms** (were 333 and 999): a lost hello or two no longer matters (hold is five hellos) and a dead node is noticed in under a second. Gateways that already exist keep the values they have; change them under the gateway's edit dialog or with the CLI.
+- **`hello_ms` larger than `hold_ms` is refused** (in the form, the CLI and a loaded configuration), because the neighbour would be declared gone between two hellos. `TestHelloNotLargerThanHold`.
+
+### Notes
+- A configuration file that already has hello above hold is now refused when loaded; fix it by lowering hello or raising hold.
+
 ## [v443] - 2026-10-18 — Menu order
 
 ### Changed

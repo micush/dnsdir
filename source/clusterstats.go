@@ -363,7 +363,7 @@ func mergeQStats(parts []clusterPart[QStatsResult], infos []ClusterNodeInfo) *QS
 		addCounts(domains, q.Domains)
 	}
 	r.Types = sortedCounts(types, 0)
-	for _, name := range []string{"UDP", "TCP"} {
+	for _, name := range protoOrder {
 		if e := protos[name]; e != nil {
 			r.Protos = append(r.Protos, *e)
 		}

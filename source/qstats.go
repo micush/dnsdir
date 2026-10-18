@@ -120,6 +120,10 @@ type qsKind struct {
 // protoNames are the names of the proto counters, in index order.
 var protoNames = [4]string{"UDP · IPv4", "UDP · IPv6", "TCP · IPv4", "TCP · IPv6"}
 
+// protoOrder is every name a transport slice can have, in the order they are listed: the split ones and, from counts made
+// before the split existed (or a node on an older version), plain UDP and TCP.
+var protoOrder = []string{"UDP · IPv4", "UDP · IPv6", "UDP", "TCP · IPv4", "TCP · IPv6", "TCP"}
+
 // protoIdx is the index into qsKind.proto of a query: its transport and whether the client address is IPv6 (an unknown
 // address counts as IPv4).
 func protoIdx(tcp bool, client netip.Addr) int {

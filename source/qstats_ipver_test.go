@@ -3,6 +3,7 @@ package main
 import (
 	"net/netip"
 	"testing"
+	"time"
 )
 
 func TestTransportIPVersion(t *testing.T) {
@@ -40,5 +41,18 @@ func TestTransportSplitKeepsOldCounts(t *testing.T) {
 	}
 	if rest := uint64(k.tcp) - (protos[2] + protos[3]); rest != 4 {
 		t.Errorf("plain TCP %d, want 4", rest)
+	}
+}
+
+func TestTransportAfterClear(t *testing.T) {
+	s := NewQStats()
+	s.Record(netip.MustParseAddr("10.1.1.1"), "example.com", 1, false, 0)
+	s.Clear()
+	s.Record(netip.MustParseAddr("2001:db8::2"), "example.org", 1, true, 0)
+	s.Record(netip.MustParseAddr("10.1.1.2"), "example.org", 1, false, 0)
+	now := time.Now()
+	r := s.Query(now.Add(-time.Hour), now.Add(time.Minute), QFilter{})
+	if len(r.Protos) != 2 || r.Protos[0].Name != "UDP · IPv4" || r.Protos[1].Name != "TCP · IPv6" || r.Protos[0].Count != 1 || r.Protos[1].Count != 1 {
+		t.Fatalf("protos after a clear: %+v", r.Protos)
 	}
 }

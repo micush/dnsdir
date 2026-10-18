@@ -314,3 +314,27 @@ func TestClusterNodesWithOneHostNameAreNamedByAddress(t *testing.T) {
 		t.Fatalf("nodes %+v", nodes)
 	}
 }
+
+func TestMergeQStatsKeepsTheTransportSplit(t *testing.T) {
+	mk := func(p ...NameCount) *QStatsResult {
+		return &QStatsResult{Start: 600, Step: 60, From: 600, To: 660, Since: 100, Total: []uint64{1}, NoError: []uint64{1}, ServFail: []uint64{0},
+			NXDomain: []uint64{0}, Refused: []uint64{0}, Other: []uint64{0}, Updates: []uint64{0}, Protos: p}
+	}
+	a := mk(NameCount{Name: "UDP \u00b7 IPv4", Count: 10}, NameCount{Name: "TCP \u00b7 IPv6", Count: 1})
+	b := mk(NameCount{Name: "UDP \u00b7 IPv4", Count: 5}, NameCount{Name: "UDP \u00b7 IPv6", Count: 2})
+	old := mk(NameCount{Name: "UDP", Count: 7}, NameCount{Name: "TCP", Count: 3}) // a node on an older version
+	r := mergeQStats([]clusterPart[QStatsResult]{qpart("A", a), qpart("B", b), qpart("C", old)}, infosOf("A", "B", "C"))
+	got := map[string]uint64{}
+	var names []string
+	for _, p := range r.Protos {
+		got[p.Name] = p.Count
+		names = append(names, p.Name)
+	}
+	want := map[string]uint64{"UDP \u00b7 IPv4": 15, "UDP \u00b7 IPv6": 2, "UDP": 7, "TCP \u00b7 IPv6": 1, "TCP": 3}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("cluster transport %v, want %v", got, want)
+	}
+	if names[0] != "UDP \u00b7 IPv4" || names[len(names)-1] != "TCP" {
+		t.Fatalf("order %v", names)
+	}
+}

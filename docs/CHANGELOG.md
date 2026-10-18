@@ -1,5 +1,10 @@
 # Changelog
 
+## [v450] - 2026-10-18 — The Transport chart works for the whole cluster
+
+### Fixed
+- **With the Node menu on `Cluster`, the Transport chart was empty ("No queries in this range.")** while every single node showed it: the cluster sum only knew the names `UDP` and `TCP`, and dropped the four split ones added in v447. It now adds all of them across the nodes, and a node still on an older version contributes its plain `UDP` and `TCP`. `TestMergeQStatsKeepsTheTransportSplit`.
+
 ## [v449] - 2026-10-18 — Clearer colours in the Transport chart
 
 ### Changed

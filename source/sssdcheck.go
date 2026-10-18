@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -77,13 +78,29 @@ func sssdGPOProblem(service string) string {
 		"\" to that domain's section of " + sssdConfFile + " and restart sssd"
 }
 
-// sssdRestart makes sssd read its changed configuration (replaceable in tests).
-var sssdRestart = func() error {
-	out, err := exec.Command("systemctl", "try-restart", "sssd").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("systemctl try-restart sssd: %v: %s", err, strings.TrimSpace(string(out)))
+// sssdRestart makes sssd read its changed configuration; with reset it first stops sssd and deletes its cache, which
+// holds the IDs it made for the domain's users and groups (replaceable in tests).
+var sssdRestart = func(reset bool) error {
+	run := func(args ...string) error {
+		if out, err := exec.Command("systemctl", args...).CombinedOutput(); err != nil {
+			return fmt.Errorf("systemctl %s sssd: %v: %s", args[0], err, strings.TrimSpace(string(out)))
+		}
+		return nil
 	}
-	return nil
+	if !reset {
+		return run("try-restart", "sssd")
+	}
+	if err := run("stop", "sssd"); err != nil {
+		return err
+	}
+	for _, dir := range []string{"/var/lib/sss/db", "/var/lib/sss/mc"} {
+		if ents, err := os.ReadDir(dir); err == nil {
+			for _, e := range ents {
+				os.Remove(filepath.Join(dir, e.Name()))
+			}
+		}
+	}
+	return run("start", "sssd")
 }
 
 // mapSSSDService adds "+service" to ad_gpo_map_interactive in the [domain/...] sections named in secs of the
@@ -127,30 +144,138 @@ func mapSSSDService(conf, service string, secs []string) string {
 	return strings.Join(out, "\n")
 }
 
-// fixSSSD maps the PAM service in sssd.conf when sssdGPOProblem finds that sssd would refuse it, keeps the old file
-// beside it (sssd.conf.<service>.bak, once) and restarts sssd.  It reports what it did; "" and nil when there was
-// nothing to do.  A domain defined only in a conf.d snippet is not edited, and the problem is returned as an error.
-func fixSSSD(service string) (string, error) {
-	problem := sssdGPOProblem(service)
-	if problem == "" {
-		return "", nil
-	}
-	b, err := os.ReadFile(sssdConfFile)
+// The IDs sssd makes for Active Directory users (ldap_id_mapping) start at 200000 by default.  In an unprivileged
+// container (LXC, Proxmox) only the IDs of its uid_map exist, usually 0-65535, and an account with an ID outside it
+// cannot sign in.  The range below is inside such a map and clear of the system accounts.
+const (
+	sssdRangeMin  = 10000
+	sssdRangeMax  = 60000
+	sssdRangeSize = 50000
+	sssdDefaultID = 200000 // where sssd's own default range begins
+)
+
+var procUIDMap = "/proc/self/uid_map"
+
+// containerMaxID is the highest user ID that exists in this machine's user namespace; ok is false when the
+// namespace is the host's (or the map cannot be read), which is the normal case.
+func containerMaxID() (max uint64, ok bool) {
+	b, err := os.ReadFile(procUIDMap)
 	if err != nil {
-		return "", errors.New(problem)
+		return 0, false
 	}
-	var secs []string
-	for sec, opts := range sssdSections() {
-		if !strings.HasPrefix(sec, "domain/") || !sssdDomainBlocks(opts, service) {
+	any := false
+	for _, l := range strings.Split(string(b), "\n") {
+		f := strings.Fields(l)
+		if len(f) != 3 {
 			continue
 		}
-		if strings.Contains(string(b), "["+sec+"]") {
-			secs = append(secs, sec)
+		in, e1 := strconv.ParseUint(f[0], 10, 64)
+		n, e2 := strconv.ParseUint(f[2], 10, 64)
+		if e1 != nil || e2 != nil || n == 0 {
+			continue
+		}
+		any = true
+		if in+n-1 > max {
+			max = in + n - 1
 		}
 	}
-	sort.Strings(secs)
-	if len(secs) == 0 {
-		return "", errors.New(problem + " (the domain is not in " + sssdConfFile + " itself, so it was not changed)")
+	return max, any && max < sssdDefaultID
+}
+
+// sssdRangeDomains lists the AD domains whose IDs would fall outside the container's map: sssd makes the IDs itself
+// (ldap_id_mapping is not off) and the domain sets no range of its own.
+func sssdRangeDomains() []string {
+	var out []string
+	for sec, opts := range sssdSections() {
+		if !strings.HasPrefix(sec, "domain/") {
+			continue
+		}
+		if strings.ToLower(opts["id_provider"]) != "ad" || strings.ToLower(opts["ldap_id_mapping"]) == "false" {
+			continue
+		}
+		has := false
+		for k := range opts {
+			if strings.HasPrefix(k, "ldap_idmap_range_") {
+				has = true
+			}
+		}
+		if !has {
+			out = append(out, sec)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// addIDRange puts the three range lines right after the header of each section in secs.
+func addIDRange(conf string, secs []string) string {
+	want := map[string]bool{}
+	for _, s := range secs {
+		want[s] = true
+	}
+	var out []string
+	for _, l := range strings.Split(conf, "\n") {
+		out = append(out, l)
+		if t := strings.TrimSpace(l); len(t) > 2 && t[0] == '[' && strings.HasSuffix(t, "]") && want[t[1:len(t)-1]] {
+			out = append(out, "ldap_idmap_range_min = "+strconv.Itoa(sssdRangeMin),
+				"ldap_idmap_range_max = "+strconv.Itoa(sssdRangeMax),
+				"ldap_idmap_range_size = "+strconv.Itoa(sssdRangeSize))
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// fixSSSD makes the changes to sssd.conf that sign-ins of Active Directory users need, keeps the old file beside it
+// (sssd.conf.<service>.bak, once) and restarts sssd:
+//   - maps the PAM service when group policy would refuse it (sssdGPOProblem);
+//   - in an unprivileged container, sets an ID range inside the container's map for a domain that has none; sssd's cache
+//     is deleted then, because the IDs it made are kept there.
+//
+// It reports what it did; "" and nil when there was nothing to do.  A domain defined only in a conf.d snippet is not
+// edited, and what to add is returned as an error.
+func fixSSSD(service string) (string, error) {
+	var notes []string // things not done, for the error
+	b, rerr := os.ReadFile(sssdConfFile)
+	inFile := func(sec string) bool { return rerr == nil && strings.Contains(string(b), "["+sec+"]") }
+
+	var gpoSecs []string
+	if problem := sssdGPOProblem(service); problem != "" {
+		for sec, opts := range sssdSections() {
+			if strings.HasPrefix(sec, "domain/") && sssdDomainBlocks(opts, service) && inFile(sec) {
+				gpoSecs = append(gpoSecs, sec)
+			}
+		}
+		if len(gpoSecs) == 0 {
+			notes = append(notes, problem+" (the domain is not in "+sssdConfFile+" itself, so it was not changed)")
+		}
+	}
+
+	var rngSecs []string
+	if max, ok := containerMaxID(); ok {
+		if doms := sssdRangeDomains(); len(doms) > 0 {
+			if max < sssdRangeMax {
+				notes = append(notes, fmt.Sprintf("this container has user IDs up to %d only, and sssd makes IDs from 200000 up for %s, so its users cannot sign in: give the container a larger ID map, or set an ldap_idmap_range_* inside it", max, strings.Join(doms, ", ")))
+			} else {
+				for _, sec := range doms {
+					if inFile(sec) {
+						rngSecs = append(rngSecs, sec)
+					} else {
+						notes = append(notes, sec+" is not in "+sssdConfFile+" itself, so its ID range was not set: add ldap_idmap_range_min = 10000, ldap_idmap_range_max = 60000 and ldap_idmap_range_size = 50000 to it")
+					}
+				}
+			}
+		}
+	}
+	sort.Strings(gpoSecs)
+	sort.Strings(rngSecs)
+	fail := func() error {
+		if len(notes) == 0 {
+			return nil
+		}
+		return errors.New(strings.Join(notes, "; "))
+	}
+	if len(gpoSecs) == 0 && len(rngSecs) == 0 {
+		return "", fail()
 	}
 	st, err := os.Stat(sssdConfFile)
 	if err != nil {
@@ -162,8 +287,15 @@ func fixSSSD(service string) (string, error) {
 			return "", fmt.Errorf("saving %s: %v", bak, err)
 		}
 	}
+	text := string(b)
+	if len(gpoSecs) > 0 {
+		text = mapSSSDService(text, service, gpoSecs)
+	}
+	if len(rngSecs) > 0 {
+		text = addIDRange(text, rngSecs)
+	}
 	tmp := sssdConfFile + ".tmp-" + service
-	if err := os.WriteFile(tmp, []byte(mapSSSDService(string(b), service, secs)), st.Mode().Perm()); err != nil {
+	if err := os.WriteFile(tmp, []byte(text), st.Mode().Perm()); err != nil {
 		return "", err
 	}
 	if sys, ok := st.Sys().(*syscall.Stat_t); ok {
@@ -173,11 +305,24 @@ func fixSSSD(service string) (string, error) {
 		os.Remove(tmp)
 		return "", err
 	}
-	msg := "added \"ad_gpo_map_interactive = +" + service + "\" to " + strings.Join(secs, ", ") + " in " + sssdConfFile + " (the old file is " + bak + ")"
-	if err := sssdRestart(); err != nil {
+	var did []string
+	if len(gpoSecs) > 0 {
+		did = append(did, "added \"ad_gpo_map_interactive = +"+service+"\" to "+strings.Join(gpoSecs, ", "))
+	}
+	if len(rngSecs) > 0 {
+		did = append(did, fmt.Sprintf("set the ID range %d-%d (this container only has IDs up to %d) for %s", sssdRangeMin, sssdRangeMax, func() uint64 { m, _ := containerMaxID(); return m }(), strings.Join(rngSecs, ", ")))
+	}
+	msg := strings.Join(did, "; ") + " in " + sssdConfFile + " (the old file is " + bak + ")"
+	reset := len(rngSecs) > 0
+	if err := sssdRestart(reset); err != nil {
 		return msg, fmt.Errorf("%s, but sssd was not restarted: %v; restart it", msg, err)
 	}
-	return msg + " and restarted sssd", nil
+	if reset {
+		msg += " and restarted sssd with its cache cleared"
+	} else {
+		msg += " and restarted sssd"
+	}
+	return msg, fail()
 }
 
 // sssdDomainBlocks says whether the options of a domain make sssd refuse the PAM service by group policy.

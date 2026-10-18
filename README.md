@@ -615,7 +615,7 @@ default_shell = /sbin/nologin
 
 **3. Make a group in the directory.** Create a group called `dnsdir-users` in Active Directory and put the people who may sign in in it. Give it a different name from the local `dnsdir` group the installer creates: the local group is looked up first, so a directory group with the same name would be hidden by it and its members could not sign in.
 
-The **Login groups** setting (Configure ▸ Web, or `web.group` in `dnsdir.conf`) takes several groups separated by commas; a member of any of them may sign in, and a group that does not exist on a node is skipped. A new installation has `dnsdir,dnsdir-users`: the local group, which the Users page manages, and the directory group, which is managed in the directory. An existing configuration is not changed by an update, so set it once on each node. The setting is live; people who are not in a listed group are signed out within a minute.
+The **Login groups** setting (Configure ▸ Web, or `web.group` in `dnsdir.conf`) takes several groups separated by commas; a member of any of them may sign in, and a group that does not exist on a node is skipped. A new installation has `dnsdir,dnsdir-users`: the local group, which the Users page manages, and the directory group, which is managed in the directory. An existing configuration is not changed by an update. In a cluster the setting is shared: set it on any node (after every node is updated) and the others follow. The setting is live; people who are not in a listed group are signed out within a minute.
 
 **4. Group policy.** sssd applies the domain's group policy (GPO) at the account step of PAM and refuses every PAM service that has no logon right, and `dnsdir` is not one it knows: the password is accepted and the sign-in still fails with `pam account check (password accepted): Permission denied`, even though ssh works. When the daemon starts it looks for this, and if it finds an AD domain in `sssd.conf` that enforces group policy without a mapping for its PAM service it adds the line below to that domain's section, keeps the old file as `sssd.conf.dnsdir.bak` (once) and restarts sssd:
 
@@ -624,6 +624,16 @@ ad_gpo_map_interactive = +dnsdir
 ```
 
 dnsdir and ntpdir on the same host each add their own item to the same line. A domain that is defined only in a `conf.d` snippet is not edited; the log says what to add. A domain with `ad_gpo_access_control` set to `permissive` or `disabled`, or one that is not Active Directory, needs nothing.
+
+**In a container (LXC, Proxmox).** An unprivileged container has only the user IDs of its `uid_map` (usually 0–65535; see `/proc/self/uid_map`), and sssd makes the IDs of AD users from 200000 up, which do not exist there: the password is accepted and the sign-in fails anyway. When the daemon starts in such a container, and an AD domain in `sssd.conf` has no `ldap_idmap_range_*` of its own, it adds these lines to the domain's section, stops sssd, deletes its cache (`/var/lib/sss/db`, `/var/lib/sss/mc`, which hold the IDs it made), and starts it again:
+
+```
+ldap_idmap_range_min = 10000
+ldap_idmap_range_max = 60000
+ldap_idmap_range_size = 50000
+```
+
+Use the same range on every node, so a user has the same ID everywhere; a node that is not in a container keeps sssd's default unless you set these lines on it too. A range you set yourself is never changed, and a container whose map is smaller than 60000 only gets a warning in the log. Changing the range changes the IDs of every directory user and group on the node. 50000 IDs cover directory objects with a relative ID (the last part of the SID) up to 50000.
 
 **5. Check from the shell** before the GUI:
 
@@ -790,7 +800,7 @@ Joining replaces the new node's *shared* settings with the cluster's, after savi
 
 ### What is shared and what is per node
 
-**Shared** settings are the DNS block and, per group, `group_id`, `name`, `vip4`, `vip6`, `more_vip4`, `more_vip6`, `key`, `lb_method`, `hello_ms`, `hold_ms`, `max_afns` and `neighbors` (the unicast list: every node's address; each node skips its own). **Per node** are the interface, priority, weight, preempt, the log level, and the web and cluster blocks.
+**Shared** settings are the DNS block and, per group, `group_id`, `name`, `vip4`, `vip6`, `more_vip4`, `more_vip6`, `key`, `lb_method`, `hello_ms`, `hold_ms`, `max_afns` and `neighbors` (the unicast list: every node's address; each node skips its own). **Per node** are the interface, priority, weight, preempt, the log level, and the web and cluster blocks, except the web **Login groups** (`web.group`), the sign-in lockout (`max_failed_logins`, `failed_login_window_minutes`, `lockout_minutes`) and the minimum password length, which are shared too: the same people may sign in on every node, under the same rules. A cluster whose login group is still the single group `dnsdir` and whose lockout and password length are the defaults shares nothing; any other value is replicated, so update every node before changing them (a node on an older version does not know these settings). Putting a setting back to its default on the primary does not reach nodes that kept another value; set it on them, or give it any other value and then the default again from a node that has the change.
 
 You can edit anywhere. A change to shared settings made on a replica is forwarded to the primary, validated there, and replicated to everyone within the sync interval (5 seconds). A group added on the primary appears on replicas with the primary's interface and priority as a starting point.
 

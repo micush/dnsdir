@@ -1,5 +1,20 @@
 # Changelog
 
+## [v473] - 2026-10-18 — The sign-in lockout and minimum password length are replicated
+
+### Changed
+- **Configure ▸ Web: failed logins before lockout, the window they count in, how long the lockout lasts, and the minimum password length are shared settings**: set on any node, the primary replicates them, so the same rules hold on every node (like the login groups). While all four are the defaults (3 in 1 minute, locked for 15 minutes, 8 characters) nothing is replicated and the document's hash is unchanged, which keeps a rolling update in agreement; any other value is replicated. A node that receives none, from an older primary, keeps its own. Update every node before changing them.
+
+## [v472] - 2026-10-18 — The login groups are replicated in a cluster
+
+### Changed
+- **Configure ▸ Web ▸ Login groups (`web.group`) is a shared setting**: set on any node, the primary replicates it, so the same people can sign in on every node. A cluster whose login group is still the single `dnsdir` that every earlier version had shares nothing (the replicated document, and so its hash, is unchanged, which keeps a rolling update in agreement); any other value is replicated. A node that receives no value, from an older primary, keeps its own. Update every node before changing it: a node on an older version ignores the setting.
+
+## [v471] - 2026-10-18 — AD sign-in in a container: the ID range is set
+
+### Added
+- **In an unprivileged container (LXC, Proxmox) Active Directory users could not sign in, because sssd made their IDs from 200000 up and the container only has IDs up to 65535**: at start, when `/proc/self/uid_map` shows such a container and an AD domain in `sssd.conf` has no `ldap_idmap_range_*` and does not turn ID mapping off, the daemon adds `ldap_idmap_range_min = 10000`, `ldap_idmap_range_max = 60000` and `ldap_idmap_range_size = 50000` to that domain's section, stops sssd, deletes its cache (`/var/lib/sss/db`, `/var/lib/sss/mc`: the IDs it made are kept there) and starts it again. This is done together with the group-policy mapping, with one backup of the file (`sssd.conf.dnsdir.bak`) and one restart. A range you set yourself is left alone; a container with fewer than 60000 IDs, or a domain defined only in a `conf.d` snippet, only gets a warning in the log. A host or virtual machine is not touched. The README (*Signing in with Active Directory*) and the help explain it; use the same range on every node.
+
 ## [v470] - 2026-10-18 — Help: signing in with Active Directory
 
 ### Changed

@@ -2137,13 +2137,13 @@
   ];
   const WEB_FIELDS = [
     { k: "listen", l: "Listen address", t: "port", hint: "the port, default 53853 (all addresses); to listen on one address only, write it with the port: 10.0.0.1:53853" },
-    { k: "group", l: "Login groups", t: "text", hint: "one or more, separated by commas: a member of any may sign in. The first one that is a local group is the one the Users page manages; the others can be directory (Active Directory) groups" },
+    { shared: true, k: "group", l: "Login groups", t: "text", hint: "one or more, separated by commas: a member of any may sign in. The first one that is a local group is the one the Users page manages; the others can be directory (Active Directory) groups" },
     { k: "pam_service", l: "PAM service", t: "text" },
     { k: "session_idle_minutes", l: "Session idle timeout (min)", t: "int", min: 1 },
-    { k: "max_failed_logins", l: "Failed logins before lockout", t: "int", min: 1 },
-    { k: "failed_login_window_minutes", l: "…within this many minutes", t: "int", min: 1 },
-    { k: "lockout_minutes", l: "Lockout lasts (minutes)", t: "int", min: 1 },
-    { k: "min_password_length", l: "Minimum password length", t: "int", min: 0, max: 128, hint: "0 = 8" },
+    { shared: true, k: "max_failed_logins", l: "Failed logins before lockout", t: "int", min: 1 },
+    { shared: true, k: "failed_login_window_minutes", l: "…within this many minutes", t: "int", min: 1 },
+    { shared: true, k: "lockout_minutes", l: "Lockout lasts (minutes)", t: "int", min: 1 },
+    { shared: true, k: "min_password_length", l: "Minimum password length", t: "int", min: 0, max: 128, hint: "0 = 8" },
   ];
   const SNMP_FIELDS = [
     { shared: true, k: "snmp_communities", l: "Community strings", t: "list", wide: true },

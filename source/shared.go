@@ -10,7 +10,7 @@ import (
 // What a cluster replicates.  Gateway groups are the same group on every
 // member (same VIP, key, timers), but each node has its own interface,
 // priority, weight, preempt flag and unicast neighbours — those are local and
-// never replicated.  The dns block is shared as a whole; web, cluster and
+// never replicated.  The dns block is shared as a whole, and so are the web login groups and sign-in rules (see WebGroup, WebAuth); the rest of web, cluster and
 // log_level are local.
 
 // SharedGroup is the replicated part of a GroupConfig.
@@ -54,7 +54,44 @@ type SharedGroup struct {
 type SharedConfig struct {
 	DNS    DNSConfig     `json:"dns"`
 	Groups []SharedGroup `json:"groups"`
+	// WebGroup is the web login groups setting (web.group), so the same people may sign in on every node.  It is omitted
+	// while it is the single local group every earlier version had (legacyWebGroup): the hash of a cluster that has not
+	// set it is unchanged, so members on different versions during a rolling update agree.  A member that gets no value
+	// keeps its own.
+	WebGroup string `json:"web_group,omitempty"`
+	// WebAuth is the sign-in lockout (max_failed_logins, failed_login_window_minutes, lockout_minutes) and the minimum
+	// password length, so the same rules hold on every node.  Omitted while all four are the defaults every earlier version
+	// had, for the same reason as WebGroup; a member that gets none keeps its own.
+	WebAuth *SharedWebAuth `json:"web_auth,omitempty"`
 }
+
+// SharedWebAuth is the replicated part of the sign-in rules.
+type SharedWebAuth struct {
+	MaxFailedLogins          int `json:"max_failed_logins"`
+	FailedLoginWindowMinutes int `json:"failed_login_window_minutes"`
+	LockoutMinutes           int `json:"lockout_minutes"`
+	MinPasswordLength        int `json:"min_password_length"`
+}
+
+// sharedWebAuth is the document's WebAuth for a web block: nil while every value is the default.
+func sharedWebAuth(w WebConfig) *SharedWebAuth {
+	d := defaultWeb()
+	if w.MaxFailedLogins == d.MaxFailedLogins && w.FailedLoginWindowMinutes == d.FailedLoginWindowMinutes &&
+		w.LockoutMinutes == d.LockoutMinutes && w.minPassword() == defaultMinPassword {
+		return nil
+	}
+	return &SharedWebAuth{w.MaxFailedLogins, w.FailedLoginWindowMinutes, w.LockoutMinutes, w.MinPasswordLength}
+}
+
+func (a *SharedWebAuth) applyTo(w *WebConfig) {
+	if a != nil {
+		w.MaxFailedLogins, w.FailedLoginWindowMinutes, w.LockoutMinutes, w.MinPasswordLength =
+			a.MaxFailedLogins, a.FailedLoginWindowMinutes, a.LockoutMinutes, a.MinPasswordLength
+	}
+}
+
+// legacyWebGroup is the value web.group had before it could be shared.
+const legacyWebGroup = "dnsdir"
 
 // GroupSeed carries the primary's local values for a group, used only to
 // initialise a group a replica doesn't have yet.
@@ -68,6 +105,10 @@ type GroupSeed struct {
 
 func sharedOf(dc *DaemonConfig) SharedConfig {
 	sc := SharedConfig{DNS: dc.DNS, Groups: []SharedGroup{}}
+	if dc.Web.Group != legacyWebGroup {
+		sc.WebGroup = dc.Web.Group
+	}
+	sc.WebAuth = sharedWebAuth(dc.Web)
 	if sc.DNS.Servers == nil {
 		sc.DNS.Servers = []string{}
 	}
@@ -110,6 +151,10 @@ func (s SharedConfig) Validate() error {
 		dc.Groups = append(dc.Groups, gc)
 	}
 	dc.DNS = s.DNS
+	if s.WebGroup != "" {
+		dc.Web.Group = s.WebGroup
+	}
+	s.WebAuth.applyTo(&dc.Web)
 	return dc.Validate()
 }
 
@@ -172,6 +217,10 @@ func mergeShared(dc *DaemonConfig, sh SharedConfig, seeds []GroupSeed) (bool, er
 	}
 	dc.Groups = kept
 	dc.DNS = sh.DNS
+	if sh.WebGroup != "" {
+		dc.Web.Group = sh.WebGroup
+	}
+	sh.WebAuth.applyTo(&dc.Web)
 	if err := dc.Validate(); err != nil {
 		return false, err
 	}

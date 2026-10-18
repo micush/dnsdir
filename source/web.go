@@ -245,10 +245,12 @@ func (w *WebServer) sanityWarnings(cfg WebConfig) {
 		warnf("web: none of the login groups %q exists — nobody can log in. Create one and add users: groupadd %s; usermod -aG %s <user>",
 			cfg.Group, g, g)
 	}
-	if msg, err := fixSSSD(cfg.PAMService); err != nil {
-		warnf("web: %v", err)
-	} else if msg != "" {
+	msg, err := fixSSSD(cfg.PAMService)
+	if msg != "" && err == nil {
 		infof("web: sssd: %s", msg)
+	}
+	if err != nil {
+		warnf("web: sssd: %v", err)
 	}
 	if _, err := os.Stat("/etc/pam.d/" + cfg.PAMService); err != nil {
 		warnf("web: /etc/pam.d/%s not found — PAM will fall back to its 'other' policy, which usually denies every login (see contrib/pam.d/)", cfg.PAMService)

@@ -1926,6 +1926,7 @@
             h("td", {}, pill(m.state.toUpperCase(), m.state === "expired" ? "bad" : m.state === "active" || m.state === "forward" ? "ok" : "warn"),
               m.preempt ? " " : null, m.preempt ? pill("preempt") : null),
             h("td", { class: "num" }, m.local ? "local" : m.age_ms),
+            h("td", { class: "num", title: "average gap between this node's hellos / the largest gap in the last 30 to 60 seconds" }, m.local || !m.hello_avg_ms ? "–" : m.hello_avg_ms + " / " + m.hello_max_ms),
             h("td", { class: "mono" }, m.vmac || "–"),
             h("td", {}, pill(m.dns_listening ? "answering" : "not answering", m.dns_listening ? "ok" : "warn"))));
           out.append(h("div", { class: "card" },
@@ -1933,7 +1934,7 @@
               h("span", { class: "mono muted" }, "VIP " + g.vip),
               g.agc ? h("span", { class: "muted" }, "AGC ", h("span", { class: "mono" }, g.agc)) : null),
             h("div", { class: "scroll" }, h("table", { class: "tight" },
-              h("thead", {}, h("tr", {}, ["Node name", "Node IP", "Pri", "Slot", "Weight", "Role", "State", "Age (ms)", "vMAC", "DNS"].map((t, i) => h("th", { class: [2, 3, 4, 7].includes(i) ? "num" : "" }, t)))),
+              h("thead", {}, h("tr", {}, ["Node name", "Node IP", "Pri", "Slot", "Weight", "Role", "State", "Age (ms)", "Hello avg / max (ms)", "vMAC", "DNS"].map((t, i) => h("th", { class: [2, 3, 4, 7, 8].includes(i) ? "num" : "" }, t)))),
               h("tbody", {}, rows)))));
         }
         morph(body, out);

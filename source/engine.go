@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/big"
 	"net"
 	"net/netip"
@@ -25,7 +26,36 @@ type Peer struct {
 	FirstSeen time.Time
 	// Controller is whether its last hello said it is the active controller.
 	Controller bool
+	// What the hellos really do: LastHello is when the last one arrived, HelloAvg the running average of the gap between
+	// hellos (ms), gapMax / gapPrev the largest gap in the current and the previous half minute.
+	LastHello, winStart time.Time
+	HelloAvg            float64
+	gapMax, gapPrev     float64
 }
+
+// noteHello records the arrival of a hello from the peer.
+func (p *Peer) noteHello(now time.Time) {
+	if !p.LastHello.IsZero() {
+		gap := float64(now.Sub(p.LastHello)) / float64(time.Millisecond)
+		if p.HelloAvg == 0 {
+			p.HelloAvg = gap
+		} else {
+			p.HelloAvg += 0.1 * (gap - p.HelloAvg)
+		}
+		if now.Sub(p.winStart) > 30*time.Second {
+			p.gapPrev, p.gapMax, p.winStart = p.gapMax, 0, now
+		}
+		if gap > p.gapMax {
+			p.gapMax = gap
+		}
+	} else {
+		p.winStart = now
+	}
+	p.LastHello = now
+}
+
+// helloMax is the largest gap between two hellos in the last 30 to 60 seconds, in ms.
+func (p *Peer) helloMax() float64 { return math.Max(p.gapMax, p.gapPrev) }
 
 // takeoverHandback is how long a returning node must have been heard before the
 // controller lets go of the virtual MAC it was covering.
@@ -562,6 +592,7 @@ func (e *Engine) onPacketLocked(data []byte, from net.Addr) {
 	}
 	if pkt.Type == pktHello {
 		peer.Controller = isController(pkt)
+		peer.noteHello(time.Now())
 	}
 
 	switch pkt.Type {
@@ -1398,12 +1429,16 @@ type SnapshotRow struct {
 	Weight   int    `json:"weight"`
 	Preempt  bool   `json:"preempt"`
 	AgeMS    int64  `json:"age_ms"`
-	State    string `json:"state"`
-	Local    bool   `json:"local"`
-	VIP4     string `json:"vip4"`
-	VIP6     string `json:"vip6"`
-	AGCIP    string `json:"agc_ip"`
-	DNSUp    bool   `json:"dns_listening"`
+	// HelloAvgMS and HelloMaxMS are what the peer's hellos really do: the average gap between them and the largest gap in the
+	// last 30 to 60 seconds (0 until two have arrived)
+	HelloAvgMS int64  `json:"hello_avg_ms,omitempty"`
+	HelloMaxMS int64  `json:"hello_max_ms,omitempty"`
+	State      string `json:"state"`
+	Local      bool   `json:"local"`
+	VIP4       string `json:"vip4"`
+	VIP6       string `json:"vip6"`
+	AGCIP      string `json:"agc_ip"`
+	DNSUp      bool   `json:"dns_listening"`
 	// RealMACs: the gateway runs without virtual MACs; MAC is then the node's real MAC address, when known (the
 	// controller learns the others'; a forwarder knows only its own)
 	RealMACs bool   `json:"real_macs,omitempty"`
@@ -1432,6 +1467,7 @@ func (e *Engine) snapshot() []SnapshotRow {
 		r := row()
 		r.PeerIP, r.Priority, r.AfnID, r.Weight, r.Preempt = ip, p.Priority, p.AfnID, p.Weight, p.Preempt
 		r.AgeMS = time.Since(p.LastSeen).Milliseconds()
+		r.HelloAvgMS, r.HelloMaxMS = int64(math.Round(p.HelloAvg)), int64(math.Round(p.helloMax()))
 		r.State = p.stateName(e.cfg.HoldMS)
 		if e.cfg.RealMACs {
 			r.RealMACs = true

@@ -10,18 +10,20 @@ import (
 // both always agree on roles, ordering and vMACs.
 
 type GatewayMember struct {
-	IP        string `json:"ip"`
-	Priority  int    `json:"priority"`
-	Slot      int    `json:"slot"`
-	Weight    int    `json:"weight"`
-	Role      string `json:"role"`  // AGC | AFN | INIT
-	State     string `json:"state"` // engine state for this node; active|expired for peers
-	AgeMS     int64  `json:"age_ms"`
-	Local     bool   `json:"local"`
-	Preempt   bool   `json:"preempt"`
-	VMAC      string `json:"vmac"` // the virtual MAC, or in real-MAC mode the node's real MAC
-	DNSListen bool   `json:"dns_listening"`
-	Name      string `json:"name,omitempty"` // the node that has this address, when the cluster can say (see nodeNamesByIP)
+	IP         string `json:"ip"`
+	Priority   int    `json:"priority"`
+	Slot       int    `json:"slot"`
+	Weight     int    `json:"weight"`
+	Role       string `json:"role"`  // AGC | AFN | INIT
+	State      string `json:"state"` // engine state for this node; active|expired for peers
+	AgeMS      int64  `json:"age_ms"`
+	HelloAvgMS int64  `json:"hello_avg_ms,omitempty"` // the average gap between this peer's hellos, ms
+	HelloMaxMS int64  `json:"hello_max_ms,omitempty"` // the largest gap in the last 30 to 60 seconds, ms
+	Local      bool   `json:"local"`
+	Preempt    bool   `json:"preempt"`
+	VMAC       string `json:"vmac"` // the virtual MAC, or in real-MAC mode the node's real MAC
+	DNSListen  bool   `json:"dns_listening"`
+	Name       string `json:"name,omitempty"` // the node that has this address, when the cluster can say (see nodeNamesByIP)
 }
 
 type GatewayGroup struct {
@@ -79,7 +81,7 @@ func buildGateways(rows []SnapshotRow) []GatewayGroup {
 		}
 		g.Members = append(g.Members, GatewayMember{
 			IP: r.PeerIP, Priority: r.Priority, Slot: r.AfnID, Weight: r.Weight,
-			Role: role, State: r.State, AgeMS: r.AgeMS, Local: r.Local, Preempt: r.Preempt,
+			Role: role, State: r.State, AgeMS: r.AgeMS, HelloAvgMS: r.HelloAvgMS, HelloMaxMS: r.HelloMaxMS, Local: r.Local, Preempt: r.Preempt,
 			VMAC: vmac, DNSListen: r.DNSUp,
 		})
 	}

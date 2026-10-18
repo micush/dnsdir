@@ -702,15 +702,18 @@ func showGatewayTable(sock string) {
 			title = fmt.Sprintf("%s (group %d)", n, g.GroupID)
 		}
 		fmt.Printf("%s  VIP %s\n", title, g.VIP)
-		fmt.Printf("%-18s %-40s %-5s %-5s %-7s %-8s %-10s %-9s %s\n", "NODE NAME", "NODE IP", "PRI", "SLOT", "WEIGHT", "ROLE", "STATE", "AGE(ms)", "VMAC")
+		fmt.Printf("%-18s %-40s %-5s %-5s %-7s %-8s %-10s %-9s %-13s %s\n", "NODE NAME", "NODE IP", "PRI", "SLOT", "WEIGHT", "ROLE", "STATE", "AGE(ms)", "HELLO avg/max", "VMAC")
 		fmt.Println(strings.Repeat("-", 122))
 		for _, m := range g.Members {
 			age, flag := strconv.FormatInt(m.AgeMS, 10), ""
+			hello := "-"
 			if m.Local {
 				age, flag = "(local)", " *"
+			} else if m.HelloAvgMS > 0 {
+				hello = fmt.Sprintf("%d/%d", m.HelloAvgMS, m.HelloMaxMS)
 			}
-			fmt.Printf("%-18s %-40s %-5d %-5d %-7d %-8s %-10s %-9s %s\n", orDefault(m.Name, "-")+flag, m.IP, m.Priority,
-				m.Slot, m.Weight, m.Role, strings.ToUpper(m.State), age, orDefault(m.VMAC, "-"))
+			fmt.Printf("%-18s %-40s %-5d %-5d %-7d %-8s %-10s %-9s %-13s %s\n", orDefault(m.Name, "-")+flag, m.IP, m.Priority,
+				m.Slot, m.Weight, m.Role, strings.ToUpper(m.State), age, hello, orDefault(m.VMAC, "-"))
 		}
 		fmt.Println()
 	}

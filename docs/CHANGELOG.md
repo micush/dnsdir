@@ -1,5 +1,13 @@
 # Changelog
 
+## [v445] - 2026-10-18 — Live hello timing
+
+### Added
+- **Monitor ▸ Gateways shows what each peer's hellos really do**: `Hello avg / max (ms)` is the average gap between the peer's hellos and the largest gap in the last 30 to 60 seconds, measured on this node from the hellos that arrive (the configured interval is in the gateway's edit form). `--show-gateways` prints it as `HELLO avg/max`; the gateway snapshot has `hello_avg_ms` and `hello_max_ms`. A maximum near the hold time means hellos are being lost or delayed. `TestHelloGapStats`.
+
+### Notes
+- It is measured by this node, so each node can show different numbers for the same peer; a gap seen here may be a lost frame or a stall on either side.
+
 ## [v444] - 2026-10-18 — Faster gateway timers; hello can no longer exceed hold
 
 ### Changed

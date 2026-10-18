@@ -3101,8 +3101,9 @@
     ];
     // a record type keeps its colour whatever its rank; the rest fold into "Other"
     const TYPE_CLS = { A: "t1", AAAA: "t2", HTTPS: "t3", PTR: "t4", SRV: "t5", TXT: "t6", SOA: "t7", MX: "t8" };
-    // UDP in blue, TCP in orange, the IPv6 share of each in the lighter shade; plain UDP / TCP come from a node on an older version
-    const PROTO_CLS = { "UDP · IPv4": "t1", "UDP · IPv6": "t9", "TCP · IPv4": "t2", "TCP · IPv6": "t10", UDP: "t1", TCP: "t2" };
+    // UDP over IPv4 blue, over IPv6 purple; TCP over IPv4 orange, over IPv6 pink.  Plain UDP / TCP (counted before the split
+    // existed, or by a node on an older version) are the muted blue-grey and tan.
+    const PROTO_CLS = { "UDP · IPv4": "t1", "UDP · IPv6": "t7", "TCP · IPv4": "t2", "TCP · IPv6": "t5", UDP: "t9", TCP: "t10" };
     const RANGES = [["now", "Now"], ["1h", "Last Hour"], ["1d", "Last Day"], ["7d", "Last Week"], ["30d", "Last Month"], ["custom", "Custom"]];
     const REFRESH_MS = 10000;
     const n0 = (n) => Number(n || 0).toLocaleString();
@@ -4036,6 +4037,8 @@
   // ── Log, Monitor  (CLI: --log) ───────────────────────────────────────────────
   VIEWS.log = (() => {
     let status, level, span, count, search, live, info, box, first, timer, tsBtn, tsHold = 0, seq = 0, shown = [];
+    // the filters survive a change of node (and of page): the view is built again each time, from these
+    const kept = { level: "", span: "1h", count: "1000", q: "", live: true };
     const sel = (label, opts, val, onchange) => {
       const el = h("select", { "aria-label": label, onchange }, opts.map(([v, t]) => h("option", { value: v }, t)));
       el.value = val;
@@ -4100,12 +4103,13 @@
       mount(main) {
         first = true;
         status = h("div", { "aria-live": "polite" });
-        level = sel("Level", [["", "All levels"], ["info", "Info and above"], ["warn", "Warnings and errors"], ["error", "Errors only"]], "", load);
-        span = sel("Time range", [["15m", "Last 15 minutes"], ["1h", "Last hour"], ["6h", "Last 6 hours"], ["1d", "Last 24 hours"], ["7d", "Last 7 days"], ["all", "All of it"]], "1h", load);
-        count = sel("Lines", [["200", "200 lines"], ["1000", "1000 lines"], ["5000", "5000 lines"]], "1000", load);
+        level = sel("Level", [["", "All levels"], ["info", "Info and above"], ["warn", "Warnings and errors"], ["error", "Errors only"]], kept.level, () => { kept.level = level.value; load(); });
+        span = sel("Time range", [["15m", "Last 15 minutes"], ["1h", "Last hour"], ["6h", "Last 6 hours"], ["1d", "Last 24 hours"], ["7d", "Last 7 days"], ["all", "All of it"]], kept.span, () => { kept.span = span.value; load(); });
+        count = sel("Lines", [["200", "200 lines"], ["1000", "1000 lines"], ["5000", "5000 lines"]], kept.count, () => { kept.count = count.value; load(); });
         search = h("input", { type: "search", placeholder: "Filter words…", "aria-label": "Filter text", spellcheck: "false", class: "grow",
-          oninput: () => { clearTimeout(timer); timer = setTimeout(load, 300); } });
-        live = h("input", { type: "checkbox", checked: true });
+          oninput: () => { kept.q = search.value; clearTimeout(timer); timer = setTimeout(load, 300); } });
+        search.value = kept.q;
+        live = h("input", { type: "checkbox", checked: kept.live, onchange: () => { kept.live = live.checked; } });
         tsBtn = h("button", { class: "btn", type: "button", onclick: tshoot }, "tshoot");
         info = h("div", { class: "hint nomargin" });
         box = h("div", { class: "logbox", tabindex: "0", role: "log", "aria-label": "Log lines" });

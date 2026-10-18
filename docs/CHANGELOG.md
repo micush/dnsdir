@@ -1,5 +1,15 @@
 # Changelog
 
+## [v449] - 2026-10-18 — Clearer colours in the Transport chart
+
+### Changed
+- The four Transport slices now use four different colours: UDP · IPv4 blue, UDP · IPv6 purple, TCP · IPv4 orange, TCP · IPv6 pink. The plain `UDP` and `TCP` slices (counted before the split existed) are a muted blue-grey and tan, so they no longer look like IPv4.
+
+## [v448] - 2026-10-18 — The log filters stay when the node changes
+
+### Changed
+- **Monitor ▸ Log keeps its filter words, level, time range, number of lines and the Live box when another node is picked** (or another page and back), and applies them to the new node's log. They were reset to the defaults each time. They are kept until the page is reloaded.
+
 ## [v447] - 2026-10-18 — IPv4 and IPv6 in the Transport chart
 
 ### Changed

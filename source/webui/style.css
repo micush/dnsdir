@@ -393,12 +393,12 @@ td input[type=date] { width: 11rem; }
 /* Monitor → Statistics.  Colours are fixed per entity (validated for both themes). */
 :root {
   --q-total: #2a78d6; --q-ok: #1baf7a; --q-nx: #eda100; --q-ref: #e87ba4; --q-oth: #4a3aa7; --q-fail: #e34948; --q-upd: #0e9fb5;
-  --t1: #2a78d6; --t2: #eb6834; --t3: #1baf7a; --t4: #eda100; --t5: #e87ba4; --t6: #008300; --t7: #4a3aa7; --t8: #e34948; --t9: #86b6f0; --t10: #f3a583; --t-other: #8a93a0;
+  --t1: #2a78d6; --t2: #eb6834; --t3: #1baf7a; --t4: #eda100; --t5: #e87ba4; --t6: #008300; --t7: #4a3aa7; --t8: #e34948; --t9: #7f98b8; --t10: #bf9f86; --t-other: #8a93a0;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --q-total: #3987e5; --q-ok: #199e70; --q-nx: #c98500; --q-ref: #d55181; --q-oth: #9085e9; --q-fail: #e66767; --q-upd: #3cc4d8;
-    --t1: #3987e5; --t2: #d95926; --t3: #199e70; --t4: #c98500; --t5: #d55181; --t6: #008300; --t7: #9085e9; --t8: #e66767; --t9: #5f9be8; --t10: #e88a5e; --t-other: #8a93a0;
+    --t1: #3987e5; --t2: #d95926; --t3: #199e70; --t4: #c98500; --t5: #d55181; --t6: #008300; --t7: #9085e9; --t8: #e66767; --t9: #8aa4c4; --t10: #c9a78d; --t-other: #8a93a0;
   }
 }
 .q-total { --c: var(--q-total); } .q-ok { --c: var(--q-ok); } .q-nx { --c: var(--q-nx); } .q-ref { --c: var(--q-ref); }

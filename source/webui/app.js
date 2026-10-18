@@ -3743,7 +3743,7 @@
         h("button", { class: "btn small", type: "button", "aria-label": "Next page", disabled: topPage[pk] >= pages - 1, onclick: go(1) }, "›"));
       const mine = withHost ? "Client" : "Domain";
       return h("div", { class: "card qcard" }, h("header", { class: "bar" }, h("h2", {}, tc(title)), h("span", { class: "grow" }),
-        h("input", { type: "text", class: "qfilter", placeholder: "Filter", "aria-label": "Filter " + (withHost ? "clients" : "domains"), autocomplete: "off", spellcheck: "false",
+        h("input", { type: "text", class: "qfilter", placeholder: "Filter (AND, OR)", "aria-label": "Filter " + (withHost ? "clients" : "domains") + ", words may be joined by AND or OR", autocomplete: "off", spellcheck: "false",
           value: withHost ? cFilter : dFilter, oninput: (ev) => onFilter(withHost, ev.currentTarget.value),
           onkeydown: (ev) => { if (ev.key === "Escape" && ev.currentTarget.value) { ev.currentTarget.value = ""; onFilter(withHost, ""); } } }),
         ),

@@ -833,8 +833,8 @@ type QFilter struct {
 func (f QFilter) withMatch(client, domain string) QFilter {
 	clean := func(s string) string {
 		s = strings.ToLower(strings.TrimSpace(s))
-		if len(s) > 100 {
-			s = s[:100]
+		if len(s) > 200 {
+			s = s[:200]
 		}
 		return s
 	}
@@ -850,10 +850,11 @@ const qsHostLookups = 200
 // host names contains the text.  Only the names already looked up can match; a text that is not just digits, a-f, dots and
 // colons (so it can be part of a host name) starts the lookups of the busiest clients that have none yet.
 func (s *QStats) keepMatchingClients(m map[string]uint64, text string) map[string]uint64 {
-	if text == "" {
+	expr := parseMatch(text)
+	if expr == nil {
 		return m
 	}
-	hostLike := strings.Trim(text, "0123456789abcdef:.") != ""
+	hostLike := expr.hostLike()
 	out := make(map[string]uint64, len(m))
 	var todo []NameCount
 	s.rmu.Lock()
@@ -861,20 +862,15 @@ func (s *QStats) keepMatchingClients(m map[string]uint64, text string) map[strin
 		if k == qsOthers {
 			continue
 		}
-		if strings.Contains(strings.ToLower(k), text) {
-			out[k] = v
-			continue
-		}
-		if strings.Contains(strings.ToLower(s.names[k]), text) {
-			out[k] = v
-			continue
-		}
 		e, seen := s.rdns[k]
+		texts := make([]string, 0, 2+len(e.names)) // the address, the name given by hand and the reverse names
+		texts = append(texts, strings.ToLower(k), strings.ToLower(s.names[k]))
 		for _, n := range e.names {
-			if strings.Contains(strings.ToLower(n), text) {
-				out[k] = v
-				break
-			}
+			texts = append(texts, strings.ToLower(n))
+		}
+		if expr.matches(texts...) {
+			out[k] = v
+			continue
 		}
 		if hostLike && !seen && !s.rwork[k] {
 			if _, err := netip.ParseAddr(k); err == nil {
@@ -898,16 +894,89 @@ func (s *QStats) keepMatchingClients(m map[string]uint64, text string) map[strin
 
 // keepMatching drops the entries whose name does not contain text; "(others)" goes too, as it stands for names not kept.
 func keepMatching(m map[string]uint64, text string) map[string]uint64 {
-	if text == "" {
+	expr := parseMatch(text)
+	if expr == nil {
 		return m
 	}
 	out := make(map[string]uint64, len(m))
 	for k, v := range m {
-		if k != qsOthers && strings.Contains(strings.ToLower(k), text) {
+		if k != qsOthers && expr.matches(strings.ToLower(k)) {
 			out[k] = v
 		}
 	}
 	return out
+}
+
+// matchExpr is the text of a filter box: words joined by AND or OR (any case), AND binding first, so "ubuntu AND ntp OR debian"
+// is (ubuntu and ntp) or debian.  It is a list of alternatives, each a list of terms that must all be found.  Words with no
+// operator between them stay one term (a space is part of what is looked for).
+type matchExpr [][]string
+
+func parseMatch(text string) matchExpr {
+	var expr matchExpr
+	var group, term []string
+	endTerm := func() {
+		if len(term) > 0 {
+			group = append(group, strings.Join(term, " "))
+			term = nil
+		}
+	}
+	endGroup := func() {
+		endTerm()
+		if len(group) > 0 {
+			expr = append(expr, group)
+			group = nil
+		}
+	}
+	for _, w := range strings.Fields(strings.ToLower(text)) {
+		switch w {
+		case "and":
+			endTerm()
+		case "or":
+			endGroup()
+		default:
+			term = append(term, w)
+		}
+	}
+	endGroup()
+	return expr
+}
+
+// matches says whether the expression holds for something known by these (lower-case) texts: each term must be found in at
+// least one of them.
+func (e matchExpr) matches(texts ...string) bool {
+	for _, group := range e {
+		all := true
+		for _, term := range group {
+			found := false
+			for _, t := range texts {
+				if strings.Contains(t, term) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				all = false
+				break
+			}
+		}
+		if all {
+			return true
+		}
+	}
+	return false
+}
+
+// hostLike says whether some term can be part of a host name (it is not just digits, a-f, dots and colons).
+func (e matchExpr) hostLike() bool {
+	for _, group := range e {
+		for _, term := range group {
+			if strings.Trim(term, "0123456789abcdef:.") != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // qstatsFilter checks and normalises the rcode, client and domain arguments of the API and CLI.

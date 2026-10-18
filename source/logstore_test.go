@@ -61,6 +61,12 @@ func TestReadLogFilters(t *testing.T) {
 	if r, _ = ReadLog(LogQuery{Text: "SERVER a up"}); len(r.Lines) != 2 {
 		t.Fatalf("text (all words, any case): %+v", r.Lines)
 	}
+	if r, _ = ReadLog(LogQuery{Text: "boom OR server AND up"}); len(r.Lines) != 3 {
+		t.Fatalf("text AND/OR: %d %+v", len(r.Lines), r.Lines)
+	}
+	if r, _ = ReadLog(LogQuery{Text: "boom or nosuchword"}); len(r.Lines) != 1 {
+		t.Fatalf("text OR: %d %+v", len(r.Lines), r.Lines)
+	}
 	if r, _ = ReadLog(LogQuery{Since: 30 * time.Minute}); len(r.Lines) != 4 { // 3 timed lines + the stray one without a time
 		t.Fatalf("since: %d %+v", len(r.Lines), r.Lines)
 	}

@@ -1,5 +1,15 @@
 # Changelog
 
+## [v465] - 2026-10-18 — AND and OR in the Log filter
+
+### Changed
+- **Monitor ▸ Log: the filter takes AND and OR**, like the Statistics filters: `error OR warn` shows lines with either, `dns AND timeout OR ntp` is (dns and timeout) or ntp, AND binding first. Words with no operator are still all required, in any order, and any case, so existing filters give the same lines.
+
+## [v464] - 2026-10-18 — A wider filter box with AND and OR
+
+### Changed
+- **The filter boxes of Top Clients and Top Domains are twice as wide, and take AND and OR**: `ubuntu AND ntp` keeps what contains both, `ubuntu OR debian` what contains either; AND binds first, so `a AND b OR c` is (a and b) or c. The words may be in any case. A client matches a word by its address, its name or any of its host names, and each word may be found in a different one of them. Text with no operator is looked for as typed, as before. The longest text is now 200 characters.
+
 ## [v463] - 2026-10-18 — Ctrl-click several clients or domains
 
 ### Added

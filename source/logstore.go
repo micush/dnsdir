@@ -108,7 +108,7 @@ func startLogFile(dir string) {
 // LogQuery selects log lines.  Zero values mean "no filter"; Limit 0 means all.
 type LogQuery struct {
 	Level string        // minimum level: debug, info, warn, error
-	Text  string        // every word must appear (case-insensitive)
+	Text  string        // words that must appear, joined by AND / OR (case-insensitive); plain words are AND
 	Since time.Duration // only lines newer than now-Since
 	Limit int           // newest N matching lines
 }
@@ -166,7 +166,7 @@ func ReadLog(q LogQuery) (*LogResult, error) {
 	}
 	base := filepath.Join(logDir, logFileName)
 	res := &LogResult{Lines: []LogLine{}, File: base}
-	words := strings.Fields(strings.ToLower(q.Text))
+	expr := parseMatch(q.Text)
 	min := 0 // no level given: every line, debug included
 	if q.Level != "" {
 		min = levelRank(q.Level)
@@ -206,18 +206,8 @@ func ReadLog(q LogQuery) (*LogResult, error) {
 					continue
 				}
 			}
-			if len(words) > 0 {
-				low := strings.ToLower(ln.Raw)
-				ok := true
-				for _, w := range words {
-					if !strings.Contains(low, w) {
-						ok = false
-						break
-					}
-				}
-				if !ok {
-					continue
-				}
+			if len(expr) > 0 && !logMatches(expr, strings.ToLower(ln.Raw)) {
+				continue
 			}
 			res.Matched++
 			keep = append(keep, ln)
@@ -273,4 +263,27 @@ func logQueryFromArgs(level, text, since, n string) (LogQuery, error) {
 		q.Limit = v
 	}
 	return q, nil
+}
+
+// logMatches says whether a (lower-case) log line satisfies the filter: one of the OR alternatives must have all its AND
+// terms, and every word of a term must appear in the line (so plain words with no operator are all required, in any order).
+func logMatches(e matchExpr, line string) bool {
+	for _, group := range e {
+		all := true
+		for _, term := range group {
+			for _, w := range strings.Fields(term) {
+				if !strings.Contains(line, w) {
+					all = false
+					break
+				}
+			}
+			if !all {
+				break
+			}
+		}
+		if all {
+			return true
+		}
+	}
+	return false
 }

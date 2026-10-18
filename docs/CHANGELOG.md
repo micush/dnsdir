@@ -1,5 +1,10 @@
 # Changelog
 
+## [v470] - 2026-10-18 — Help: signing in with Active Directory
+
+### Changed
+- **Help (Users)**: a new *Active Directory* part with the steps (join, directory group `dnsdir-users`, Login groups, group policy mapping, checks). No other change.
+
 ## [v469] - 2026-10-18 — README: signing in with Active Directory
 
 ### Changed

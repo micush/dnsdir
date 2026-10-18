@@ -3750,16 +3750,16 @@
         h("div", { class: "hint qnote" }, o.note ? [o.note, " ", h("button", { class: "qlink", type: "button", onclick: o.onClear }, "Show all")] : "\u00a0"),
         h("div", { class: "body flush" }, rows.length
           ? h("div", { class: "scroll" }, h("table", { class: "qtop" + (withHost ? "" : " plain") }, h("thead", {}, h("tr", {}, h("th", {}, mine), h("th", { class: "num" }, "Queries"), h("th", { class: "num" }, "Share"))),
-            h("tbody", {}, rows.map((e) => h("tr", { class: e.name === o.picked ? "picked" : null,
+            h("tbody", {}, rows.map((e) => h("tr", { class: inPick(o.picked, e.name) ? "picked" : null,
               // right-click a domain: add a Policy-Based Resolution row for it
               oncontextmenu: e.name === "(others)" ? null : (ev) => (withHost ? clientMenu(ev, e.name, e) : domainMenu(ev, e.name)) },
               h("td", {}, e.name === "(others)" ? h("div", { class: "muted" }, e.name)
                 : (() => {
-                  const tail = withHost ? "\n\nClick: show what this client asked for" : "\n\nClick: show who asked for this domain";
+                  const tail = withHost ? "\n\nClick: show what this client asked for (Ctrl-click: add more clients)" : "\n\nClick: show who asked for this domain (Ctrl-click: add more domains)";
                   const head = withHost ? (e.hosts && e.hosts.length ? e.hosts.join("\n") : "No reverse DNS name known (yet)") : "";
-                  const b = h("button", { type: "button", class: "qlink mono", "data-name": e.name, "aria-pressed": e.name === o.picked ? "true" : "false",
+                  const b = h("button", { type: "button", class: "qlink mono", "data-name": e.name, "aria-pressed": inPick(o.picked, e.name) ? "true" : "false",
                     title: withHost ? head + tail : e.name + tail,   // a long domain is cut in the cell; the tooltip has all of it
-                    onclick: () => o.onPick(e.name === o.picked ? "" : e.name) }, e.name);
+                    onclick: (ev) => o.onPick(e.name, ev.ctrlKey || ev.metaKey) }, e.name);
                   const nd = withHost ? null : nameDecision(e.name);
                   const blk = withHost ? blockedBy(e.name) : null, lim = withHost ? limitedBy(e.name) : null;
                   const marks = withHost ? [
@@ -3785,8 +3785,19 @@
     const shareBase = (d) => { const k = Object.keys(KINDS).find((x) => KINDS[x] === sel); return k ? d.sums[k] : d.sums.total; };
     const kindLabel = (sep = " — ") => { const s = SERIES.find((x) => KINDS[x.key] === sel); return s ? sep + s.label : ""; };   // the donuts say "Query types — No Error", the top lists "Top Clients: No Error"
     // picking a client clears the domain and the other way round: one drill-down at a time
-    function pickC(c) { if (c === pickClient) return; pickClient = c; pickDomain = ""; load(); }
-    function pickD(n) { if (n === pickDomain) return; pickDomain = n; pickClient = ""; load(); }
+    // Ctrl-click (Cmd on a Mac) adds a row to what is picked, or takes it off again; the picks travel as a comma-separated list
+    function inPick(picked, name) { return !!picked && picked.split(",").includes(name); }
+    function pickText(picked) { const l = picked.split(","); return l.length > 3 ? l.length + " picked (" + l.slice(0, 2).join(", ") + ", …)" : l.join(", "); }
+    function togglePick(cur, name, add) {
+      if (name === "") return "";
+      const l = cur ? cur.split(",") : [];
+      if (!add) return l.length === 1 && l[0] === name ? "" : name;
+      const i = l.indexOf(name);
+      if (i >= 0) l.splice(i, 1); else l.push(name);
+      return l.join(",");
+    }
+    function pickC(c, add) { const v = togglePick(pickClient, c, add); if (v === pickClient) return; pickClient = v; pickDomain = ""; load(); }
+    function pickD(n, add) { const v = togglePick(pickDomain, n, add); if (v === pickDomain) return; pickDomain = v; pickClient = ""; load(); }
     function pick(kind) {
       const was = qpsView;
       qpsView = false;   // any other tile goes back to counting queries
@@ -3808,9 +3819,9 @@
       if (tk !== topKey) { topKey = tk; topPage = { c: 0, d: 0 }; }
       fill(tops, 
         topTable("Top Clients" + kindLabel(": "), d.clients, pickDomain ? sumOf(d.clients) : shareBase(d), true,
-          { picked: pickClient, onPick: pickC, note: pickDomain ? "Clients that asked for " + pickDomain : "", onClear: () => pickD("") }),
+          { picked: pickClient, onPick: pickC, note: pickDomain ? "Clients that asked for " + pickText(pickDomain) : "", onClear: () => pickD("") }),
         topTable("Top Domains" + kindLabel(": "), d.domains, pickClient ? sumOf(d.domains) : shareBase(d), false,
-          { picked: pickDomain, onPick: pickD, note: pickClient ? "Domains that " + pickClient + " asked for" : "", onClear: () => pickC("") }));
+          { picked: pickDomain, onPick: pickD, note: pickClient ? "Domains that " + pickText(pickClient) + " asked for" : "", onClear: () => pickC("") }));
       clear(cnote).append(...clusterNote(d.cluster));   // which nodes are added together, when the Node menu says Cluster
       foot.hidden = true;
     }

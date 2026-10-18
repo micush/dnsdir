@@ -1,5 +1,10 @@
 # Changelog
 
+## [v463] - 2026-10-18 — Ctrl-click several clients or domains
+
+### Added
+- **Statistics: Ctrl-click (Cmd-click on a Mac) adds more rows to a picked client or domain**: pick several clients and the list beside them shows what any of them asked for (counts added together); pick several domains and it shows who asked for any of them. Ctrl-click a picked row again to take it off; a plain click picks that row alone, and clicking the only picked row clears it. The picks travel as a comma-separated list in the existing `client` / `domain` parameters (up to 100), so the CLI takes the same.
+
 ## [v462] - 2026-10-18 — The whole list for a picked domain or client
 
 ### Changed

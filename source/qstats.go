@@ -591,15 +591,16 @@ func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
 		}
 	}
 	s.mu.Unlock()
-	if f.Client != "" || f.Domain != "" { // the pairs are on disk: read the units the slots above cover
+	cset, dset := pickSet(f.Client), pickSet(f.Domain)
+	if cset != nil || dset != nil { // the pairs are on disk: read the units the slots above cover
 		s.pairs.scan(from.Unix()/60/span*span/pairUnitMin, (to.Unix()/60/span+1)*span/pairUnitMin-1, func(kind int, c, name string, v uint32) {
 			if rcode != "" && qcNames[kind] != rcode {
 				return
 			}
-			if f.Client != "" && c == f.Client {
+			if cset[c] {
 				pairDomains[name] += uint64(v)
 			}
-			if f.Domain != "" && name == f.Domain {
+			if dset[name] {
 				pairClients[c] += uint64(v)
 			}
 		})
@@ -632,10 +633,10 @@ func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
 	add(protoNames[3], protos[3])
 	add("TCP", tcp-min(tcp, protos[2]+protos[3]))
 	if f.Client != "" {
-		domains = withRest(pairDomains, clients[f.Client])
+		domains = withRest(pairDomains, sumSet(clients, cset))
 	}
 	if f.Domain != "" {
-		clients = withRest(pairClients, domains[f.Domain])
+		clients = withRest(pairClients, sumSet(domains, dset))
 	}
 	nc, nd := qsKeepResult, qsKeepResult
 	if f.Domain != "" {
@@ -910,26 +911,85 @@ func keepMatching(m map[string]uint64, text string) map[string]uint64 {
 }
 
 // qstatsFilter checks and normalises the rcode, client and domain arguments of the API and CLI.
+// qsMaxPicked is the most clients (or domains) a filter may name: the page sends several when rows are Ctrl-clicked.
+const qsMaxPicked = 100
+
+// pickSet is the set of names in a filter's comma-separated list (nil for none).
+func pickSet(s string) map[string]bool {
+	if s == "" {
+		return nil
+	}
+	m := map[string]bool{}
+	for _, p := range strings.Split(s, ",") {
+		if p != "" {
+			m[p] = true
+		}
+	}
+	return m
+}
+
+// sumSet adds up what the counts hold for the names in the set.
+func sumSet(m map[string]uint64, set map[string]bool) uint64 {
+	var t uint64
+	for k := range set {
+		t += m[k]
+	}
+	return t
+}
+
+// cleanPicks checks each name of a comma-separated list with one, and returns the list without repeats.
+func cleanPicks(s string, one func(string) (string, error)) (string, error) {
+	var out []string
+	seen := map[string]bool{}
+	for _, p := range strings.Split(s, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		p, err := one(p)
+		if err != nil {
+			return "", err
+		}
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	if len(out) > qsMaxPicked {
+		return "", fmt.Errorf("at most %d names can be picked", qsMaxPicked)
+	}
+	return strings.Join(out, ","), nil
+}
+
 func qstatsFilter(rcode, client, domain string) (QFilter, error) {
 	var f QFilter
 	var err error
 	if f.Rcode, err = qstatsRcode(rcode); err != nil {
 		return f, err
 	}
-	client = strings.TrimSpace(client)
-	domain = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(domain), "."))
+	client, err = cleanPicks(client, func(c string) (string, error) {
+		if a, err := netip.ParseAddr(c); err == nil {
+			return a.Unmap().String(), nil
+		} else if c != "unknown" {
+			return "", fmt.Errorf("%q is not a client address", c)
+		}
+		return c, nil
+	})
+	if err != nil {
+		return f, err
+	}
+	domain, err = cleanPicks(domain, func(n string) (string, error) {
+		n = strings.ToLower(strings.TrimSuffix(n, "."))
+		if len(n) > 255 || strings.ContainsAny(n, " \t\r\n") {
+			return "", fmt.Errorf("%q is not a domain name", n)
+		}
+		return n, nil
+	})
+	if err != nil {
+		return f, err
+	}
 	if client != "" && domain != "" {
 		return f, fmt.Errorf("pick a client or a domain, not both")
-	}
-	if client != "" {
-		if a, err := netip.ParseAddr(client); err == nil {
-			client = a.Unmap().String()
-		} else if client != "unknown" {
-			return f, fmt.Errorf("%q is not a client address", client)
-		}
-	}
-	if len(domain) > 255 || strings.ContainsAny(domain, " \t\r\n") {
-		return f, fmt.Errorf("%q is not a domain name", domain)
 	}
 	f.Client, f.Domain = client, domain
 	return f, nil

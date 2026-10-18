@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"regexp"
 	"sort"
 	"strconv"
@@ -77,11 +78,50 @@ func validUserName(u string) bool {
 	return true
 }
 
-func (m *Mgmt) guiGroup() string {
-	if p := m.webPolicy.Load(); p != nil && p.Group != "" {
-		return p.Group
+// validAccountName is what the group page accepts for an account that already exists, which may come from a directory
+// (sssd: Active Directory, LDAP): upper-case letters, "." "@" and "\\" are common there.  It never holds what would break
+// a line of /etc/group.
+func validAccountName(u string) bool {
+	if u == "" || len(u) > 64 {
+		return false
 	}
-	return "dnsdir"
+	for i, c := range []byte(u) {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c == '_':
+		case (c >= '0' && c <= '9' || c == '-' || c == '.' || c == '@' || c == '\\') && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// usersLookup says whether the name system (NSS: files, sssd, ...) knows the account (replaceable in tests).
+var usersLookup = func(name string) bool {
+	_, err := user.Lookup(name)
+	return err == nil
+}
+
+// guiGroup is the local group the Users page manages: the first of the login groups (a comma-separated list; the
+// later ones may be directory groups, which are managed in the directory) that is in /etc/group, else the first one.
+func (m *Mgmt) guiGroup() string {
+	list := splitGroups("dnsdir")
+	if p := m.webPolicy.Load(); p != nil && p.Group != "" {
+		list = splitGroups(p.Group)
+	}
+	if len(list) == 0 {
+		return "dnsdir"
+	}
+	if b, err := os.ReadFile(usersGroupFile); err == nil {
+		for _, g := range list { // keep the order of the setting when several are local
+			for _, l := range strings.Split(string(b), "\n") {
+				if name, _, _ := strings.Cut(l, ":"); name == g {
+					return g
+				}
+			}
+		}
+	}
+	return list[0]
 }
 
 // groupMembers lists the members of the group: the names on its line in
@@ -120,7 +160,11 @@ func groupMembers(group string) []string {
 	return out
 }
 
-func userExists(name string) bool {
+// userExists: the account is known to this machine, in /etc/passwd or in a directory.
+func userExists(name string) bool { return localAccount(name) || usersLookup(name) }
+
+// localAccount: the account is in /etc/passwd, so the tools of shadow-utils can manage it.
+func localAccount(name string) bool {
 	b, err := os.ReadFile(usersPasswdFile)
 	if err != nil {
 		return false
@@ -364,7 +408,11 @@ func (m *Mgmt) usersFan(msg usersMsg, done string) (string, bool) {
 // usersPeer applies a change that another member sent.
 func (m *Mgmt) usersPeer(msg usersMsg, by string) error {
 	name := msg.Name
-	if !validUserName(name) || name == "root" {
+	okName := validUserName(name)
+	if msg.Op == "grant" || msg.Op == "revoke" {
+		okName = validAccountName(name)
+	}
+	if !okName || name == "root" {
 		return errors.New("invalid user name")
 	}
 	switch msg.Op {
@@ -477,6 +525,12 @@ func (m *Mgmt) createUser(name string, expires int64) error {
 }
 
 func (m *Mgmt) addToGroup(name string) error {
+	if !localAccount(name) { // a directory account: usermod does not know it, gpasswd does
+		if out, err := usersRun("", "gpasswd", "-a", name, m.guiGroup()); err != nil {
+			return fmt.Errorf("gpasswd failed: %s", firstNonEmpty(out, err.Error()))
+		}
+		return nil
+	}
 	if out, err := usersRun("", "usermod", "-aG", m.guiGroup(), name); err != nil {
 		return fmt.Errorf("usermod failed: %s", firstNonEmpty(out, err.Error()))
 	}
@@ -533,11 +587,11 @@ func (m *Mgmt) UserAdd(name, password string, expires int64, actor string) (stri
 // password it already has.  On the other nodes the account is added to the group when it exists there and created
 // with the same password hash when it does not.
 func (m *Mgmt) UserGrant(name, actor string) (string, bool, error) {
-	if !validUserName(name) || name == "root" {
+	if !validAccountName(name) || name == "root" {
 		return "", false, errors.New("invalid user name")
 	}
 	if !userExists(name) {
-		return "", false, fmt.Errorf("there is no account called %q on this machine; use Add user to create one", name)
+		return "", false, fmt.Errorf("there is no account called %q on this machine; use Add user to create a local one", name)
 	}
 	if m.memberOf(name) {
 		return "", false, fmt.Errorf("%q is already in the %s group", name, m.guiGroup())
@@ -581,7 +635,7 @@ func (m *Mgmt) UserRevoke(name, actor string) (string, bool, error) {
 
 // UserPassword sets a member's password on every node.
 func (m *Mgmt) UserPassword(name, password, actor string) (string, bool, error) {
-	if err := m.requireMember(name); err != nil {
+	if err := m.requireLocalMember(name); err != nil {
 		return "", false, err
 	}
 	if err := m.checkPassword(password); err != nil {
@@ -598,7 +652,7 @@ func (m *Mgmt) UserPassword(name, password, actor string) (string, bool, error) 
 
 // UserExpiry sets (or, with 0, clears) the date an account stops working, on every node.
 func (m *Mgmt) UserExpiry(name string, expires int64, actor string) (string, bool, error) {
-	if err := m.requireMember(name); err != nil {
+	if err := m.requireLocalMember(name); err != nil {
 		return "", false, err
 	}
 	if err := m.setExpiry(name, expires); err != nil {
@@ -624,7 +678,7 @@ func (m *Mgmt) UserDelete(name, actor string) (string, bool, error) {
 		msg, partial := m.usersFan(usersMsg{Op: "delete", Name: name, By: actor}, "There is no account "+name+" on this node.")
 		return msg, partial, nil
 	}
-	if err := m.requireMember(name); err != nil {
+	if err := m.requireLocalMember(name); err != nil {
 		return "", false, err
 	}
 	if name == actor {
@@ -653,8 +707,20 @@ func (m *Mgmt) countMembers() int {
 	return n
 }
 
+// requireLocalMember is requireMember for a change that only a local account can take: a password or an expiry date, or
+// deleting the account.  A directory account's are kept in the directory.
+func (m *Mgmt) requireLocalMember(name string) error {
+	if err := m.requireMember(name); err != nil {
+		return err
+	}
+	if !localAccount(name) {
+		return fmt.Errorf("%q is a directory account (not in /etc/passwd): its password and expiry are kept in the directory; remove it from the group to stop it signing in", name)
+	}
+	return nil
+}
+
 func (m *Mgmt) requireMember(name string) error {
-	if !validUserName(name) {
+	if !validAccountName(name) {
 		return errors.New("invalid user name")
 	}
 	if !m.memberOf(name) {

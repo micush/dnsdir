@@ -2137,7 +2137,7 @@
   ];
   const WEB_FIELDS = [
     { k: "listen", l: "Listen address", t: "port", hint: "the port, default 53853 (all addresses); to listen on one address only, write it with the port: 10.0.0.1:53853" },
-    { k: "group", l: "Login group", t: "text" },
+    { k: "group", l: "Login groups", t: "text", hint: "one or more, separated by commas: a member of any may sign in. The first one that is a local group is the one the Users page manages; the others can be directory (Active Directory) groups" },
     { k: "pam_service", l: "PAM service", t: "text" },
     { k: "session_idle_minutes", l: "Session idle timeout (min)", t: "int", min: 1 },
     { k: "max_failed_logins", l: "Failed logins before lockout", t: "int", min: 1 },
@@ -4796,11 +4796,11 @@
         return;
       }
       if (mode === "existing") {
-        const who = h("input", { type: "text", list: "users-others", autocomplete: "off", spellcheck: "false", autocapitalize: "none", maxlength: "32" });
+        const who = h("input", { type: "text", list: "users-others", autocomplete: "off", spellcheck: "false", autocapitalize: "none", maxlength: "64" });
         const grant = () => call("grant", { username: who.value.trim() }, () => { sel = who.value.trim(); mode = "user"; });
         who.addEventListener("keydown", (e) => { if (e.key === "Enter") grant(); });
         detail.append(h("header", {}, h("h2", {}, tc("Add an existing account"))), h("div", { class: "body" },
-          h("p", { class: "muted small" }, "An account that already exists on this host can be allowed to sign in here by adding it to the " + group + " group."),
+          h("p", { class: "muted small" }, "An account that already exists on this host, including one from a directory (Active Directory, LDAP through sssd), can be allowed to sign in here by adding it to the " + group + " group. A directory account keeps its password in the directory."),
           h("div", { class: "grid c3" }, h("label", { class: "f" }, "Name", who, otherList)),
           h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "button", onclick: grant }, "Add to group"))));
         who.focus();

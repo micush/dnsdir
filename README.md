@@ -585,6 +585,15 @@ cp contrib/pam.d/dnsdir.debian /etc/pam.d/dnsdir     # or dnsdir.rhel
 
 Without `/etc/pam.d/dnsdir`, PAM falls back to its `other` policy, which usually denies everything. The help panel has a **Find** box at its top: every match in the page's help is marked, Enter goes to the next one (Shift+Enter the one before) and Esc empties the box. `root` is not special: add it to the group if you want it to log in. Removing a user from the group ends their session within a minute.
 
+**Active Directory users (sssd).** A node joined to a Samba or Windows AD domain with `realm join` signs AD users in through the same PAM service; the group (`dnsdir`) can be an AD group of that name, and no local copy of it should exist on the node. sssd enforces the domain's group policy on every PAM service it knows no logon right for, and `dnsdir` is one of those: the password is accepted and the account step then fails with `pam account check (password accepted): Permission denied`, even though ssh works. Map the service in the domain's section of `/etc/sssd/sssd.conf`, then `systemctl restart sssd`:
+
+```
+[domain/example.com]
+ad_gpo_map_interactive = +dnsdir
+```
+
+The daemon adds the line itself at start when it finds it missing (it keeps the old file as `sssd.conf.dnsdir.bak` and restarts sssd); a domain defined only in a `conf.d` snippet is left alone and the log says what to add. The Users page can then add an AD account to the local `dnsdir` group (**Add an existing account**) if you do not keep the group in AD.
+
 The PAM binding uses cgo, so build natively with `libpam0g-dev` (Debian and Ubuntu) or `pam-devel` (RHEL) installed. A build without cgo, including any cross-compile, has no PAM, so it **refuses to start the GUI** rather than serve it unauthenticated. The daemon and the command line work normally.
 
 ### Which page does what

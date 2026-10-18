@@ -24,10 +24,11 @@ func usersFixture(t *testing.T, group, passwd, shadow string) (*Mgmt, *[]usersCa
 		}
 		return p
 	}
-	oldG, oldP, oldS, oldR, oldN, oldSh := usersGroupFile, usersPasswdFile, usersShadowFile, usersRun, usersNow, nologinShells
+	oldG, oldP, oldS, oldR, oldN, oldSh, oldL := usersGroupFile, usersPasswdFile, usersShadowFile, usersRun, usersNow, nologinShells, usersLookup
 	t.Cleanup(func() {
-		usersGroupFile, usersPasswdFile, usersShadowFile, usersRun, usersNow, nologinShells = oldG, oldP, oldS, oldR, oldN, oldSh
+		usersGroupFile, usersPasswdFile, usersShadowFile, usersRun, usersNow, nologinShells, usersLookup = oldG, oldP, oldS, oldR, oldN, oldSh, oldL
 	})
+	usersLookup = func(string) bool { return false } // no directory unless a test makes one
 	usersGroupFile, usersPasswdFile, usersShadowFile = w("group", group), w("passwd", passwd), w("shadow", shadow)
 	nologinShells = []string{"/definitely/missing", "/bin/false"}
 	usersNow = func() time.Time { return time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC) }
@@ -425,5 +426,37 @@ func TestPeerGrantAndRevoke(t *testing.T) {
 	*calls = nil
 	if err := m.usersPeer(usersMsg{Op: "revoke", Name: "dave"}, "x"); err != nil || len(*calls) != 0 {
 		t.Fatalf("revoking a non-member is a no-op: %v %+v", err, *calls)
+	}
+}
+
+func TestUserGrantDirectoryAccount(t *testing.T) {
+	m, calls := usersFixture(t, fxGroup, fxPasswd, "")
+	usersLookup = func(n string) bool { return n == "Mcc.Smith" || n == "EX\\bob" }
+	if _, _, err := m.UserGrant("Mcc.Smith", "alice"); err != nil {
+		t.Fatalf("grant of a directory account: %v", err)
+	}
+	if len(*calls) != 1 || (*calls)[0].name != "gpasswd" || strings.Join((*calls)[0].args, " ") != "-a Mcc.Smith "+m.guiGroup() {
+		t.Fatalf("a directory account is added with gpasswd: %+v", *calls)
+	}
+	if _, _, err := m.UserGrant("EX\\bob", "alice"); err != nil {
+		t.Fatalf("domain\\name: %v", err)
+	}
+	for _, bad := range []string{"a:b", "a,b", "a b", "x\ny", "-a", "nobody-here"} {
+		if _, _, err := m.UserGrant(bad, "alice"); err == nil {
+			t.Errorf("%q should be refused", bad)
+		}
+	}
+	// a directory account's password and expiry are not ours to change, even once it is in the group
+	b, _ := os.ReadFile(usersGroupFile)
+	os.WriteFile(usersGroupFile, []byte(strings.Replace(string(b), "alice,bob", "alice,bob,Mcc.Smith", 1)), 0o600)
+	*calls = nil
+	if _, _, err := m.UserPassword("Mcc.Smith", "longenough-pw1", "alice"); err == nil || !strings.Contains(err.Error(), "directory account") {
+		t.Fatalf("password: %v", err)
+	}
+	if _, _, err := m.UserExpiry("Mcc.Smith", 0, "alice"); err == nil || len(*calls) != 0 {
+		t.Fatalf("expiry: %v %+v", err, *calls)
+	}
+	if _, _, err := m.UserRevoke("Mcc.Smith", "alice"); err != nil {
+		t.Fatalf("revoke: %v", err)
 	}
 }

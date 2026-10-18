@@ -193,8 +193,8 @@ const DNSDIR_HELP = {
       ["h", "Web GUI"],
       ["fields", [
         ["Listen address", "The port the GUI listens on, default `53853`, on every address; to listen on one address only, write it with the port, such as `10.0.0.5:53853` (saved as `listen` in the `web` block, where a bare port is kept as `:53853`). Changing it restarts the GUI and logs everyone out, so you are asked to confirm."],
-        ["Login group", "The operating-system group whose members may sign in (default `dnsdir`)."],
-        ["PAM service", "The `/etc/pam.d` service that checks passwords (default `dnsdir`)."],
+        ["Login groups", "The operating-system groups whose members may sign in: one name or several separated by commas (default `dnsdir,dnsdir-users`). A member of any of them may sign in. The first one that is a local group is the one the Users page manages; `dnsdir-users` is meant for a group in Active Directory (or another directory, through sssd), which is kept there. A name that does not exist on a node is skipped. An existing setting is not changed by an update."],
+        ["PAM service", "The `/etc/pam.d` service that checks passwords (default `dnsdir`). AD users through sssd: if the password is accepted but the log says `pam account check`, the daemon adds `ad_gpo_map_interactive = +dnsdir` to the domain section of `sssd.conf` itself at start (and restarts sssd); if it could not, add it yourself."],
         ["Session idle timeout (min)", "From 1, default 30. A browser is signed out after this many idle minutes."],
         ["Failed logins before lockout", "1–1000, default 3. Wrong attempts, within the window below, that lock out that address, and that address together with that user name. A user name alone is never locked out, so nobody can lock an administrator out by failing logins for that name."],
         ["…within this many minutes", "From 1, default 1. The window in which the failed logins are counted."],

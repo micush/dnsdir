@@ -1,5 +1,21 @@
 # Changelog
 
+## [v468] - 2026-10-18 — Several login groups: a local one and a directory one
+
+### Changed
+- **Login group takes a list**: `web.group` (Configure ▸ Web ▸ Login groups) may name several groups separated by commas, and a member of any of them may sign in. The default for a new configuration is `dnsdir,dnsdir-users`: `dnsdir` is the local group the Users page manages and `dnsdir-users` is meant for a group in Active Directory, so the directory group cannot be hidden by a local group of the same name. A group that does not exist on a node is skipped (the log warns only when none exists). The Users page, the command line and the installer keep working with the first login group that is local. An existing configuration is not changed.
+
+## [v467] - 2026-10-18 — sssd.conf is fixed at start; directory accounts can be added to the group
+
+### Added
+- **The daemon now adds the mapping to sssd.conf itself**: at start (and whenever the web listener is set up again) it checks sssd.conf and, when an AD domain enforces group policy and has no mapping for the PAM service, adds `ad_gpo_map_interactive = +dnsdir` to that domain's section (an existing line gets `, +dnsdir` appended), keeps the old file as `sssd.conf.dnsdir.bak` (once) and runs `systemctl try-restart sssd`. A node where it is already mapped, or has no sssd, or has a domain that is not AD, is left alone; a domain defined only in a `conf.d` snippet is not edited and the log says what to add. The file keeps its owner and mode.
+- **Users: an account from a directory can be added to the group**: "Add an existing account" accepts Active Directory / LDAP names (upper case, dots, `@`, `DOMAIN\\name`) and adds them to the local dnsdir group with `gpasswd -a`, which works where `usermod` refused them; the other nodes do the same. Such an account's password and expiry are kept in the directory, so those buttons refuse it with a message; Remove from the group works as for any account.
+
+## [v466] - 2026-10-18 — Active Directory logins through sssd: the daemon now says what is wrong
+
+### Added
+- **A GUI login of an Active Directory user (Samba AD, Windows AD, `realm join`) failed with "pam: Permission denied" although ssh worked**: sssd enforces the domain's group policy and refuses a PAM service it has no logon right for, which includes `dnsdir`. The log now tells the two PAM steps apart (`authentication failed: pam account check (password accepted): ...` means the password was right and the account was refused), and when sssd.conf shows an AD domain with enforced group policy and no mapping for the service, the daemon says so at start and on the failed login, with the line to add: `ad_gpo_map_interactive = +dnsdir` in the domain's section, then restart sssd. The README and the help (Settings, PAM service) have the same advice. Nothing in sssd.conf is changed by the daemon.
+
 ## [v465] - 2026-10-18 — AND and OR in the Log filter
 
 ### Changed

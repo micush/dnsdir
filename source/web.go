@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -59,10 +60,6 @@ func (sysAuth) Authenticate(service, user, password string) error {
 }
 
 func (sysAuth) InGroup(username, group string) (bool, error) {
-	g, err := user.LookupGroup(group)
-	if err != nil {
-		return false, err
-	}
 	u, err := user.Lookup(username)
 	if err != nil {
 		return false, err
@@ -71,12 +68,38 @@ func (sysAuth) InGroup(username, group string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	have := map[string]bool{}
 	for _, id := range gids {
-		if id == g.Gid {
+		have[id] = true
+	}
+	known := 0
+	for _, name := range splitGroups(group) {
+		g, err := user.LookupGroup(name)
+		if err != nil {
+			continue // a group that does not exist here (the directory one on a node without a directory) is just empty
+		}
+		known++
+		if have[g.Gid] {
 			return true, nil
 		}
 	}
+	if known == 0 {
+		return false, fmt.Errorf("none of the groups %q exists on this machine", group)
+	}
 	return false, nil
+}
+
+// splitGroups is the login group setting as a list: names separated by commas (or spaces), without repeats.
+func splitGroups(s string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, g := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
+		if !seen[g] {
+			seen[g] = true
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 type session struct {
@@ -211,9 +234,21 @@ func (w *WebServer) Apply(cfg WebConfig) {
 }
 
 func (w *WebServer) sanityWarnings(cfg WebConfig) {
-	if _, err := user.LookupGroup(cfg.Group); err != nil {
-		warnf("web: group %q does not exist — nobody can log in. Create it and add users: groupadd %s; usermod -aG %s <user>",
-			cfg.Group, cfg.Group, cfg.Group)
+	found := 0
+	for _, g := range splitGroups(cfg.Group) {
+		if _, err := user.LookupGroup(g); err == nil {
+			found++
+		}
+	}
+	if found == 0 {
+		g := splitGroups(cfg.Group)[0]
+		warnf("web: none of the login groups %q exists — nobody can log in. Create one and add users: groupadd %s; usermod -aG %s <user>",
+			cfg.Group, g, g)
+	}
+	if msg, err := fixSSSD(cfg.PAMService); err != nil {
+		warnf("web: %v", err)
+	} else if msg != "" {
+		infof("web: sssd: %s", msg)
 	}
 	if _, err := os.Stat("/etc/pam.d/" + cfg.PAMService); err != nil {
 		warnf("web: /etc/pam.d/%s not found — PAM will fall back to its 'other' policy, which usually denies every login (see contrib/pam.d/)", cfg.PAMService)
@@ -669,6 +704,11 @@ func (w *WebServer) handleLogin(rw http.ResponseWriter, r *http.Request) {
 	default:
 		if err := w.auth.Authenticate(pol.PAMService, req.Username, req.Password); err != nil {
 			reason = "authentication failed: " + err.Error()
+			if strings.HasPrefix(err.Error(), "pam account check") {
+				if msg := sssdGPOProblem(pol.PAMService); msg != "" {
+					reason += " (" + msg + ")"
+				}
+			}
 		} else if ok, err := w.auth.InGroup(req.Username, pol.Group); err != nil {
 			reason = "group lookup failed: " + err.Error()
 		} else if !ok {

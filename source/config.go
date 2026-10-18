@@ -1257,7 +1257,8 @@ type WebConfig struct {
 	// auto-generated self-signed certificate stored next to the config file.
 	CertFile string `json:"cert_file"`
 	KeyFile  string `json:"key_file"`
-	// Group is the system group whose members may log in.
+	// Group is the system group whose members may log in: one name, or several separated by commas (the default is the
+	// local group and a group of the same name with "-users" for a directory such as Active Directory).
 	Group string `json:"group"`
 	// PAMService is the /etc/pam.d service used to check passwords.
 	PAMService string `json:"pam_service"`
@@ -1292,7 +1293,7 @@ func (w WebConfig) minPassword() int {
 func defaultWeb() WebConfig {
 	return WebConfig{
 		Listen:                   fmt.Sprintf(":%d", defaultWebPort),
-		Group:                    "dnsdir",
+		Group:                    "dnsdir,dnsdir-users",
 		PAMService:               "dnsdir",
 		SessionIdleMinutes:       30,
 		MaxFailedLogins:          3,

@@ -46,14 +46,15 @@ fail:
 
 // Returns a PAM status code; PAM_SUCCESS only if the user authenticated and
 // the account is valid (not expired/locked).
-static int dnsdir_pam_auth(const char *service, const char *user, const char *pass) {
+static int dnsdir_pam_auth(const char *service, const char *user, const char *pass, int *stage) {
 	struct dnsdir_cred c = { pass };
 	struct pam_conv conv = { dnsdir_conv, &c };
 	pam_handle_t *h = NULL;
 	int rc = pam_start(service, user, &conv, &h);
 	if (rc != PAM_SUCCESS) return rc;
+	*stage = 0;
 	rc = pam_authenticate(h, PAM_DISALLOW_NULL_AUTHTOK);
-	if (rc == PAM_SUCCESS) rc = pam_acct_mgmt(h, PAM_DISALLOW_NULL_AUTHTOK);
+	if (rc == PAM_SUCCESS) { *stage = 1; rc = pam_acct_mgmt(h, PAM_DISALLOW_NULL_AUTHTOK); }
 	pam_end(h, rc);
 	return rc;
 }
@@ -87,7 +88,11 @@ func pamAuthenticate(service, user, password string) error {
 		C.memset(unsafe.Pointer(cp), 0, C.size_t(len(password)))
 		C.free(unsafe.Pointer(cp))
 	}()
-	if rc := C.dnsdir_pam_auth(cs, cu, cp); rc != C.PAM_SUCCESS {
+	var stage C.int
+	if rc := C.dnsdir_pam_auth(cs, cu, cp, &stage); rc != C.PAM_SUCCESS {
+		if stage == 1 { // the password was accepted: the account is what was refused
+			return errors.New("pam account check (password accepted): " + C.GoString(C.pam_strerror(nil, rc)))
+		}
 		return errors.New("pam: " + C.GoString(C.pam_strerror(nil, rc)))
 	}
 	return nil

@@ -585,16 +585,64 @@ cp contrib/pam.d/dnsdir.debian /etc/pam.d/dnsdir     # or dnsdir.rhel
 
 Without `/etc/pam.d/dnsdir`, PAM falls back to its `other` policy, which usually denies everything. The help panel has a **Find** box at its top: every match in the page's help is marked, Enter goes to the next one (Shift+Enter the one before) and Esc empties the box. `root` is not special: add it to the group if you want it to log in. Removing a user from the group ends their session within a minute.
 
-**Active Directory users (sssd).** A node joined to a Samba or Windows AD domain with `realm join` signs AD users in through the same PAM service; the group (`dnsdir`) can be an AD group of that name, and no local copy of it should exist on the node. sssd enforces the domain's group policy on every PAM service it knows no logon right for, and `dnsdir` is one of those: the password is accepted and the account step then fails with `pam account check (password accepted): Permission denied`, even though ssh works. Map the service in the domain's section of `/etc/sssd/sssd.conf`, then `systemctl restart sssd`:
+For Active Directory (or any directory that sssd serves), see [Signing in with Active Directory](#signing-in-with-active-directory) below.
+
+The PAM binding uses cgo, so build natively with `libpam0g-dev` (Debian and Ubuntu) or `pam-devel` (RHEL) installed. A build without cgo, including any cross-compile, has no PAM, so it **refuses to start the GUI** rather than serve it unauthenticated. The daemon and the command line work normally.
+
+### Signing in with Active Directory
+
+Accounts do not have to be local. A node that is joined to an Active Directory domain (Samba AD or Windows AD) with sssd sees the domain's users and groups through the operating system, and dnsdir signs them in through the same PAM service as a local user: it has no LDAP code of its own and stores no directory password. Tested with a Samba AD domain controller and `realm join`. Do the steps on **every** node: the login groups are a per-node setting, and each node must be joined.
+
+**1. Join the node to the domain.** The node needs DNS that can find the domain controller, and a clock within five minutes of it.
 
 ```
-[domain/example.com]
+# Debian / Ubuntu
+apt install realmd sssd sssd-ad adcli sssd-tools krb5-user libpam-sss libnss-sss pamtester
+# RHEL / Rocky / Alma
+dnf install realmd sssd adcli oddjob-mkhomedir krb5-workstation samba-common-tools pamtester
+
+realm discover example.com
+realm join -U Administrator example.com
+```
+
+**2. Settings in `/etc/sssd/sssd.conf`**, in the `[domain/example.com]` section that `realm join` made, then `systemctl restart sssd`:
+
+```
+use_fully_qualified_names = False      # sign in as  alice,  not  alice@example.com
+fallback_homedir = /nonexistent        # these accounts only sign in here
+default_shell = /sbin/nologin
+```
+
+**3. Make a group in the directory.** Create a group called `dnsdir-users` in Active Directory and put the people who may sign in in it. Give it a different name from the local `dnsdir` group the installer creates: the local group is looked up first, so a directory group with the same name would be hidden by it and its members could not sign in.
+
+The **Login groups** setting (Configure ▸ Web, or `web.group` in `dnsdir.conf`) takes several groups separated by commas; a member of any of them may sign in, and a group that does not exist on a node is skipped. A new installation has `dnsdir,dnsdir-users`: the local group, which the Users page manages, and the directory group, which is managed in the directory. An existing configuration is not changed by an update, so set it once on each node. The setting is live; people who are not in a listed group are signed out within a minute.
+
+**4. Group policy.** sssd applies the domain's group policy (GPO) at the account step of PAM and refuses every PAM service that has no logon right, and `dnsdir` is not one it knows: the password is accepted and the sign-in still fails with `pam account check (password accepted): Permission denied`, even though ssh works. When the daemon starts it looks for this, and if it finds an AD domain in `sssd.conf` that enforces group policy without a mapping for its PAM service it adds the line below to that domain's section, keeps the old file as `sssd.conf.dnsdir.bak` (once) and restarts sssd:
+
+```
 ad_gpo_map_interactive = +dnsdir
 ```
 
-The daemon adds the line itself at start when it finds it missing (it keeps the old file as `sssd.conf.dnsdir.bak` and restarts sssd); a domain defined only in a `conf.d` snippet is left alone and the log says what to add. The Users page can then add an AD account to the local `dnsdir` group (**Add an existing account**) if you do not keep the group in AD.
+dnsdir and ntpdir on the same host each add their own item to the same line. A domain that is defined only in a `conf.d` snippet is not edited; the log says what to add. A domain with `ad_gpo_access_control` set to `permissive` or `disabled`, or one that is not Active Directory, needs nothing.
 
-The PAM binding uses cgo, so build natively with `libpam0g-dev` (Debian and Ubuntu) or `pam-devel` (RHEL) installed. A build without cgo, including any cross-compile, has no PAM, so it **refuses to start the GUI** rather than serve it unauthenticated. The daemon and the command line work normally.
+**5. Check from the shell** before the GUI:
+
+```
+sss_cache -E
+id alice                                   # lists dnsdir-users
+getent group dnsdir-users                    # lists its members
+pamtester dnsdir alice authenticate acct_mgmt  # both steps must succeed
+```
+
+Then sign in with the name `id` prints (`alice` with the setting above). When it does not work, the reason is in the log (`journalctl -u dnsdir | grep 'login failed'`); the login page gives one message for every cause:
+
+| The log says | Meaning |
+|---|---|
+| `authentication failed: pam: Authentication failure` | wrong password, or the PAM service file `/etc/pam.d/dnsdir` does not use sssd |
+| `authentication failed: pam account check (password accepted): Permission denied` | sssd refused the service: group policy (step 4), `simple_allow_groups`, or an `ldap_access_filter` |
+| `group lookup failed` / `not a member of group` | the user or the group is not visible to the operating system: look at `id` and `getent group`, and remember that sssd caches (`sss_cache -E`) |
+
+A directory account keeps its password and expiry date in the directory. **Add an existing account…** on the Users page can still add one by name to the local group (instead of using a directory group); the password and expiry buttons then refuse it, and Disable removes it from the group as for any account. Changes to a person's groups in the directory take effect when sssd's cache refreshes; a session that is open is re-checked about once a minute.
 
 ### Which page does what
 

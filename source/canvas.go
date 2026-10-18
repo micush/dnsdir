@@ -102,6 +102,9 @@ type CanvasGateway struct {
 // CanvasMember is one cluster node currently serving the gateway: it holds an
 // address-forwarding slot (AFN) and is still sending hellos.
 type CanvasMember struct {
+	// ViaLocal marks the entry of the node whose picture this is, in a gateway the signed-in node does not serve (Local is
+	// cleared there, as it would point at the signed-in node)
+	ViaLocal bool `json:"via_local,omitempty"`
 	IP    string `json:"ip"`
 	Local bool   `json:"local"`
 	AGC   bool   `json:"agc"`

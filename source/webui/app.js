@@ -659,7 +659,7 @@
       if (v) for (const x of v.servers) servers[x.addr] = x;
       const fams = {};
       if (v) for (const f of v.families || []) fams[f.af] = f;
-      const members = v ? v.members || [] : [];
+      const members = (v ? v.members || [] : []).map((m) => (m.via_local ? { ...m, via_addr: v.via_addr } : m));   // the serving node's own entry says which node it is
       let circle = v ? v.status : "idle", why = v ? v.detail : "Starting — not running yet";
       // what is staged wins over the last live view, so the pause / resume shows at once
       const via = !!(v && v.via);   // this node does not serve the gateway: the picture is that of a node that does, so nothing local colours it
@@ -1493,10 +1493,12 @@
     };
     // Make controller is greyed on the node that already holds the role for every gateway it is a member of.  A member is
     // matched to a node by its address on the gateway's subnet (this node's own member is marked local).
+    // the node whose picture a gateway shows when the signed-in node does not serve it: its own member is flagged via_local
+    const viaAddr = (m) => m.via_addr || "";
     const isController = (n, all) => {  // all: holds the role for every gateway (else: for at least one)
       const ips = new Set((n.addrs || []).flatMap((i) => [...(i.v4 || []), ...(i.v6 || [])].map((x) => String(x).split("/")[0])));
       const withMembers = groups().map((g) => statusOf(g).members || []).filter((ms) => ms.length);
-      const isIt = (m) => (m.local ? n.self : ips.has(m.ip));
+      const isIt = (m) => (m.via_local ? n.addr === viaAddr(m) : m.local ? n.self : ips.has(m.ip));
       const has = (ms) => ms.some((m) => m.agc && isIt(m));
       // all: for every gateway this node is a member of (one it is not on, another subnet, never gives it the role)
       const mine = withMembers.filter((ms) => ms.some(isIt));
@@ -1506,7 +1508,7 @@
     // gateway's IPv4 controller is another node (so the drawing can tell the two apart), "" otherwise (the plain dot).
     const controllerKind = (n) => {
       const ips = new Set((n.addrs || []).flatMap((i) => [...(i.v4 || []), ...(i.v6 || [])].map((x) => String(x).split("/")[0])));
-      const isIt = (m) => (m.local ? n.self : ips.has(m.ip));
+      const isIt = (m) => (m.via_local ? n.addr === viaAddr(m) : m.local ? n.self : ips.has(m.ip));
       let v6 = false;
       for (const g of groups()) {
         const ms = statusOf(g).members || [];

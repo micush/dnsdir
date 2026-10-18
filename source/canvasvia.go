@@ -58,6 +58,7 @@ func (g *CanvasGateway) takeFrom(p CanvasGateway, from CanvasNode) {
 	g.Members = make([]CanvasMember, len(p.Members))
 	copy(g.Members, p.Members)
 	for i := range g.Members {
+		g.Members[i].ViaLocal = g.Members[i].Local
 		g.Members[i].Local = false
 	}
 	g.Via, g.ViaAddr = from.Name, from.Addr

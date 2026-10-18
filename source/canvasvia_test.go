@@ -120,7 +120,7 @@ func TestTakeFromClearsLocalOnMembers(t *testing.T) {
 			t.Errorf("%s still local", m.IP)
 		}
 	}
-	if !mine.Members[0].AGC || !theirs.Members[0].Local {
+	if !mine.Members[0].AGC || !theirs.Members[0].Local || !mine.Members[0].ViaLocal || mine.Members[1].ViaLocal {
 		t.Errorf("the controller flag must stay, and the serving node's own copy must not change: %+v %+v", mine.Members, theirs.Members)
 	}
 }

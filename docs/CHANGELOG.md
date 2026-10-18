@@ -1,5 +1,11 @@
 # Changelog
 
+## [v462] - 2026-10-18 — The whole list for a picked domain or client
+
+### Changed
+- **Picking a domain in Top Domains (or a client in Top Clients) lists up to 5000 entries, not 500.** The pairs are on disk since v461, so the lists can be that long; the ordinary top lists stay at 500. In a cluster each node sends up to 5000 and the merged list keeps 5000.
+- Names (reverse DNS) are looked up for the first 500 rows only, so a long list does not queue lookups for minutes; the rest show their names once they are known from the lookups of other lists.
+
 ## [v461] - 2026-10-18 — Who asked for what is kept on disk, all of it
 
 ### Changed

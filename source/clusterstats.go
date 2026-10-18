@@ -418,7 +418,14 @@ func mergeQStats(parts []clusterPart[QStatsResult], infos []ClusterNodeInfo) *QS
 			r.Protos = append(r.Protos, *e)
 		}
 	}
-	r.Clients, r.Domains = sortedCounts(clients, qsKeepResult), sortedCounts(domains, qsKeepResult)
+	nc, nd := qsKeepResult, qsKeepResult // a picked client or domain lists everything it has
+	if parts[0].R.Domain != "" {
+		nc = qsKeepPicked
+	}
+	if parts[0].R.Client != "" {
+		nd = qsKeepPicked
+	}
+	r.Clients, r.Domains = sortedCounts(clients, nc), sortedCounts(domains, nd)
 	seen := len(clients)
 	if _, ok := clients[qsOthers]; ok {
 		seen--

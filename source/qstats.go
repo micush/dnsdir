@@ -34,7 +34,8 @@ const (
 	qsCoarseSlots = 30 * 24
 	qsCapClients  = 300
 	qsCapDomains  = 600
-	qsKeepResult  = 500 // entries per top list in a reply
+	qsKeepResult  = 500  // entries per top list in a reply
+	qsKeepPicked  = 5000 // entries in the list of what a picked client asked for, or of who asked for a picked domain
 	qsMaxPoints   = 800
 	qsOthers      = "(others)"
 	qsRDNSTTL     = 10 * time.Minute
@@ -636,8 +637,15 @@ func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
 	if f.Domain != "" {
 		clients = withRest(pairClients, domains[f.Domain])
 	}
-	r.Clients = topList(s.keepMatchingClients(clients, f.CMatch), qsKeepResult)
-	r.Domains = topList(keepMatching(domains, f.DMatch), qsKeepResult)
+	nc, nd := qsKeepResult, qsKeepResult
+	if f.Domain != "" {
+		nc = qsKeepPicked
+	}
+	if f.Client != "" {
+		nd = qsKeepPicked
+	}
+	r.Clients = topList(s.keepMatchingClients(clients, f.CMatch), nc)
+	r.Domains = topList(keepMatching(domains, f.DMatch), nd)
 	s.fillHosts(r.Clients)
 	return r
 }
@@ -701,7 +709,7 @@ func (s *QStats) fillHosts(cl []NameCount) {
 			setHosts(&cl[i], e.names)
 			continue
 		}
-		if !s.rwork[ip] {
+		if !s.rwork[ip] && i < qsKeepResult { // only the first rows are looked up: a list of thousands would queue for minutes
 			s.rwork[ip] = true
 			go s.lookup(ip)
 		}

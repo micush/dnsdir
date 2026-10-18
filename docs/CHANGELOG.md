@@ -1,5 +1,10 @@
 # Changelog
 
+## [v443] - 2026-10-18 — Menu order
+
+### Changed
+- The menu groups are now in the order Topology, Configure, Operate, Monitor (Monitor was second).
+
 ## [v442] - 2026-10-17 — Months in two even rows
 
 ### Changed

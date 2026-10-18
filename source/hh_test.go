@@ -47,3 +47,16 @@ func TestHelloGapStats(t *testing.T) {
 		t.Fatalf("an old gap is still reported: %.1f", p.helloMax())
 	}
 }
+
+func TestHelloMaxCountsSilence(t *testing.T) {
+	var p Peer
+	t0 := time.Unix(1000, 0)
+	p.noteHello(t0)
+	p.noteHello(t0.Add(150 * time.Millisecond))
+	if m := p.helloMaxAt(t0.Add(200 * time.Millisecond)); m < 149 || m > 151 {
+		t.Fatalf("max %.1f, want about 150", m)
+	}
+	if m := p.helloMaxAt(t0.Add(150*time.Millisecond + 600*time.Millisecond)); m < 599 {
+		t.Fatalf("a silence of 600 ms is not in the maximum: %.1f", m)
+	}
+}

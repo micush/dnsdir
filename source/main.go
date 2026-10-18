@@ -659,8 +659,8 @@ func showNeighbors(sock string) {
 		fmt.Println("No neighbors.")
 		return
 	}
-	const f = "%-8s %-5s %-42s %-5s %-5s %-7s %-8s %s\n"
-	fmt.Printf(f, "GROUP", "AF", "PEER IP", "PRI", "AFN", "WEIGHT", "AGE(ms)", "STATE")
+	const f = "%-8s %-5s %-42s %-5s %-5s %-7s %-13s %s\n"
+	fmt.Printf(f, "GROUP", "AF", "PEER IP", "PRI", "AFN", "WEIGHT", "HELLO avg/max", "STATE")
 	fmt.Println(strings.Repeat("-", 90))
 	for _, p := range peers {
 		state := p.State
@@ -668,7 +668,7 @@ func showNeighbors(sock string) {
 			state += " preempt"
 		}
 		fmt.Printf(f, itoa(p.GroupID), p.AF, p.PeerIP, itoa(p.Priority), itoa(p.AfnID),
-			itoa(p.Weight), strconv.FormatInt(p.AgeMS, 10), state)
+			itoa(p.Weight), helloText(p.HelloAvgMS, p.HelloMaxMS), state)
 	}
 }
 
@@ -702,18 +702,15 @@ func showGatewayTable(sock string) {
 			title = fmt.Sprintf("%s (group %d)", n, g.GroupID)
 		}
 		fmt.Printf("%s  VIP %s\n", title, g.VIP)
-		fmt.Printf("%-18s %-40s %-5s %-5s %-7s %-8s %-10s %-9s %-13s %s\n", "NODE NAME", "NODE IP", "PRI", "SLOT", "WEIGHT", "ROLE", "STATE", "AGE(ms)", "HELLO avg/max", "VMAC")
-		fmt.Println(strings.Repeat("-", 122))
+		fmt.Printf("%-18s %-40s %-5s %-5s %-7s %-8s %-10s %-13s %s\n", "NODE NAME", "NODE IP", "PRI", "SLOT", "WEIGHT", "ROLE", "STATE", "HELLO avg/max", "VMAC")
+		fmt.Println(strings.Repeat("-", 113))
 		for _, m := range g.Members {
-			age, flag := strconv.FormatInt(m.AgeMS, 10), ""
-			hello := "-"
+			hello, flag := helloText(m.HelloAvgMS, m.HelloMaxMS), ""
 			if m.Local {
-				age, flag = "(local)", " *"
-			} else if m.HelloAvgMS > 0 {
-				hello = fmt.Sprintf("%d/%d", m.HelloAvgMS, m.HelloMaxMS)
+				hello, flag = "(local)", " *"
 			}
-			fmt.Printf("%-18s %-40s %-5d %-5d %-7d %-8s %-10s %-9s %-13s %s\n", orDefault(m.Name, "-")+flag, m.IP, m.Priority,
-				m.Slot, m.Weight, m.Role, strings.ToUpper(m.State), age, hello, orDefault(m.VMAC, "-"))
+			fmt.Printf("%-18s %-40s %-5d %-5d %-7d %-8s %-10s %-13s %s\n", orDefault(m.Name, "-")+flag, m.IP, m.Priority,
+				m.Slot, m.Weight, m.Role, strings.ToUpper(m.State), hello, orDefault(m.VMAC, "-"))
 		}
 		fmt.Println()
 	}
@@ -976,4 +973,12 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// helloText is a peer's measured hello gaps as "average/largest" in ms, "-" before two hellos have arrived.
+func helloText(avg, max int64) string {
+	if avg <= 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%d/%d", avg, max)
 }

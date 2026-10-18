@@ -57,6 +57,15 @@ func (p *Peer) noteHello(now time.Time) {
 // helloMax is the largest gap between two hellos in the last 30 to 60 seconds, in ms.
 func (p *Peer) helloMax() float64 { return math.Max(p.gapMax, p.gapPrev) }
 
+// helloMaxAt is helloMax counting the silence in progress too, so a peer that has gone quiet shows it at once.
+func (p *Peer) helloMaxAt(now time.Time) float64 {
+	m := p.helloMax()
+	if !p.LastHello.IsZero() {
+		m = math.Max(m, float64(now.Sub(p.LastHello))/float64(time.Millisecond))
+	}
+	return m
+}
+
 // takeoverHandback is how long a returning node must have been heard before the
 // controller lets go of the virtual MAC it was covering.
 var takeoverHandback = 600 * time.Millisecond
@@ -1467,7 +1476,7 @@ func (e *Engine) snapshot() []SnapshotRow {
 		r := row()
 		r.PeerIP, r.Priority, r.AfnID, r.Weight, r.Preempt = ip, p.Priority, p.AfnID, p.Weight, p.Preempt
 		r.AgeMS = time.Since(p.LastSeen).Milliseconds()
-		r.HelloAvgMS, r.HelloMaxMS = int64(math.Round(p.HelloAvg)), int64(math.Round(p.helloMax()))
+		r.HelloAvgMS, r.HelloMaxMS = int64(math.Round(p.HelloAvg)), int64(math.Round(p.helloMaxAt(time.Now())))
 		r.State = p.stateName(e.cfg.HoldMS)
 		if e.cfg.RealMACs {
 			r.RealMACs = true

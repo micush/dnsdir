@@ -1,5 +1,10 @@
 # Changelog
 
+## [v446] - 2026-10-18 — The Age column is gone
+
+### Changed
+- **Monitor ▸ Gateways and the CLI tables no longer have an Age column** (the time since the last packet at the instant of the refresh, a random point inside the hello gap). `Hello avg / max` replaces it, and its maximum now counts a silence still in progress, so a node that has gone quiet shows a growing maximum at once instead of only when its next hello arrives. `--show-neighbors` prints the same column. `age_ms` stays in the API.
+
 ## [v445] - 2026-10-18 — Live hello timing
 
 ### Added

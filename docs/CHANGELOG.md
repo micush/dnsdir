@@ -1,5 +1,10 @@
 # Changelog
 
+## [v453] - 2026-10-18 — No false drop at the end of the charts
+
+### Fixed
+- **The time charts (Statistics, and the per-gateway and per-server charts) no longer end in a drop to nearly nothing.** The last point was the step still in progress, holding only the part of it that has passed. It is now left out until it is complete.
+
 ## [v452] - 2026-10-18 — Controller mark on a node whose gateway is drawn from it
 
 ### Fixed

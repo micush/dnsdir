@@ -104,10 +104,10 @@ type CanvasGateway struct {
 type CanvasMember struct {
 	// ViaLocal marks the entry of the node whose picture this is, in a gateway the signed-in node does not serve (Local is
 	// cleared there, as it would point at the signed-in node)
-	ViaLocal bool `json:"via_local,omitempty"`
-	IP    string `json:"ip"`
-	Local bool   `json:"local"`
-	AGC   bool   `json:"agc"`
+	ViaLocal bool   `json:"via_local,omitempty"`
+	IP       string `json:"ip"`
+	Local    bool   `json:"local"`
+	AGC      bool   `json:"agc"`
 	// AGCAFs is the address families this node is the controller for ("v4", "v6" or "v4+v6"), empty when it is not.  A
 	// dual-stack gateway elects its controllers separately, so they may be two nodes.
 	AGCAFs string `json:"agc_afs,omitempty"`

@@ -1218,8 +1218,12 @@
       const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
       return step >= 3600 || long ? d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + hm : hm;
     };
+    // partialLast: the range ends inside the last bucket (more than one bucket, so there is something left to draw)
+    const partialLast = (d, len) => len > 2 && d.to < d.start + len * d.step;
     function tsChart(title, d, series, o) {
-      const n = series[0].values.length;
+      // the last bucket is still filling (it holds only part of a step), so it is left out: plotted, it would be a drop to nearly nothing
+      const n = series[0].values.length - (partialLast(d, series[0].values.length) ? 1 : 0);
+      series = series.map((s) => ({ ...s, values: s.values.slice(0, n) }));
       const peak = Math.max(0, ...series.flatMap((s) => s.values));
       const max = o.fixedMax || niceMaxV(peak, o.floor || 10);
       const W = 620, H = 230, L = axisMargin([0, 1, 2, 3, 4].map((g) => o.axis((max * g) / 4)), 62), R = 12, T = 12, B = 28, pw = W - L - R, ph = H - T - B;
@@ -3190,8 +3194,8 @@
         h("button", { type: "button", class: "qchip " + s.cls, "aria-pressed": hidden.has(s.key) && !only ? "false" : "true", disabled: only || qpsView ? "" : null,
           onclick: () => { if (hidden.has(s.key)) hidden.delete(s.key); else hidden.add(s.key); drawChart(d); } },
           h("span", { class: "sw" }), s.label)));
-      const n = d.total.length;
-      const top = Math.max(qpsView ? 0.1 : 1, ...shown.flatMap((s) => d[s.key])), max = qpsView ? 4 * niceMax(top / 4) : niceMax(top);   // a rate gets four round steps
+      const n = d.total.length - (partialLast(d, d.total.length) ? 1 : 0);   // the bucket still filling is left out
+      const top = Math.max(qpsView ? 0.1 : 1, ...shown.flatMap((s) => d[s.key].slice(0, n))), max = qpsView ? 4 * niceMax(top / 4) : niceMax(top);   // a rate gets four round steps
       const yLabels = [0, 1, 2, 3, 4].map((g) => (qpsView ? fq((max * g) / 4) : n0(Math.round((max * g) / 4))));
       const W = 1000, H = 300, L = axisMargin(yLabels, 52), R = 14, T = 12, B = 28, pw = W - L - R, ph = H - T - B;
       const x = (i) => L + (n <= 1 ? pw / 2 : (pw * i) / (n - 1));
@@ -3207,7 +3211,7 @@
         svg.append(sv("text", { class: "qax", x: x(i), y: H - 8, "text-anchor": k === 0 ? "start" : k === ticks - 1 ? "end" : "middle" }, when2(d.start + i * d.step, d.step)));
       }
       for (const s of shown) {
-        const pts = d[s.key].map((v, i) => x(i).toFixed(1) + "," + y(v).toFixed(1)).join(" ");
+        const pts = d[s.key].slice(0, n).map((v, i) => x(i).toFixed(1) + "," + y(v).toFixed(1)).join(" ");
         svg.append(sv("polyline", { class: "qline " + s.cls, points: pts }));
       }
       // hover: a crosshair, a dot per series and one tooltip with the values

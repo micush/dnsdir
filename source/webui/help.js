@@ -305,6 +305,7 @@ const DNSDIR_HELP = {
         ["Answer repeated queries from a cache", "On by default. Repeated queries are answered from memory for as long as the records' TTLs allow. Shared."],
         ["Most answers kept", "100–1,000,000,000, default 1,000,000. When full, the least recently used answers go first. Shared."],
         ["Cache TTL (s)", "1–604800, default 3600. A cap on how long any answer is kept, whatever the TTL in its records. Shared."],
+        ["Failure cache (s)", "0–300, default 60, 0 = off. How long a failure (SERVFAIL, REFUSED, or no server answering) is remembered, so a name that keeps failing is not sent upstream again and again (RFC 9520). Forgotten earlier when a real answer arrives or a server comes back UP. Shared."],
       ]],
     ],
   },

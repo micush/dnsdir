@@ -237,11 +237,7 @@ func (f *DNSFrontend) resolveRaw(query []byte, tcp bool, client netip.Addr, qi *
 				kb = append(append(kb, '|', '@'), r.tag...)
 			}
 			if r := c.getBytes(kb, query, qi.nameEnd+4); r != nil {
-				c.Hits.Add(1)
-				qstats.RecordCache(true)
-				f.gw.addHit()
-				p.Queries.Add(1)
-				p.Answered.Add(1)
+				f.cacheServed(p, c, r)
 				return r
 			}
 			ckey = string(kb) // a miss: the key is kept (flight table, cache)
@@ -253,11 +249,7 @@ func (f *DNSFrontend) resolveRaw(query []byte, tcp bool, client netip.Addr, qi *
 				case <-f.ctx.Done():
 				}
 				if r := c.getBytes(kb, query, qi.nameEnd+4); r != nil { // served from the leader's answer: a hit
-					c.Hits.Add(1)
-					qstats.RecordCache(true)
-					f.gw.addHit()
-					p.Queries.Add(1)
-					p.Answered.Add(1)
+					f.cacheServed(p, c, r)
 					return r
 				}
 				// An answer that does not go into the cache (SERVFAIL, a truncated one, a negative one without a
@@ -289,6 +281,18 @@ func (f *DNSFrontend) resolveRaw(query []byte, tcp bool, client netip.Addr, qi *
 		}
 	}
 	resp, err := p.ForwardFrom(f.ctx, query, tcp, client)
+	if cacheable && f.ctx.Err() == nil && p.cfg.FailureCacheSeconds > 0 {
+		// remember a failure (RFC 9520), so the next client that asks for this name is not sent upstream again
+		rc := -1
+		if err != nil {
+			rc = rcodeServFail
+		} else if h, ok := parseHeader(resp); ok && (h.rcode == rcodeServFail || h.rcode == rcodeRefused) {
+			rc = h.rcode
+		}
+		if rc >= 0 {
+			p.cache.putFail(ckey, errorResponse(query, rc), time.Duration(p.cfg.FailureCacheSeconds)*time.Second)
+		}
+	}
 	if leader {
 		call.resp, call.err = resp, err
 		if err != nil {
@@ -306,6 +310,21 @@ func (f *DNSFrontend) resolveRaw(query []byte, tcp bool, client netip.Addr, qi *
 		return errorResponse(query, rcodeServFail)
 	}
 	return resp
+}
+
+// cacheServed counts a query that was answered from the cache: a hit, or a remembered failure (which is not a hit: the
+// client got an error, and the hit ratio is about answers).
+func (f *DNSFrontend) cacheServed(p *Pool, c *respCache, r []byte) {
+	p.Queries.Add(1)
+	if h, ok := parseHeader(r); ok && (h.rcode == rcodeServFail || h.rcode == rcodeRefused) {
+		c.FailHits.Add(1)
+		p.Failed.Add(1)
+		return
+	}
+	c.Hits.Add(1)
+	qstats.RecordCache(true)
+	f.gw.addHit()
+	p.Answered.Add(1)
 }
 
 // adaptResponse makes the answer a flight leader got fit another client's query of the same question: that

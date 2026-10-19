@@ -1,5 +1,12 @@
 # Changelog
 
+## [v475] - 2026-10-18 — Failures are remembered for a minute
+
+### Added
+- **Failure cache** (RFC 2308 section 7, RFC 9520): a query that ends in SERVFAIL, REFUSED or no server answering is remembered for `failure_cache_seconds` (default 60, 0 = off, at most 300), so a few failing names no longer go upstream over and over and inflate the Failed Queries graph's upstream load. Clients still get SERVFAIL/REFUSED; they are counted as failed queries and shown as "answered with a remembered failure" in the cache statistics, not as hits.
+- A failure is dropped when its time is up, when a real answer arrives, when the name is flushed, and when a server comes back UP. Failures are not exported in the cache warm-up.
+- The setting is part of the replicated DNS block, so it is the same on every cluster node.
+
 ## [v474] - 2026-10-18 — Server statistics of a gateway this node does not serve
 
 ### Fixed

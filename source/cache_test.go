@@ -442,13 +442,32 @@ func TestFrontendAnswersFromCache(t *testing.T) {
 	if r.Sums.Total < 3 {
 		t.Fatalf("statistics missed a cached answer: %+v", r.Sums)
 	}
-	// upstream failures are not cached
+	// an upstream failure is remembered (failure_cache_seconds): the second query does not go upstream, is a SERVFAIL, and
+	// is counted as a remembered failure, not as a hit
 	up.mode.Store(3)
 	q3 := cacheQuery("fail.example", 1, nil)
-	fe.resolve(q3, false, cl)
-	fe.resolve(q3, false, cl)
-	if p.cache.Len() != 2 {
-		t.Fatalf("a SERVFAIL was cached: %d entries", p.cache.Len())
+	r3 := fe.resolve(q3, false, cl)
+	if h, _ := parseHeader(r3); h.rcode != rcodeServFail {
+		t.Fatalf("the upstream failure must reach the client as SERVFAIL: %+v", h)
+	}
+	mid := up.hits.Load()
+	hits := p.cache.Hits.Load()
+	r3b := fe.resolve(q3, false, cl)
+	if h, _ := parseHeader(r3b); h.rcode != rcodeServFail || up.hits.Load() != mid || p.cache.FailHits.Load() != 1 || p.cache.Hits.Load() != hits {
+		t.Fatalf("a remembered failure: %+v upstream %d fail hits %d hits %d", h, up.hits.Load()-mid, p.cache.FailHits.Load(), p.cache.Hits.Load()-hits)
+	}
+	if p.cache.Len() != 3 {
+		t.Fatalf("the failure is one entry: %d", p.cache.Len())
+	}
+	// switched off, a failure is not remembered
+	up.mode.Store(3)
+	p.cfg.FailureCacheSeconds = 0
+	q4 := cacheQuery("fail2.example", 1, nil)
+	fe.resolve(q4, false, cl)
+	before4 := up.hits.Load()
+	fe.resolve(q4, false, cl)
+	if up.hits.Load() == before4 {
+		t.Fatal("with failure_cache_seconds 0 every query goes upstream")
 	}
 }
 

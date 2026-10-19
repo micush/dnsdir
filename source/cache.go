@@ -19,8 +19,13 @@ import (
 //
 // What is cached: an answer to a plain query (opcode QUERY, one question, class IN or any) that came back
 // NOERROR (with data or without: "no data") or NXDOMAIN, not truncated.  A negative answer needs the zone's SOA in
-// the authority section, whose MINIMUM sets how long it may be kept.  Nothing else is cached: SERVFAIL, REFUSED, truncated
+// the authority section, whose MINIMUM sets how long it may be kept.  Nothing else is cached as an answer: truncated
 // answers, zone transfers, anything signed with TSIG, and queries carrying EDNS options other than a client cookie.
+//
+// A failure (SERVFAIL, REFUSED, or every server timing out) is remembered for failure_cache_seconds (60 by default, at most
+// 300: RFC 9520 allows 1 second to 5 minutes), so that a client that asks again and again for a name that fails does not send
+// each question upstream.  It is kept under the same key as an answer would be, answered as a plain SERVFAIL or REFUSED, forgotten
+// when a server that was down comes back up, replaced by the answer as soon as there is one, and counted apart (FailHits).
 //
 // The cache key is the lower-cased name, type and class, the RD, AD and CD flags, whether the query had EDNS and its DO
 // bit, the UDP size the client allows (UDP answers are limited to it), the transport, and — when ECS is on — the client's
@@ -32,6 +37,8 @@ import (
 const (
 	cacheDefaultEntries = 1000000
 	cacheDefaultMaxTTL  = 3600
+	cacheDefaultFailTTL = 60  // seconds a failure is remembered (failure_cache_seconds)
+	cacheFailTTLMax     = 300 // at most 5 minutes (RFC 9520)
 	cacheMinEntries     = 100
 	cacheMaxEntries     = 1000000000
 	cacheMaxTTLLimit    = 7 * 24 * 3600
@@ -56,6 +63,9 @@ type cacheEntry struct {
 	// on an entry bumped less than cacheBumpEvery ago leaves the order alone, so most hits need only the shard's
 	// read lock.
 	bumped atomic.Int64
+	// fail marks the entry that remembers a failure (SERVFAIL or REFUSED): it is dropped when a server comes back up, is
+	// never handed to another node and never replaces an answer.
+	fail bool
 }
 
 // cacheShard is one slice of the cache with its own lock and its own LRU order.  At 100k queries a second one
@@ -99,6 +109,7 @@ type respCache struct {
 	Misses   atomic.Uint64 // cacheable queries that had to go upstream
 	Bypassed atomic.Uint64 // queries that are never cached
 	Evicted  atomic.Uint64 // entries pushed out because the cache was full
+	FailHits atomic.Uint64 // queries answered from a remembered failure (not counted in Hits)
 }
 
 func newRespCache(max, maxTTL int) *respCache {
@@ -408,6 +419,59 @@ func (c *respCache) put(key string, resp []byte) {
 	c.store(key, resp, 0, false)
 }
 
+// putFail remembers a failure for life: msg is the SERVFAIL or REFUSED answer made for the query that failed.  It never
+// replaces an answer that is cached.
+func (c *respCache) putFail(key string, msg []byte, life time.Duration) {
+	if life <= 0 || len(msg) < 12 {
+		return
+	}
+	if life > cacheFailTTLMax*time.Second {
+		life = cacheFailTTLMax * time.Second
+	}
+	qEnd, ok := questionEnd(msg)
+	if !ok {
+		return
+	}
+	sh := c.shardFor(key)
+	e := &cacheEntry{key: key, msg: append([]byte(nil), msg...), at: c.now(), life: life, sh: sh, qEnd: qEnd,
+		size: len(msg) + len(key) + cacheEntryOverhead, fail: true}
+	e.bumped.Store(c.now().UnixNano())
+	if e.size > sh.maxBytes {
+		return
+	}
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	if old := sh.m[key]; old != nil {
+		if !old.fail {
+			return
+		}
+		sh.drop(old)
+	}
+	e.elem = sh.lru.PushFront(e)
+	sh.m[key] = e
+	sh.bytes += e.size
+	for (len(sh.m) > sh.max || sh.bytes > sh.maxBytes) && sh.lru.Len() > 1 {
+		sh.drop(sh.lru.Back().Value.(*cacheEntry))
+		c.Evicted.Add(1)
+	}
+}
+
+// clearFailures forgets every remembered failure (a server that was down is up again) and says how many there were.
+func (c *respCache) clearFailures() int {
+	n := 0
+	for _, sh := range c.shards {
+		sh.mu.Lock()
+		for _, e := range sh.m {
+			if e.fail {
+				sh.drop(e)
+				n++
+			}
+		}
+		sh.mu.Unlock()
+	}
+	return n
+}
+
 // store keeps a response that is age old already (a warm start hands over entries from another node with the age they
 // had there, so their TTLs go on counting down).  An entry that is taken over (fromPeer) never replaces one this node
 // has, never pushes one out, and goes to the cold end of the LRU order, so a warm start cannot displace what clients
@@ -533,11 +597,12 @@ type cacheStats struct {
 	Misses   uint64 `json:"misses"`
 	Bypassed uint64 `json:"bypassed"`
 	Evicted  uint64 `json:"evicted"`
+	FailHits uint64 `json:"fail_hits"`
 }
 
 func (c *respCache) stats() cacheStats {
 	if c == nil {
 		return cacheStats{}
 	}
-	return cacheStats{On: true, Entries: c.Len(), Max: c.max, MaxTTL: int(c.maxTTL), Bytes: c.Bytes(), Hits: c.Hits.Load(), Misses: c.Misses.Load(), Bypassed: c.Bypassed.Load(), Evicted: c.Evicted.Load()}
+	return cacheStats{On: true, Entries: c.Len(), Max: c.max, MaxTTL: int(c.maxTTL), Bytes: c.Bytes(), Hits: c.Hits.Load(), Misses: c.Misses.Load(), Bypassed: c.Bypassed.Load(), Evicted: c.Evicted.Load(), FailHits: c.FailHits.Load()}
 }

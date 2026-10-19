@@ -66,7 +66,7 @@ func (c *respCache) export(maxN, maxBytes int, minLeft time.Duration) []cacheWir
 			e := el.Value.(*cacheEntry)
 			age := now.Sub(e.at)
 			rank++
-			if age < 0 || e.life-age < minLeft {
+			if e.fail || age < 0 || e.life-age < minLeft { // a remembered failure stays on this node
 				continue
 			}
 			all = append(all, cand{cacheWireEntry{Key: e.key, Msg: e.msg, Age: age.Milliseconds()}, rank})

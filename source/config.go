@@ -594,19 +594,23 @@ type DNSConfig struct {
 	Spread bool `json:"spread"`
 	// TLSInsecure makes a tls:// server be accepted whatever certificate it presents (expired, self-signed, the
 	// wrong name): the traffic is still encrypted but the server is not authenticated. Off by default.
-	TLSInsecure     bool    `json:"tls_insecure,omitempty"`
-	SpreadBand      int     `json:"spread_band"`
-	Cache           bool    `json:"cache"`
-	CacheEntries    int     `json:"cache_entries"`
-	CacheMaxTTL     int     `json:"cache_max_ttl"`
-	ECSPrefix4      int     `json:"ecs_prefix4"`
-	ECSPrefix6      int     `json:"ecs_prefix6"`
-	ProbeIntervalMS int     `json:"probe_interval_ms"`
-	ProbeTimeoutMS  int     `json:"probe_timeout_ms"`
-	QueryTimeoutMS  int     `json:"query_timeout_ms"`
-	MaxAttempts     int     `json:"max_attempts"`
-	FailThreshold   int     `json:"fail_threshold"`
-	LatencyAlpha    float64 `json:"latency_alpha"`
+	TLSInsecure  bool `json:"tls_insecure,omitempty"`
+	SpreadBand   int  `json:"spread_band"`
+	Cache        bool `json:"cache"`
+	CacheEntries int  `json:"cache_entries"`
+	CacheMaxTTL  int  `json:"cache_max_ttl"`
+	// FailureCacheSeconds is how long a failure (SERVFAIL, REFUSED, or every server timing out) is remembered, so a client that
+	// asks again and again for a name that fails does not send each question upstream (RFC 9520; cache.go).  0 turns it
+	// off; at most cacheFailTTLMax (5 minutes).  Shared like the rest of the cache settings.
+	FailureCacheSeconds int     `json:"failure_cache_seconds"`
+	ECSPrefix4          int     `json:"ecs_prefix4"`
+	ECSPrefix6          int     `json:"ecs_prefix6"`
+	ProbeIntervalMS     int     `json:"probe_interval_ms"`
+	ProbeTimeoutMS      int     `json:"probe_timeout_ms"`
+	QueryTimeoutMS      int     `json:"query_timeout_ms"`
+	MaxAttempts         int     `json:"max_attempts"`
+	FailThreshold       int     `json:"fail_threshold"`
+	LatencyAlpha        float64 `json:"latency_alpha"`
 	// LB is a gateway's own load-balancing settings (see LBConfig).  Only meaningful in a gateway's own pool; nil
 	// means the gateway follows Settings.  A pointer with omitempty so a config that never used it stays readable
 	// by older versions.
@@ -669,28 +673,29 @@ func (d *DNSConfig) ownLB() (LBConfig, bool) {
 
 func defaultDNS() DNSConfig {
 	return DNSConfig{
-		Servers:         []string{},
-		Queries:         []DNSQuery{},
-		DownPercent:     100,
-		ListenPort:      53,
-		ForwardUpdates:  true,
-		SortListOn:      true,
-		PolicyOn:        true,
-		PolicyLog:       true,
-		Spread:          true,
-		SpreadBand:      20,
-		Cache:           true,
-		CacheEntries:    cacheDefaultEntries,
-		CacheMaxTTL:     cacheDefaultMaxTTL,
-		ECS:             true,
-		ECSPrefix4:      24,
-		ECSPrefix6:      56,
-		ProbeIntervalMS: 5000,
-		ProbeTimeoutMS:  1000,
-		QueryTimeoutMS:  1500,
-		MaxAttempts:     3,
-		FailThreshold:   2,
-		LatencyAlpha:    0.3,
+		Servers:             []string{},
+		Queries:             []DNSQuery{},
+		DownPercent:         100,
+		ListenPort:          53,
+		ForwardUpdates:      true,
+		SortListOn:          true,
+		PolicyOn:            true,
+		PolicyLog:           true,
+		Spread:              true,
+		SpreadBand:          20,
+		Cache:               true,
+		CacheEntries:        cacheDefaultEntries,
+		CacheMaxTTL:         cacheDefaultMaxTTL,
+		FailureCacheSeconds: cacheDefaultFailTTL,
+		ECS:                 true,
+		ECSPrefix4:          24,
+		ECSPrefix6:          56,
+		ProbeIntervalMS:     5000,
+		ProbeTimeoutMS:      1000,
+		QueryTimeoutMS:      1500,
+		MaxAttempts:         3,
+		FailThreshold:       2,
+		LatencyAlpha:        0.3,
 	}
 }
 
@@ -910,6 +915,9 @@ func (d *DNSConfig) Validate() error {
 	if d.CacheEntries < cacheMinEntries || d.CacheEntries > cacheMaxEntries {
 		return fmt.Errorf("dns: cache_entries must be %d-%d", cacheMinEntries, cacheMaxEntries)
 	}
+	if d.FailureCacheSeconds < 0 || d.FailureCacheSeconds > cacheFailTTLMax {
+		return fmt.Errorf("dns: failure_cache_seconds must be 0-%d seconds (0 = off)", cacheFailTTLMax)
+	}
 	if d.CacheMaxTTL < 1 || d.CacheMaxTTL > cacheMaxTTLLimit {
 		return fmt.Errorf("dns: cache_max_ttl must be 1-%d seconds", cacheMaxTTLLimit)
 	}
@@ -1054,6 +1062,7 @@ func (dc *DaemonConfig) poolFor(g *GroupConfig) (int, DNSConfig) {
 // it was made with: it would go on caching, or limiting, after Settings said otherwise.
 func (c *DNSConfig) followSettings(shared DNSConfig) {
 	c.Cache, c.CacheEntries, c.CacheMaxTTL = shared.Cache, shared.CacheEntries, shared.CacheMaxTTL
+	c.FailureCacheSeconds = shared.FailureCacheSeconds
 	c.AllowedClients = append([]string(nil), shared.AllowedClients...)
 	if len(c.AllowedClients) == 0 {
 		c.AllowedClients = nil

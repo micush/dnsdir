@@ -547,6 +547,9 @@ func (p *Pool) probeServer(ctx context.Context, s *Server) {
 		if !s.healthy {
 			s.healthy = true
 			p.rankGen.Add(1)
+			if p.cache != nil { // what failed while it was down may work now
+				p.cache.clearFailures()
+			}
 			infof("dns: server %s is UP (%.1fms)", s.Addr, s.ewma)
 		}
 		return

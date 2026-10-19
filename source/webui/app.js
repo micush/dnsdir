@@ -2035,7 +2035,7 @@
                 const c = p.cache, n0 = (n) => Number(n || 0).toLocaleString();
                 if (!c || !c.on) return h("span", { class: "muted small" }, "cache off");
                 const t = c.hits + c.misses;
-                return h("span", { class: "muted small", title: "Answers kept: " + n0(c.entries) + " of " + n0(c.max) + ". Not cacheable (never kept): " + n0(c.bypassed) + ". Pushed out when full: " + n0(c.evicted) + ". Kept at most " + n0(c.max_ttl) + " s." },
+                return h("span", { class: "muted small", title: "Answers kept: " + n0(c.entries) + " of " + n0(c.max) + ". Not cacheable (never kept): " + n0(c.bypassed) + ". Pushed out when full: " + n0(c.evicted) + ". Kept at most " + n0(c.max_ttl) + " s. Answered with a remembered failure: " + n0(c.fail_hits) + "." },
                   "cache " + (t ? (100 * c.hits / t).toFixed(0) + "% hits" : "empty") + " · " + n0(c.entries) + " kept");
               })(),
               h("span", { class: "spacer" }),
@@ -2126,6 +2126,7 @@
     { shared: true, k: "cache", l: "Answer repeated queries from a cache", t: "bool" },
     { shared: true, k: "cache_entries", l: "Most answers kept", t: "int", min: 100, max: 1000000000 },
     { shared: true, k: "cache_max_ttl", l: "Cache TTL (s)", t: "int", min: 1, max: 604800 },
+    { shared: true, k: "failure_cache_seconds", l: "Failure cache (s)", t: "int", min: 0, max: 300, hint: "how long a failure (SERVFAIL, REFUSED, or no server answering) is remembered, so the same failing name is not sent upstream again and again; 0 = off, at most 300 (RFC 9520)" },
     { section: "Timing" },
     { shared: true, k: "probe_interval_ms", l: "Probe interval (ms)", t: "int", min: 1 },
     { shared: true, k: "probe_timeout_ms", l: "Probe timeout (ms)", t: "int", min: 1 },

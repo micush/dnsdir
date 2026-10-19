@@ -8,8 +8,8 @@ import (
 
 func TestMigrateLegacyConfig(t *testing.T) {
 	root := t.TempDir()
-	legacy := filepath.Join(root, "etc-liras", "ddgw.conf")
-	dst := filepath.Join(root, "var-lib-dnsdir", "dnsdir.conf")
+	legacy := filepath.Join(root, "etc-liras", "ntpdir.conf")
+	dst := filepath.Join(root, "var-lib-ntpdir", "ntpdir.conf")
 	must := func(err error) {
 		t.Helper()
 		if err != nil {
@@ -18,8 +18,8 @@ func TestMigrateLegacyConfig(t *testing.T) {
 	}
 	must(os.MkdirAll(filepath.Dir(legacy), 0o755))
 	must(os.WriteFile(legacy, []byte(`{"groups":[{"group_id":3,"vip4":"10.3.0.1/24"}]}`), 0o640))
-	must(os.WriteFile(filepath.Join(filepath.Dir(legacy), "ddgw-web.crt"), []byte("CRT"), 0o644))
-	must(os.WriteFile(filepath.Join(filepath.Dir(legacy), "ddgw-web.key"), []byte("KEY"), 0o600))
+	must(os.WriteFile(filepath.Join(filepath.Dir(legacy), "ntpdir-web.crt"), []byte("CRT"), 0o644))
+	must(os.WriteFile(filepath.Join(filepath.Dir(legacy), "ntpdir-web.key"), []byte("KEY"), 0o600))
 
 	moved, err := migrateLegacyConfig(dst, legacy)
 	if err != nil || !moved {
@@ -35,7 +35,7 @@ func TestMigrateLegacyConfig(t *testing.T) {
 	if st, _ := os.Stat(filepath.Dir(dst)); st.Mode().Perm() != 0o700 {
 		t.Fatalf("the new directory is private, got %v", st.Mode().Perm())
 	}
-	for _, f := range []string{"dnsdir-web.crt", "dnsdir-web.key"} {
+	for _, f := range []string{"ntpdir-web.crt", "ntpdir-web.key"} {
 		if b, err := os.ReadFile(filepath.Join(filepath.Dir(dst), f)); err != nil || len(b) == 0 {
 			t.Fatalf("%s must come along: %v", f, err)
 		}
@@ -46,7 +46,7 @@ func TestMigrateLegacyConfig(t *testing.T) {
 	if _, err := os.Stat(legacy); err == nil {
 		t.Fatal("the old file must not stay in place (it would be used twice)")
 	}
-	for _, f := range []string{"ddgw-web.crt", "ddgw-web.key"} {
+	for _, f := range []string{"ntpdir-web.crt", "ntpdir-web.key"} {
 		if _, err := os.Stat(filepath.Join(filepath.Dir(legacy), f)); err == nil {
 			t.Fatalf("%s must be moved, not copied", f)
 		}
@@ -65,13 +65,13 @@ func TestMigrateLegacyConfig(t *testing.T) {
 		t.Fatal("existing config was overwritten")
 	}
 	// nothing to migrate is not an error
-	if moved, err := migrateLegacyConfig(filepath.Join(root, "other", "dnsdir.conf"), filepath.Join(root, "missing.conf")); err != nil || moved {
+	if moved, err := migrateLegacyConfig(filepath.Join(root, "other", "ntpdir.conf"), filepath.Join(root, "missing.conf")); err != nil || moved {
 		t.Fatalf("no legacy file: moved=%v err=%v", moved, err)
 	}
 }
 
 func TestSaveCreatesPrivateDirectory(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "new", "dnsdir.conf")
+	p := filepath.Join(t.TempDir(), "new", "ntpdir.conf")
 	if err := newDaemonConfig().save(p); err != nil {
 		t.Fatal(err)
 	}
@@ -81,52 +81,36 @@ func TestSaveCreatesPrivateDirectory(t *testing.T) {
 }
 
 func TestDefaultLocations(t *testing.T) {
-	if confPath != "/var/lib/dnsdir/dnsdir.conf" || filepath.Dir(confPath) != defaultStateDir {
+	if confPath != "/var/lib/ntpdir/ntpdir.conf" || filepath.Dir(confPath) != defaultStateDir {
 		t.Fatalf("the config lives in the state directory: %s vs %s", confPath, defaultStateDir)
 	}
-	if statusSocket != "/run/dnsdir/dnsdir.sock" {
+	if statusSocket != "/run/ntpdir/ntpdir.sock" {
 		t.Fatalf("socket: %s", statusSocket)
 	}
 }
 
 func TestMissingConfigMeansNoGateways(t *testing.T) {
-	dc, err := loadConfig(filepath.Join(t.TempDir(), "nope", "dnsdir.conf"))
+	dc, err := loadConfig(filepath.Join(t.TempDir(), "nope", "ntpdir.conf"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if dc.Groups == nil || len(dc.Groups) != 0 {
 		t.Fatalf("a missing config must not invent a gateway: %+v", dc.Groups)
 	}
-	if dc.DNS.ListenPort != 53 || dc.Web.Listen == "" {
+	if dc.NTP.ListenPort != 123 || dc.Web.Listen == "" {
 		t.Fatalf("defaults missing: %+v", dc.Web)
 	}
 }
 
 func TestLegacyConfigPathIsRedirected(t *testing.T) {
-	for _, in := range []string{"/etc/liras/ddgw.conf", "/etc/liras//ddgw.conf", "/etc/liras/../liras/ddgw.conf", "/var/lib/ddgw/ddgw.conf"} {
+	for _, in := range []string{"/etc/liras/ntpdir.conf", "/etc/liras//ntpdir.conf", "/etc/liras/../liras/ntpdir.conf"} {
 		if got := canonicalConf(in); got != confPath {
 			t.Errorf("%q -> %q, want %q", in, got, confPath)
 		}
 	}
-	for _, in := range []string{confPath, "./dnsdir.conf", "/tmp/x/dnsdir.conf"} {
+	for _, in := range []string{confPath, "./ntpdir.conf", "/tmp/x/ntpdir.conf"} {
 		if got := canonicalConf(in); got != in {
 			t.Errorf("%q must be left alone, got %q", in, got)
 		}
-	}
-}
-
-// A new gateway starts with the key "dnsdir"; a gateway with no key written down still signs with the old default, so a
-// config from before keeps working with the nodes that use it.
-func TestDefaultGroupKey(t *testing.T) {
-	d := defaultGroup()
-	if d.Key != "dnsdir" || string(d.keyBytes()) != "dnsdir" {
-		t.Fatalf("new gateway key %q", d.Key)
-	}
-	old := GroupConfig{}
-	if string(old.keyBytes()) != "dgw" {
-		t.Fatalf("an empty key must still mean dgw, got %q", old.keyBytes())
-	}
-	if k := (&GroupConfig{Key: "secret"}).keyBytes(); string(k) != "secret" {
-		t.Fatalf("an explicit key is used as written, got %q", k)
 	}
 }

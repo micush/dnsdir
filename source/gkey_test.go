@@ -29,7 +29,7 @@ func TestNewGatewayGetsRandomKey(t *testing.T) {
 		t.Fatalf("key %q is not 32 hex characters", a.Key)
 	}
 	// the default group of a config with no groups at all keeps the old key, so bare nodes still find each other
-	if d := defaultGroup(); d.Key != defaultGroupKey || !isWeakKey(d.Key) {
+	if d := defaultGroup(); d.Key != "ntpdir" || !isWeakKey(d.Key) {
 		t.Fatalf("default group key %q", d.Key)
 	}
 }

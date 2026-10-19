@@ -172,14 +172,14 @@ func (e *Engine) repointVIPLocked() {
 	}
 }
 
-// setupRealLocked is what a forwarder or the controller sets up in real-MAC mode: the VIP on lo and the DNS proxy.  The
+// setupRealLocked is what a forwarder or the controller sets up in real-MAC mode: the VIP on lo and the NTP service.  The
 // controller also announces the VIP at its own MAC.
 func (e *Engine) setupRealLocked() {
 	if e.afnID == 0 {
 		return
 	}
 	infof("Real-MAC mode: slot %d, VIP on lo, no virtual MAC (%s)", e.afnID, e.tag())
-	e.setupDNSLocked(true)
+	e.setupNTPLocked(true)
 	if e.state == stateActive {
 		e.repointVIPLocked()
 	}

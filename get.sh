@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# AnyName DNS Director web installer: downloads the latest tagged release from GitHub and runs
+# AnyTime NTP Director web installer: downloads the latest tagged release from GitHub and runs
 # its install.sh (install or in-place upgrade).
 #
-#   curl -fsSL https://raw.githubusercontent.com/micush/dnsdir/HEAD/get.sh | sudo bash
-#   curl -fsSL https://raw.githubusercontent.com/micush/dnsdir/HEAD/get.sh | sudo bash -s -- --add-user alice
-#   curl -fsSL https://raw.githubusercontent.com/micush/dnsdir/HEAD/get.sh | sudo bash -s -- --version v215
+#   curl -fsSL https://raw.githubusercontent.com/micush/ntpdir/HEAD/get.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/micush/ntpdir/HEAD/get.sh | sudo bash -s -- --add-user alice
+#   curl -fsSL https://raw.githubusercontent.com/micush/ntpdir/HEAD/get.sh | sudo bash -s -- --version v215
 #
 # Everything after `--` goes to install.sh (see its --help), except:
 #   --version TAG   install this tag instead of the latest one
@@ -13,14 +13,14 @@
 # highest tag that looks like v<number>. Needs curl or wget, tar and the
 # network; install.sh installs the rest.
 #
-# Test hooks (not for normal use): DNSDIR_GET_REPO, DNSDIR_GET_API, DNSDIR_GET_HOST.
+# Test hooks (not for normal use): NTPDIR_GET_REPO, NTPDIR_GET_API, NTPDIR_GET_HOST.
 
 set -euo pipefail
 
 main() {
-  local repo=${DNSDIR_GET_REPO:-micush/dnsdir}
-  local api=${DNSDIR_GET_API:-https://api.github.com}
-  local host=${DNSDIR_GET_HOST:-https://github.com}
+  local repo=${NTPDIR_GET_REPO:-micush/ntpdir}
+  local api=${NTPDIR_GET_API:-https://api.github.com}
+  local host=${NTPDIR_GET_HOST:-https://github.com}
   local want="" args=() tag tmp rc
 
   if [ -t 2 ]; then B=$'\033[1m'; R=$'\033[31m'; G=$'\033[32m'; N=$'\033[0m'; else B=; R=; G=; N=; fi
@@ -64,25 +64,25 @@ main() {
   if [ -n "$want" ]; then
     tag=$want
   else
-    step "Looking up the latest AnyName version"
+    step "Looking up the latest AnyTime version"
     tag=$(latest_tag) || die "could not find a tagged version of $repo (no network, GitHub rate limit, or no tags yet)"
   fi
   valid_tag "$tag" || die "bad tag name: $tag"
 
-  tmp=$(mktemp -d "${TMPDIR:-/tmp}/dnsdir-get.XXXXXX") || die "cannot create a temporary directory"
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/ntpdir-get.XXXXXX") || die "cannot create a temporary directory"
   trap 'rm -rf "$tmp"' EXIT
 
-  step "Downloading AnyName $tag"
+  step "Downloading AnyTime $tag"
   fetch "$host/$repo/archive/refs/tags/$tag.tar.gz" >"$tmp/src.tgz" || die "download of $tag failed"
   mkdir "$tmp/tree"
   tar -xzf "$tmp/src.tgz" -C "$tmp/tree" --strip-components=1 || die "$tag is not a valid archive"
   rm -f "$tmp/src.tgz"
 
   [ -f "$tmp/tree/install.sh" ] && [ -f "$tmp/tree/source/VERSION" ] ||
-    die "$tag does not look like an AnyName release (install.sh or source/VERSION missing)"
+    die "$tag does not look like an AnyTime release (install.sh or source/VERSION missing)"
   local ver; ver=$(tr -d '[:space:]' <"$tmp/tree/source/VERSION")
   [[ $ver =~ ^[0-9]+$ ]] || die "$tag has a bad source/VERSION: '$ver'"
-  step "Installing AnyName v$ver"
+  step "Installing AnyTime v$ver"
 
   # Keep the terminal for install.sh's questions and sudo; the script itself
   # may be what is on our stdin.

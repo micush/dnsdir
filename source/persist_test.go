@@ -21,13 +21,13 @@ func swapStats(t *testing.T, q *QStats, h *HostStats) {
 func persistFixture(t *testing.T, t0 time.Time) (*QStats, *HostStats, *time.Time, *time.Time) {
 	q, cur := qsTestStats(t0)
 	c1, c2 := mustAddr("192.0.2.5"), mustAddr("192.0.2.6")
-	q.Record(c1, "a.example", 1, false, 0)
-	q.Record(c1, "a.example", 28, true, 0)
-	q.Record(c2, "typo.example", 1, false, 3)
-	q.Record(c2, "typo.example", 1, false, 3)
-	q.Record(c2, "corp.example", qtUpdate, false, 5)
+	q.Record(c1, srvA, 4, outAnswered)
+	q.Record(c1, srvA, 3, outAnswered)
+	q.Record(c2, srvB, 4, outKoD)
+	q.Record(c2, srvB, 4, outKoD)
+	q.Record(c2, "", 4, outRefused)
 	*cur = t0.Add(3 * time.Minute)
-	q.Record(c1, "b.example", 1, false, 2)
+	q.Record(c1, "", 4, outFailed)
 	h, hcur, rd := fakeHost(t0)
 	h.Sample()
 	*hcur = t0.Add(10 * time.Second)
@@ -61,7 +61,7 @@ func TestPersistRoundTrip(t *testing.T) {
 	}
 	from := t0.Add(-time.Hour)
 	wantQ := q.Query(from, *cur, QFilter{})
-	wantNX := q.Query(from, *cur, QFilter{Rcode: "nxdomain", Client: "192.0.2.6"})
+	wantNX := q.Query(from, *cur, QFilter{Outcome: "kod", Client: "192.0.2.6"})
 	wantH := h.Query(from, t0.Add(2*time.Minute))
 
 	q2, _ := qsTestStats(t0)
@@ -76,20 +76,20 @@ func TestPersistRoundTrip(t *testing.T) {
 		t.Fatalf("load: %d %v", n, err)
 	}
 	gotQ := q2.Query(from, *cur, QFilter{})
-	gotNX := q2.Query(from, *cur, QFilter{Rcode: "nxdomain", Client: "192.0.2.6"})
+	gotNX := q2.Query(from, *cur, QFilter{Outcome: "kod", Client: "192.0.2.6"})
 	for _, c := range []struct {
 		name      string
 		got, want *QStatsResult
-	}{{"all", gotQ, wantQ}, {"nx client", gotNX, wantNX}} {
+	}{{"all", gotQ, wantQ}, {"kod client", gotNX, wantNX}} {
 		if !reflect.DeepEqual(c.got, c.want) {
 			t.Fatalf("%s differs after a restart:\n got %+v\nwant %+v", c.name, c.got, c.want)
 		}
 	}
-	if gotQ.Sums.Updates != 1 || gotQ.Sums.UpdFail != 1 || gotQ.Sums.Total != 6 || gotQ.Since != q.start.Unix() {
+	if gotQ.Sums.KoD != 2 || gotQ.Sums.Refused != 1 || gotQ.Sums.Failed != 1 || gotQ.Sums.Total != 6 || gotQ.Since != q.start.Unix() {
 		t.Fatalf("sums %+v since %d", gotQ.Sums, gotQ.Since)
 	}
-	if len(gotNX.Domains) == 0 || gotNX.Domains[0].Name != "typo.example" || gotNX.Domains[0].Count != 2 {
-		t.Fatalf("the client/domain pairs did not come back: %+v", gotNX.Domains)
+	if len(gotNX.Servers) == 0 || gotNX.Servers[0].Name != srvB || gotNX.Servers[0].Count != 2 {
+		t.Fatalf("the client/server pairs did not come back: %+v", gotNX.Servers)
 	}
 	gotH := h2.Query(from, t0.Add(2*time.Minute))
 	gotH.Now, wantH.Now = HostNow{}, HostNow{}
@@ -100,7 +100,7 @@ func TestPersistRoundTrip(t *testing.T) {
 		t.Fatalf("mounts/since: %+v since %d", gotH.FS, gotH.Since)
 	}
 	// new traffic after the restart adds to the restored minutes
-	q2.Record(mustAddr("192.0.2.5"), "a.example", 1, false, 0)
+	q2.Record(mustAddr("192.0.2.5"), srvA, 4, outAnswered)
 	if r := q2.Query(from, *cur, QFilter{}); r.Sums.Total != 7 {
 		t.Fatalf("total after more traffic %d", r.Sums.Total)
 	}
@@ -144,7 +144,7 @@ func TestPersistMissingStaleAndDamaged(t *testing.T) {
 	}
 
 	// not gzip, a wrong format and a missing header are refused without loading anything
-	for name, body := range map[string]string{"text": "hello", "format": `{"k":"hdr","hdr":{"dnsdir_stats":99}}` + "\n", "nohdr": `{"k":"mins","mins":[[1,1,1,0,0,0,0,0,0]]}` + "\n"} {
+	for name, body := range map[string]string{"text": "hello", "format": `{"k":"hdr","hdr":{"ntpdir_stats":99}}` + "\n", "nohdr": `{"k":"mins","mins":[[1,1,1,0,0,0]]}` + "\n"} {
 		f, _ := os.Create(filepath.Join(dir, persistFile))
 		if name == "text" {
 			f.WriteString(body)
@@ -184,7 +184,7 @@ func TestPersistLoopSavesAtStop(t *testing.T) {
 	}
 }
 
-// a file written before updates were a kind of their own has one kind fewer per top-list record; it must still load
+// a file written with fewer outcomes than there are now (an older version) must still load
 func TestPersistLoadsFileWithFewerKinds(t *testing.T) {
 	t0 := time.Date(2026, 10, 1, 12, 0, 5, 0, time.UTC)
 	q, _ := qsTestStats(t0)
@@ -194,14 +194,14 @@ func TestPersistLoadsFileWithFewerKinds(t *testing.T) {
 	f, _ := os.Create(filepath.Join(dir, persistFile))
 	zw := gzip.NewWriter(f)
 	m := t0.Unix() / 60 / qsFineSpan
-	zw.Write([]byte(`{"k":"hdr","hdr":{"dnsdir_stats":1}}` + "\n"))
-	zw.Write([]byte(`{"k":"fine","s":` + strconv.FormatInt(m, 10) + `,"top":[{"c":{"192.0.2.5":2},"d":{"a.example":2},"t":{"A":2},"p":{"192.0.2.5":{"a.example":2}},"np":1,"u":2},{},{},{},{}]}` + "\n"))
+	zw.Write([]byte(`{"k":"hdr","hdr":{"ntpdir_stats":1}}` + "\n"))
+	zw.Write([]byte(`{"k":"fine","s":` + strconv.FormatInt(m, 10) + `,"top":[{"c":{"192.0.2.5":2},"s":{"10.0.0.1:123":2},"v":{"NTPv4":2},"p":{"192.0.2.5":{"10.0.0.1:123":2}},"np":1,"v4":2}]}` + "\n"))
 	zw.Close()
 	f.Close()
 	if n, err := loadPersisted(dir); err != nil || n != 1 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
-	if r := q.Query(t0.Add(-time.Hour), t0, QFilter{Rcode: "noerror"}); len(r.Domains) != 1 || r.Domains[0].Count != 2 {
-		t.Fatalf("%+v", r.Domains)
+	if r := q.Query(t0.Add(-time.Hour), t0, QFilter{Outcome: "answered"}); len(r.Servers) != 1 || r.Servers[0].Count != 2 {
+		t.Fatalf("%+v", r.Servers)
 	}
 }

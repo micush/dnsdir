@@ -37,7 +37,7 @@ func fakePower(t *testing.T) *powerCalls {
 }
 
 func newPowerMgmt(t *testing.T) *Mgmt {
-	mg, err := NewMgmt(filepath.Join(t.TempDir(), "dnsdir.conf"), filepath.Join(t.TempDir(), "state"), newDaemonConfig())
+	mg, err := NewMgmt(filepath.Join(t.TempDir(), "ntpdir.conf"), filepath.Join(t.TempDir(), "state"), newDaemonConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

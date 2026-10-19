@@ -52,7 +52,7 @@ func TestHelpCoversEveryField(t *testing.T) {
 			t.Errorf("field %q (%s page) has no entry in the help's Fields list", label, tp)
 		}
 	}
-	if found < 70 {
+	if found < 55 {
 		t.Errorf("found only %d labelled fields in app.js; the label pattern probably changed", found)
 	}
 

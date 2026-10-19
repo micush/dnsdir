@@ -18,28 +18,25 @@ import (
 // calls the same code), so the two always agree.
 
 type cliFlags struct {
-	versions, versionSnapshot, tlsStatus, tlsInstall, tlsCSR, tlsRevert, tlsRegenerate *bool
-	clusterStatus, clusterToken, clusterPromote, clusterLeave, clusterSync             *bool
-	updateStatus, updateApply, updateHistory, noWait, yes                              *bool
-	versionShow, versionDiff, versionRestore, versionExport, configImport, note        *string
-	certFile, keyFile, cn, san                                                         *string
-	clusterJoin, clusterRemove, clusterUnremove                                        *string
-	schedule, scheduleHistory                                                          *bool
-	scheduleSet, scheduleDel, scheduleRun                                              *string
-
-	users                                                                                                                                                                                                                                            *bool
-	userAdd, userPasswd, userExpiry, userDel, userGrant, userRevoke, expires, hostname                                                                                                                                                               *string
-	power, powerAt                                                                                                                                                                                                                                   *string
-	powerIn                                                                                                                                                                                                                                          *int
-	bgp, bgpDisable, bgpEnable, logShow, statsShow, statsClear, cacheClear, hostShow, dnsUpdates, nodePause, nodeResume, nodeStatus, allNodes, captureList                                                                                           *bool
-	logMin, logGrep, logSince, logLines, statsRange, statsRcode, statsClient, statsDomain, whoisName, scanAddr, pingAddr, traceAddr, lookupAddr, cacheFlush, dnsLookup, hostRange, captureIface, captureSecs, captureFilter, captureFile, tshootFile *string
-	asn, routerID, asPrepend, nbrAdd, nbrDel, nbrDisable, nbrEnable, remoteAS, descr, passwd, multihop, keepalive, hold                                                                                                                              *string
-	updateUpload, updatePush, updateCancel, updateAuto, updateRepo, clusterFailover                                                                                                                                                                  *string
-	canvas, vmacTest, tshoot, tshootCapture                                                                                                                                                                                                          *bool
-	canvasPause, canvasResume, canvasMove, canvasAdd, canvasDel, canvasSet, vip, vip6, ifname, server, name, qtype, ecs, label, anycast, address, scope, node, realMACs                                                                              *string
-	pos, group, ecsV4, ecsV6, spreadBand, downPercent, failThreshold, maxAttempts                                                                                                                                                                    *int
-	serverStats, gatewayStats, spread, lbMode                                                                                                                                                                                                        *string
-	latencyAlpha                                                                                                                                                                                                                                     *float64
+	versions, versionSnapshot, tlsStatus, tlsInstall, tlsCSR, tlsRevert, tlsRegenerate                                                                                                                                                      *bool
+	clusterStatus, clusterToken, clusterPromote, clusterLeave, clusterSync                                                                                                                                                                  *bool
+	updateStatus, updateApply, updateHistory, noWait, yes                                                                                                                                                                                   *bool
+	versionShow, versionDiff, versionRestore, versionExport, configImport, note                                                                                                                                                             *string
+	certFile, keyFile, cn, san                                                                                                                                                                                                              *string
+	clusterJoin, clusterRemove, clusterUnremove                                                                                                                                                                                             *string
+	users, schedule, scheduleHistory                                                                                                                                                                                                        *bool
+	scheduleSet, scheduleDel, scheduleRun                                                                                                                                                                                                   *string
+	userAdd, userPasswd, userExpiry, userDel, userGrant, userRevoke, expires                                                                                                                                                                *string
+	power, powerAt                                                                                                                                                                                                                          *string
+	powerIn                                                                                                                                                                                                                                 *int
+	bgp, bgpDisable, bgpEnable, logShow, statsShow, statsClear, hostShow, nodePause, nodeResume, nodeStatus, allNodes, captureList                                                                                                          *bool
+	logMin, logGrep, logSince, logLines, statsRange, statsOutcome, statsClient, statsServer, whoisName, nodeRename, scanAddr, pingAddr, traceAddr, hostLookup, hostRange, captureIface, captureSecs, captureFilter, captureFile, tshootFile *string
+	asn, routerID, asPrepend, nbrAdd, nbrDel, nbrDisable, nbrEnable, remoteAS, descr, passwd, multihop, keepalive, hold                                                                                                                     *string
+	updateUpload, updatePush, updateCancel, updateAuto, updateRepo                                                                                                                                                                          *string
+	canvas, vmacTest, tshoot, tshootCapture                                                                                                                                                                                                 *bool
+	canvasPause, canvasResume, canvasMove, canvasAdd, canvasDel, canvasSet, vip, vip6, ifname, server, label, anycast, address, scope, node, realMACs                                                                                       *string
+	pos, group, maxStratum, maxRootDist, failThreshold                                                                                                                                                                                      *int
+	serverStats, gatewayStats, lbMode, maxOffset                                                                                                                                                                                            *string
 }
 
 func registerCLIFlags(fs *flag.FlagSet) *cliFlags {
@@ -57,24 +54,23 @@ func registerCLIFlags(fs *flag.FlagSet) *cliFlags {
 		certFile: s("cert-file"), keyFile: s("key-file"), cn: s("cn"), san: s("san"),
 		clusterJoin: s("cluster-join"), clusterRemove: s("cluster-remove"), clusterUnremove: s("cluster-unremove"),
 		canvas: b("canvas"), vmacTest: b("test-vmac"), tshoot: b("tshoot"), tshootCapture: b("tshoot-capture"), tshootFile: s("tshoot-file"), realMACs: s("real-macs"), canvasAdd: s("canvas-add"), canvasDel: s("canvas-del"),
-		canvasSet: s("canvas-set"), canvasMove: s("canvas-move"), pos: fs.Int("to", 0, ""), canvasPause: s("canvas-pause"), canvasResume: s("canvas-resume"), vip6: s("vip6"), ecs: s("ecs"), label: s("label"), anycast: s("anycast"), address: s("address"), scope: s("scope"), node: s("node"),
-		ecsV4: fs.Int("ecs-v4", 0, ""), ecsV6: fs.Int("ecs-v6", 0, ""),
-		serverStats: s("server-stats"), gatewayStats: s("gateway-stats"), spread: s("spread"), lbMode: s("lb"), spreadBand: fs.Int("spread-band", 0, ""), downPercent: fs.Int("down-percent", 0, ""),
-		failThreshold: fs.Int("fail-threshold", 0, ""), maxAttempts: fs.Int("max-attempts", 0, ""), latencyAlpha: fs.Float64("latency-alpha", 0, ""),
-		vip: s("vip"), ifname: s("interface"), server: s("server"), name: s("name"), qtype: s("type"),
+		canvasSet: s("canvas-set"), canvasMove: s("canvas-move"), pos: fs.Int("to", 0, ""), canvasPause: s("canvas-pause"), canvasResume: s("canvas-resume"), vip6: s("vip6"), label: s("label"), anycast: s("anycast"), address: s("address"), scope: s("scope"), node: s("node"),
+		serverStats: s("server-stats"), gatewayStats: s("gateway-stats"), lbMode: s("lb"), maxStratum: fs.Int("max-stratum", 0, ""), maxRootDist: fs.Int("max-root-distance", 0, ""), maxOffset: s("max-offset"),
+		failThreshold: fs.Int("fail-threshold", 0, ""),
+		vip:           s("vip"), ifname: s("interface"), server: s("server"),
 		group:    fs.Int("group", 0, ""),
 		schedule: b("schedule"), scheduleHistory: b("schedule-history"), scheduleSet: s("schedule-set"), scheduleDel: s("schedule-del"), scheduleRun: s("schedule-run"),
-		users: b("users"), userAdd: s("user-add"), userPasswd: s("user-passwd"), userExpiry: s("user-expiry"), userDel: s("user-del"), userGrant: s("user-grant"), userRevoke: s("user-revoke"), expires: s("expires"), hostname: s("hostname"),
+		users: b("users"), userAdd: s("user-add"), userPasswd: s("user-passwd"), userExpiry: s("user-expiry"), userDel: s("user-del"), userGrant: s("user-grant"), userRevoke: s("user-revoke"), expires: s("expires"),
 		power: s("power"), powerAt: s("at"), powerIn: fs.Int("in", 0, ""),
 		nodePause: b("node-pause"), nodeResume: b("node-resume"), nodeStatus: b("node-status"),
-		logShow: b("log"), logMin: s("log-min"), logGrep: s("log-grep"), logSince: s("log-since"), logLines: s("log-lines"), statsShow: b("stats"), statsClear: b("stats-clear"), cacheClear: b("cache-clear"), scanAddr: s("scan"), pingAddr: s("ping"), lookupAddr: s("lookup"), cacheFlush: s("cache-flush"), traceAddr: s("traceroute"), statsRange: s("stats-range"), statsRcode: s("stats-rcode"), statsClient: s("stats-client"), statsDomain: s("stats-domain"), whoisName: s("whois"), dnsLookup: s("dns-lookup"), hostShow: b("host"), allNodes: b("all-nodes"), captureList: b("capture-interfaces"), captureIface: s("capture"), captureSecs: s("capture-seconds"), captureFilter: s("capture-filter"), captureFile: s("capture-file"), dnsUpdates: b("dns-updates"), hostRange: s("host-range"),
+		logShow: b("log"), logMin: s("log-min"), logGrep: s("log-grep"), logSince: s("log-since"), logLines: s("log-lines"), statsShow: b("stats"), statsClear: b("stats-clear"), scanAddr: s("scan"), pingAddr: s("ping"), traceAddr: s("traceroute"), statsRange: s("stats-range"), statsOutcome: s("stats-outcome"), statsClient: s("stats-client"), statsServer: s("stats-server"), whoisName: s("whois"), nodeRename: s("node-rename"), hostLookup: s("host-lookup"), hostShow: b("host"), allNodes: b("all-nodes"), captureList: b("capture-interfaces"), captureIface: s("capture"), captureSecs: s("capture-seconds"), captureFilter: s("capture-filter"), captureFile: s("capture-file"), hostRange: s("host-range"),
 		bgp: b("bgp"), bgpDisable: b("bgp-disable"), bgpEnable: b("bgp-enable"), nbrDisable: s("bgp-neighbor-disable"), nbrEnable: s("bgp-neighbor-enable"), asn: s("asn"), routerID: s("router-id"), asPrepend: s("as-prepend"),
 		nbrAdd: s("bgp-neighbor-add"), nbrDel: s("bgp-neighbor-del"), remoteAS: s("remote-as"), descr: s("description"),
 		passwd:       s("password"),
 		multihop:     s("multihop"),
 		keepalive:    s("keepalive"),
 		hold:         s("hold"),
-		updateUpload: s("update-upload"), updatePush: s("update-push"), updateCancel: s("update-cancel"), updateAuto: s("update-auto"), updateRepo: s("update-repo"), clusterFailover: s("cluster-failover"),
+		updateUpload: s("update-upload"), updatePush: s("update-push"), updateCancel: s("update-cancel"), updateAuto: s("update-auto"), updateRepo: s("update-repo"),
 	}
 }
 
@@ -149,12 +145,23 @@ func (f *cliFlags) run(sock string) bool {
 		showVmacTest(sock, *f.group)
 	case *f.canvasAdd != "" || *f.canvasDel != "" || *f.canvasSet != "" || *f.canvasPause != "" || *f.canvasResume != "" || *f.canvasMove != "":
 		e := canvasEdit{Action: "add", Kind: *f.canvasAdd, Group: *f.group, VIP: *f.vip, VIP6: *f.vip6, Interface: *f.ifname, Label: *f.label, Anycast: *f.anycast, Address: *f.address, Scope: *f.scope, Node: *f.node, RealMACs: *f.realMACs,
-			Server: *f.server, Name: *f.name, Type: *f.qtype, ECS: *f.ecs, ECSv4: *f.ecsV4, ECSv6: *f.ecsV6,
-			LB: *f.lbMode, Spread: *f.spread, SpreadBand: *f.spreadBand, DownPercent: *f.downPercent, FailThreshold: *f.failThreshold, MaxAttempts: *f.maxAttempts, LatencyAlpha: *f.latencyAlpha, Pos: *f.pos}
+			Server: *f.server,
+			LB:     *f.lbMode, MaxStratum: *f.maxStratum, MaxRootDist: *f.maxRootDist, FailThreshold: *f.failThreshold, Pos: *f.pos}
+		if *f.maxOffset != "" {
+			if strings.EqualFold(*f.maxOffset, "off") {
+				e.MaxOffset = new(int)
+			} else {
+				n, err := strconv.Atoi(*f.maxOffset)
+				if err != nil || n < 0 {
+					fatalf("--max-offset takes a number of milliseconds, or off")
+				}
+				e.MaxOffset = &n
+			}
+		}
 		if *f.canvasMove != "" {
 			e.Action, e.Kind = "move", *f.canvasMove
-			if e.Kind != "server" && e.Kind != "domain" && e.Kind != "anycast" {
-				fatalf("only a server, a domain or an anycast address can be moved: --canvas-move server|domain|anycast ... --to N")
+			if e.Kind != "server" && e.Kind != "anycast" {
+				fatalf("only a server or an anycast address can be moved: --canvas-move server|anycast ... --to N")
 			}
 		}
 		if *f.canvasDel != "" {
@@ -169,11 +176,11 @@ func (f *cliFlags) run(sock string) bool {
 		if *f.canvasResume != "" {
 			e.Action, e.Kind = "resume", *f.canvasResume
 		}
-		if (e.Action == "pause" || e.Action == "resume") && e.Kind != "gateway" && e.Kind != "server" && e.Kind != "anycast" && e.Kind != "domain" {
-			fatalf("only a gateway, server, domain or anycast address can be paused: --canvas-%s gateway|server|domain|anycast --group N [--server ADDR] [--name DOMAIN] [--address ADDR] --scope node|all", e.Action)
+		if (e.Action == "pause" || e.Action == "resume") && e.Kind != "gateway" && e.Kind != "server" && e.Kind != "anycast" {
+			fatalf("only a gateway, server or anycast address can be paused: --canvas-%s gateway|server|anycast --group N [--server ADDR] [--address ADDR] --scope node|all", e.Action)
 		}
 		if e.Action == "del" && e.Kind == "gateway" {
-			askYes(fmt.Sprintf("Delete gateway %d with all its DNS servers and domains?", e.Group), *f.yes)
+			askYes(fmt.Sprintf("Delete gateway %d with all its NTP servers?", e.Group), *f.yes)
 		}
 		var r struct {
 			Message string `json:"message"`
@@ -283,7 +290,7 @@ func (f *cliFlags) run(sock string) bool {
 		}
 		decode(op(sock, "tls.csr", map[string]any{"cn": *f.cn, "dns": names, "ips": ips}), &r)
 		fmt.Print(r.CSR)
-		fmt.Fprintln(os.Stderr, "\nThe matching private key stays on this node. When your CA returns the certificate:\n  dnsdir --tls-install --cert-file CERT.pem")
+		fmt.Fprintln(os.Stderr, "\nThe matching private key stays on this node. When your CA returns the certificate:\n  ntpdir --tls-install --cert-file CERT.pem")
 	case *f.tlsRevert:
 		askYes("Remove the installed certificate and go back to the self-signed one?", *f.yes)
 		var i CertInfo
@@ -307,18 +314,14 @@ func (f *cliFlags) run(sock string) bool {
 			Expires time.Time `json:"expires"`
 		}
 		decode(op(sock, "cluster.token", nil), &r)
-		fmt.Printf("Join code (single use, valid until %s):\n\n%s\n\nOn the new node:  dnsdir --cluster-join '%s'\n", lt(r.Expires), r.Code, r.Code)
-		fmt.Println("\nThe new node's shared settings (DNS, VIPs, keys) will be replaced by this cluster's; its interface, priority and weight stay its own.")
+		fmt.Printf("Join code (single use, valid until %s):\n\n%s\n\nOn the new node:  ntpdir --cluster-join '%s'\n", lt(r.Expires), r.Code, r.Code)
+		fmt.Println("\nThe new node's shared settings (NTP block, VIPs, keys) will be replaced by this cluster's; its interface, priority and weight stay its own.")
 	case *f.clusterJoin != "":
-		askYes("Join this node to the cluster? Its shared settings (DNS block, VIPs, keys, timers) will be replaced by the cluster's; a snapshot of the current config is saved first.", *f.yes)
+		askYes("Join this node to the cluster? Its shared settings (NTP block, VIPs, keys, timers) will be replaced by the cluster's; a snapshot of the current config is saved first.", *f.yes)
 		var v ClusterView
 		decode(op(sock, "cluster.join", map[string]any{"code": *f.clusterJoin}), &v)
 		fmt.Println("Joined.")
 		printCluster(v)
-	case *f.clusterFailover != "":
-		var v ClusterView
-		decode(op(sock, "cluster.failover", map[string]any{"failover": *f.clusterFailover}), &v)
-		fmt.Println("Automatic failover:", failoverWords(v))
 	case *f.clusterPromote:
 		askYes("Promote THIS node to primary? Do this only if the current primary is gone (or you are moving the primary role on purpose).", *f.yes)
 		var r struct {
@@ -355,11 +358,9 @@ func (f *cliFlags) run(sock string) bool {
 		runHost(sock, f)
 	case *f.serverStats != "" || *f.gatewayStats != "":
 		runServerStats(sock, f)
-	case *f.dnsUpdates:
-		runDNSUpdates(sock)
-	case *f.dnsLookup != "":
+	case *f.hostLookup != "":
 		var r LookupResult
-		decode(op(sock, "dns.lookup", map[string]string{"lookup": *f.dnsLookup}), &r)
+		decode(op(sock, "host.lookup", map[string]string{"lookup": *f.hostLookup}), &r)
 		switch {
 		case !r.Found:
 			fatalf("%s", r.Error)
@@ -395,47 +396,29 @@ func (f *cliFlags) run(sock string) bool {
 		}
 	case *f.scanAddr != "":
 		runScan(sock, *f.scanAddr)
-	case *f.lookupAddr != "":
-		var r LookupFull
-		decode(op(sock, "dns.lookup.full", map[string]string{"lookup": *f.lookupAddr}), &r)
-		fmt.Println(r.Text)
-	case *f.cacheClear:
-		var r struct {
-			Cleared int
-		}
-		decode(op(sock, "cache.clear.cluster", map[string]string{}), &r)
-		fmt.Printf("the answer cache of every node emptied (%d answers)\n", r.Cleared)
-	case *f.cacheFlush != "":
-		var r struct {
-			Name    string
-			Flushed int
-		}
-		decode(op(sock, "cache.flush.cluster", map[string]string{"domain": *f.cacheFlush}), &r)
-		fmt.Printf("%d cached answer(s) for %s dropped, on every node\n", r.Flushed, r.Name)
 	case *f.pingAddr != "":
 		runNetTool(sock, "ping", *f.pingAddr)
 	case *f.traceAddr != "":
 		runNetTool(sock, "trace", *f.traceAddr)
 	case *f.whoisName != "":
 		var w WhoisInfo
-		decode(op(sock, "whois.get", map[string]string{"domain": *f.whoisName}), &w)
+		decode(op(sock, "whois.get", map[string]string{"lookup": *f.whoisName}), &w)
 		fmt.Println(w.Text())
 	// ── log ──
 	case *f.logShow:
 		runLog(sock, f)
-	// ── rename the host ──
-	case *f.hostname != "":
-		var r struct {
-			Message string `json:"message"`
-		}
-		decode(op(sock, "host.rename", map[string]string{"hostname": *f.hostname}), &r)
-		fmt.Println(r.Message)
 	// ── pause the whole node ──
 	case *f.nodePause || *f.nodeResume:
 		var r struct {
 			Message string `json:"message"`
 		}
 		decode(op(sock, "node.pause", map[string]bool{"paused": *f.nodePause}), &r)
+		fmt.Println(r.Message)
+	case *f.nodeRename != "":
+		var r struct {
+			Message string `json:"message"`
+		}
+		decode(op(sock, "node.rename", map[string]string{"name": *f.nodeRename}), &r)
 		fmt.Println(r.Message)
 	// ── scheduler ──
 	case *f.schedule || *f.scheduleHistory:
@@ -596,13 +579,9 @@ func printCert(i CertInfo) {
 	}
 }
 
-// failoverWords says what the automatic failover setting means now.
+// failoverWords says whether automatic failover is in force: always automatic, on from three members.
 func failoverWords(v ClusterView) string {
-	set := map[string]string{"": "automatic", "on": "on", "off": "off"}[v.Failover]
-	if v.Failover == "" {
-		return set + " (" + map[bool]string{true: "on", false: "off"}[v.FailoverOn] + " with " + itoa(len(v.Peers)) + " members; on from three)"
-	}
-	return set
+	return map[bool]string{true: "on", false: "off"}[v.FailoverOn] + " with " + itoa(len(v.Peers)) + " members (automatic, on from three)"
 }
 
 func printCluster(v ClusterView) {
@@ -739,14 +718,14 @@ func waitForUpdate(sock, target string) {
 					var v UpdateView
 					b, _ := json.Marshal(r2["data"])
 					json.Unmarshal(b, &v)
-					fmt.Printf("dnsdir is back, running v%s.\n", v.Running)
+					fmt.Printf("ntpdir is back, running v%s.\n", v.Running)
 					if v.Running != target {
 						fmt.Println("(not the expected version — see --update-history)")
 					}
 					return
 				}
 			}
-			fmt.Println("dnsdir did not come back within 30s; check: systemctl status dnsdir, journalctl -u dnsdir")
+			fmt.Println("ntpdir did not come back within 30s; check: systemctl status ntpdir, journalctl -u ntpdir")
 			return
 		}
 		var v UpdateView
@@ -781,7 +760,7 @@ func showCanvas(sock string) {
 	decodeData(res, &gws)
 	if len(gws) == 0 {
 		fmt.Println("The canvas is empty: no gateways. Draw one with:")
-		fmt.Println("  dnsdir --canvas-add gateway --vip 10.0.0.1/24 --interface eth0")
+		fmt.Println("  ntpdir --canvas-add gateway --vip 10.0.0.1/24 --interface eth0")
 		return
 	}
 	now := time.Now()
@@ -810,14 +789,21 @@ func showCanvas(sock string) {
 			}
 			fmt.Printf("      fallback servers: %s — %s\n", strings.Join(g.Fallback, ", "), note)
 		}
-		if g.ECS {
-			fmt.Println("      client subnet (ECS) is passed to the DNS servers")
-		}
 		if g.LBOwn {
-			fmt.Printf("      load balancing: this gateway's own (spread %s, band %d%%, down at %d%%, %d failures, %d servers tried) — --lb settings follows Settings\n",
-				map[bool]string{true: "on", false: "off"}[g.LB.Spread], g.LB.SpreadBand, g.LB.DownPercent, g.LB.FailThreshold, g.LB.MaxAttempts)
+			fmt.Printf("      health checks: this gateway's own (stratum up to %d, root distance up to %d ms, %s, %d failures) — --lb settings follows Settings\n",
+				g.LB.MaxStratum, g.LB.MaxRootDistanceMS, offLimit(g.LB.MaxOffsetMS), g.LB.FailThreshold)
 		}
 		for _, a := range g.Anycast {
+			if a.External {
+				state := "answering NTP; dnsdir announces it (on lo now)"
+				if !a.Up {
+					state = "not answering: " + orDefault(a.Reason, "dnsdir does not have it on lo")
+				} else if a.Reason != "" {
+					state += " (" + a.Reason + ")"
+				}
+				fmt.Printf("      dnsdir address %s — %s\n", a.Addr, state)
+				continue
+			}
 			state := "announced from this node (on lo)"
 			if !a.Up {
 				state = "withdrawn: " + orDefault(a.Reason, "not held")
@@ -845,38 +831,22 @@ func showCanvas(sock string) {
 		}
 		for i, s := range g.Servers {
 			lastS := i == len(g.Servers)-1
-			branch, pad := "├─", "│  "
+			branch := "├─"
 			if lastS {
-				branch, pad = "└─", "   "
+				branch = "└─"
 			}
 			extra := s.Detail
-			if s.Rank > 0 {
-				extra += fmt.Sprintf(" (rank %d)", s.Rank)
-			}
-			if s.InBand {
-				extra += " [spread: takes turns]"
-			}
 			who := s.Addr
 			if s.Name != "" {
 				who = s.Name + " (" + s.Addr + ")"
 			}
 			fmt.Printf("  %s %s [] server %s — %s\n", branch, canvasTag[s.Status], who, extra+upNote(s.Uptime))
-			for j, t := range s.Tests {
-				tb := "├─"
-				if j == len(s.Tests)-1 {
-					tb = "└─"
-				}
-				fmt.Printf("  %s %s %s /_\\ %s %s — %s\n", pad, tb, canvasTag[t.Status], t.Name, t.Type, t.Detail+upNote(t.Uptime))
-			}
-			if len(s.Tests) == 0 {
-				fmt.Printf("  %s    (no domains: add one with --canvas-add domain --group %d --server %s --name example.com)\n", pad, g.GroupID, s.Addr)
-			}
 		}
 		if len(g.Servers) == 0 {
-			fmt.Printf("      (no DNS servers: add one with --canvas-add server --group %d --server 8.8.8.8)\n", g.GroupID)
+			fmt.Printf("      (no NTP servers: add one with --canvas-add server --group %d --server 8.8.8.8)\n", g.GroupID)
 		}
 	}
-	fmt.Println("\n(O) gateway   [] DNS server   /_\\ domain tested on that server")
+	fmt.Println("\n(O) gateway   [] NTP server")
 }
 
 // runPower is --power restart|shutdown|cancel|status [--in MINUTES | --at HH:MM].
@@ -949,8 +919,8 @@ func runLog(sock string, f *cliFlags) {
 	}
 }
 
-// runStats is --stats [--stats-range now|1h|1d|7d|30d] [--stats-rcode noerror|servfail|nxdomain|refused|other|update]: totals, query types, transports and the
-// top clients and domains of the last hour (or day, week, month).  Memory only, last 30 days.
+// runStats is --stats [--stats-range now|1h|1d|7d|30d] [--stats-outcome answered|failed|kod|refused]: totals, NTP versions, address families and the
+// top clients and servers of the last hour (or day, week, month).  Memory only, last 30 days.
 func runStats(sock string, f *cliFlags) {
 	rng := *f.statsRange
 	if rng == "" {
@@ -961,7 +931,7 @@ func runStats(sock string, f *cliFlags) {
 	if *f.allNodes {
 		cmd = "qstats.cluster"
 	}
-	decode(op(sock, cmd, map[string]string{"from": rng, "rcode": *f.statsRcode, "client": *f.statsClient, "domain": *f.statsDomain}), &r)
+	decode(op(sock, cmd, map[string]string{"from": rng, "outcome": *f.statsOutcome, "client": *f.statsClient, "server": *f.statsServer}), &r)
 	printClusterNote(r.Cluster)
 	pct := func(n uint64) string {
 		if r.Sums.Total == 0 {
@@ -969,16 +939,15 @@ func runStats(sock string, f *cliFlags) {
 		}
 		return fmt.Sprintf("%5.1f%%", 100*float64(n)/float64(r.Sums.Total))
 	}
-	fmt.Printf("Queries answered since %s (statistics kept for 30 days, saved to disk; counting since %s)\n",
+	fmt.Printf("NTP requests since %s (statistics kept for 30 days, saved to disk; counting since %s)\n",
 		lt(time.Unix(r.From, 0)), lt(time.Unix(r.Since, 0)))
 	fmt.Printf("  Total          %10d\n", r.Sums.Total)
 	for _, row := range []struct {
 		n string
 		v uint64
-	}{{"No error", r.Sums.NoError}, {"Server failure", r.Sums.ServFail}, {"NX domain", r.Sums.NXDomain}, {"Refused", r.Sums.Refused}, {"Other", r.Sums.Other}} {
+	}{{"Answered", r.Sums.Answered}, {"No answer", r.Sums.Failed}, {"Kiss-o'-death", r.Sums.KoD}, {"Refused", r.Sums.Refused}} {
 		fmt.Printf("  %-14s %10d  %s\n", row.n, row.v, pct(row.v))
 	}
-	fmt.Printf("  Updates        %10d  (dynamic DNS, %d failed)\n", r.Sums.Updates, r.Sums.UpdFail)
 	fmt.Printf("  Clients        %10d\n", r.Sums.Clients)
 	list := func(title string, l []NameCount, host bool) {
 		if len(l) == 0 {
@@ -996,19 +965,19 @@ func runStats(sock string, f *cliFlags) {
 			fmt.Printf("  %10d  %s%s\n", e.Count, e.Name, extra)
 		}
 	}
-	if r.Rcode != "" {
-		fmt.Printf("\nThe lists below count only the queries answered %q.\n", r.Rcode)
+	if r.Outcome != "" {
+		fmt.Printf("\nThe lists below count only the requests with the outcome %q.\n", r.Outcome)
 	}
 	if r.Client != "" {
-		fmt.Printf("\nTop domains below: what %s asked for.\n", r.Client)
+		fmt.Printf("\nTop servers below: the servers that answered %s.\n", r.Client)
 	}
-	if r.Domain != "" {
-		fmt.Printf("\nTop clients below: who asked for %s.\n", r.Domain)
+	if r.Server != "" {
+		fmt.Printf("\nTop clients below: whom %s answered.\n", r.Server)
 	}
-	list("Query types", r.Types, false)
-	list("Transport", r.Protos, false)
+	list("NTP versions", r.Versions, false)
+	list("Address family", r.Families, false)
 	list("Top clients", r.Clients, true)
-	list("Top domains", r.Domains, false)
+	list("Top servers", r.Servers, false)
 	if g := r.Guard; g.Trims > 0 {
 		fmt.Printf("\nMemory guard: the oldest history was dropped %d time(s) to keep memory use under %.0f%%. Last: %s — %s\n", g.Trims, g.Limit, lt(time.Unix(g.Last, 0)), g.LastNote)
 	}
@@ -1139,38 +1108,9 @@ func humanBytes(v uint64) string {
 	return ""
 }
 
-// runDNSUpdates is --dns-updates: the recent dynamic DNS updates this node handled, newest first.
-func runDNSUpdates(sock string) {
-	var r struct {
-		Updates []UpdateLog `json:"updates"`
-	}
-	decode(op(sock, "dnsupdates.get", nil), &r)
-	if len(r.Updates) == 0 {
-		fmt.Println("No dynamic DNS updates since dnsdir started counting.")
-		return
-	}
-	fmt.Printf("Recent dynamic DNS updates (the last %d are kept), newest first\n", updLogMax)
-	for _, u := range r.Updates {
-		to := "not delivered"
-		if u.Addr != "" {
-			to = "primary " + u.Primary + " (" + u.Addr + ")"
-		}
-		fmt.Printf("\n%s  %s -> zone %s  %s  [%s]\n", lt(time.Unix(u.At, 0)), u.Client, u.Zone, u.Result, to)
-		if u.Note != "" {
-			fmt.Printf("    %s\n", u.Note)
-		}
-		for _, c := range u.Changes {
-			fmt.Printf("    %s\n", c)
-		}
-		if u.More > 0 {
-			fmt.Printf("    ... and %d more\n", u.More)
-		}
-	}
-}
-
-// runServerStats is --server-stats ADDR [--name DOMAIN [--type T]] or --gateway-stats GROUP, with [--stats-range 1h|1d|7d]:
-// how one upstream server, one monitored domain on a server, or one gateway has been doing (last 7 days): totals, and the
-// latest buckets of latency and loss (and, for a gateway, traffic, cache hits and availability).
+// runServerStats is --server-stats ADDR or --gateway-stats GROUP, with [--stats-range 1h|1d|7d]:
+// how one upstream server or one gateway has been doing (last 7 days): totals, and the latest buckets of
+// round-trip time, loss and clock offset (and, for a gateway, traffic and availability).
 func runServerStats(sock string, f *cliFlags) {
 	rng := *f.statsRange
 	if rng == "" {
@@ -1183,15 +1123,9 @@ func runServerStats(sock string, f *cliFlags) {
 			fatalf("--gateway-stats takes a gateway's group number (1-255)")
 		}
 		key, what = gwKey(n), fmt.Sprintf("Gateway (group %d)", n)
-	} else if *f.name != "" {
-		typ := *f.qtype
-		if typ == "" {
-			typ = "A"
-		}
-		key, what = domKey(*f.serverStats, *f.name, typ), fmt.Sprintf("Domain %s %s on server %s", *f.name, strings.ToUpper(typ), *f.serverStats)
 	}
 	var r ServerStatsResult
-	decode(op(sock, "dns.serverstats", map[string]string{"addr": key, "from": rng}), &r)
+	decode(op(sock, "ntp.serverstats", map[string]string{"addr": key, "from": rng}), &r)
 	if !r.Known {
 		fmt.Printf("Nothing recorded for %s: it is not configured on this node (or the daemon has only just started).\n", what)
 		return
@@ -1208,22 +1142,22 @@ func runServerStats(sock string, f *cliFlags) {
 	gw := r.Kind == "gateway"
 	switch r.Kind {
 	case "gateway":
-		fmt.Printf("  client queries answered %d, failed (SERVFAIL/REFUSED) %d, of which from the cache %d\n", r.Answered, r.Failed, r.Hits)
-		fmt.Printf("  answer time average %.2f ms, worst %.2f ms; errors %.2f%% of queries; ", r.AvgMS, r.MaxMS, r.LossPct)
+		fmt.Printf("  client requests answered %d, failed (no answer) %d\n", r.Answered, r.Failed)
+		fmt.Printf("  answer time average %.2f ms, worst %.2f ms; errors %.2f%% of requests; ", r.AvgMS, r.MaxMS, r.LossPct)
 		if r.AvailPct >= 0 {
 			fmt.Printf("available %.2f%% of the time\n\n", r.AvailPct)
 		} else {
 			fmt.Printf("availability not sampled in this range\n\n")
 		}
-		fmt.Printf("  %-11s %9s %9s %8s %8s %8s %8s\n", "time", "avg ms", "worst ms", "err %", "avail %", "q/s", "cache/s")
-	case "domain":
-		fmt.Printf("  probes passed %d, failed %d\n", r.ProbesOK, r.ProbesBad)
-		fmt.Printf("  latency average %.2f ms, worst %.2f ms; probes failed %.2f%%\n\n", r.AvgMS, r.MaxMS, r.LossPct)
-		fmt.Printf("  %-11s %9s %9s %8s\n", "time", "avg ms", "worst ms", "fail %")
+		fmt.Printf("  %-11s %9s %9s %8s %8s %8s\n", "time", "avg ms", "worst ms", "err %", "avail %", "req/s")
 	default:
-		fmt.Printf("  live queries answered %d, failed %d; probe queries passed %d, failed %d\n", r.Answered, r.Failed, r.ProbesOK, r.ProbesBad)
-		fmt.Printf("  latency average %.2f ms, worst %.2f ms; probes failed %.2f%%; client queries failed %.2f%%\n\n", r.AvgMS, r.MaxMS, r.LossPct, r.QueryLossPct)
-		fmt.Printf("  %-11s %9s %9s %8s %9s %9s\n", "time", "avg ms", "worst ms", "loss %", "query %", "queries")
+		fmt.Printf("  client requests answered %d, failed %d; probes passed %d, failed %d\n", r.Answered, r.Failed, r.ProbesOK, r.ProbesBad)
+		off := "-"
+		if r.AvgOffsetMS != nil {
+			off = fmt.Sprintf("%+.2f ms", *r.AvgOffsetMS)
+		}
+		fmt.Printf("  round trip average %.2f ms, worst %.2f ms; probes failed %.2f%%; client requests failed %.2f%%; clock offset average %s\n\n", r.AvgMS, r.MaxMS, r.LossPct, r.QueryLossPct, off)
+		fmt.Printf("  %-11s %9s %9s %8s %9s %9s %11s\n", "time", "avg ms", "worst ms", "loss %", "req %", "requests", "offset ms")
 	}
 	num := func(v float64, f string) string {
 		if v < 0 {
@@ -1242,11 +1176,13 @@ func runServerStats(sock string, f *cliFlags) {
 		}
 		switch {
 		case gw:
-			fmt.Printf("  %-11s %9s %9s %8s %8s %8s %8s\n", t, num(r.Latency[i], "%.2f"), num(r.LatMax[i], "%.2f"), num(r.Loss[i], "%.2f"), num(r.Avail[i], "%.2f"), num(r.QPS[i], "%.1f"), num(r.HitQPS[i], "%.1f"))
-		case r.Kind == "domain":
-			fmt.Printf("  %-11s %9s %9s %8s\n", t, num(r.Latency[i], "%.2f"), num(r.LatMax[i], "%.2f"), num(r.Loss[i], "%.2f"))
+			fmt.Printf("  %-11s %9s %9s %8s %8s %8s\n", t, num(r.Latency[i], "%.2f"), num(r.LatMax[i], "%.2f"), num(r.Loss[i], "%.2f"), num(r.Avail[i], "%.2f"), num(r.QPS[i], "%.1f"))
 		default:
-			fmt.Printf("  %-11s %9s %9s %8s %9s %9s\n", t, num(r.Latency[i], "%.2f"), num(r.LatMax[i], "%.2f"), num(r.Loss[i], "%.2f"), num(r.QueryLoss[i], "%.2f"), num(r.Queries[i], "%.0f"))
+			offs := "-"
+			if i < len(r.Offset) && r.Offset[i] != nil {
+				offs = fmt.Sprintf("%+.2f", *r.Offset[i])
+			}
+			fmt.Printf("  %-11s %9s %9s %8s %9s %9s %11s\n", t, num(r.Latency[i], "%.2f"), num(r.LatMax[i], "%.2f"), num(r.Loss[i], "%.2f"), num(r.QueryLoss[i], "%.2f"), num(r.Queries[i], "%.0f"), offs)
 		}
 		rows++
 	}
@@ -1377,7 +1313,7 @@ func showVmacTest(sock string, group int) {
 			fmt.Printf("    %s: %s\n", f.AF, f.Detail)
 		}
 		if r.Verdict == vmacNotDelivered {
-			fmt.Printf("    To run without virtual MACs on every node: dnsdir --canvas-set gateway --group %d --real-macs on\n", r.GroupID)
+			fmt.Printf("    To run without virtual MACs on every node: ntpdir --canvas-set gateway --group %d --real-macs on\n", r.GroupID)
 		}
 	}
 }
@@ -1389,7 +1325,7 @@ func runTshoot(sock string, all, capture bool, file string) {
 		cmd = "tshoot.cluster"
 	}
 	if file == "" {
-		file = "dnsdir-tshoot-" + selfHost() + "-" + time.Now().Format("20060102-150405") + ".tgz"
+		file = "ntpdir-tshoot-" + selfHost() + "-" + time.Now().Format("20060102-150405") + ".tgz"
 	}
 	fmt.Fprintln(os.Stderr, "collecting (up to a minute)…")
 	var b struct {

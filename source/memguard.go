@@ -10,26 +10,26 @@ import (
 	"time"
 )
 
-// The memory guard.  The statistics, the host history and the answer cache all live in memory, and the
-// statistics and host history grow up to 30 days of data.  Every memGuardEvery the guard looks at how much
+// The memory guard.  The statistics and the host history live in memory, and they
+// grow up to 30 days of data.  Every memGuardEvery the guard looks at how much
 // memory the machine is using (the same figure as Monitor ▸ Host: what programs hold, caches excluded; inside a
 // container with a memory limit, the container's own use against its limit, whichever is higher).  At or above
 // the limit (85 % by default) it drops the oldest data: each round removes the oldest tenth of the time span the
-// statistics and the host history cover, and a tenth of the answer cache (the least recently used entries), gives
+// statistics and the host history cover, gives
 // the memory back to the system and measures again, up to memGuardRounds rounds per check, until use is below
 // the limit.  If it is still above, the next check carries on.  Newer data always outlives older data, and the newest hour is never dropped (it is tiny, and a machine that
 // is short of memory for another reason should not lose its recent history as well).
 //
-// The limit can be changed with the environment variable DNSDIR_MEMORY_LIMIT_PERCENT (1-99) of the daemon.
+// The limit can be changed with the environment variable NTPDIR_MEMORY_LIMIT_PERCENT (1-99) of the daemon.
 
 const (
 	memGuardEvery  = 30 * time.Second
 	memGuardLimit  = 85.0
-	memGuardStep   = 0.10      // of the time span covered (statistics, host) or of the entries (cache) per round
+	memGuardStep   = 0.10      // of the time span covered (statistics, host) per round
 	memGuardRounds = 5         // rounds per check
 	memGuardKeep   = time.Hour // the newest hour of statistics and host history is never dropped
 	memGuardSettle = time.Second
-	memGuardEnv    = "DNSDIR_MEMORY_LIMIT_PERCENT"
+	memGuardEnv    = "NTPDIR_MEMORY_LIMIT_PERCENT"
 )
 
 // MemGuardInfo is what the Host page and --host say about the guard.
@@ -44,7 +44,6 @@ type memGuard struct {
 	mu     sync.Mutex
 	limit  float64
 	usage  func() (float64, error) // percent of memory in use
-	caches func() []*respCache
 	now    func() time.Time
 	free   func() // hand freed memory back to the system
 	settle time.Duration
@@ -55,8 +54,7 @@ type memGuard struct {
 var memguard = newMemGuard()
 
 func newMemGuard() *memGuard {
-	g := &memGuard{limit: memGuardLimit, usage: memUsagePercent, now: time.Now, free: debug.FreeOSMemory, settle: memGuardSettle,
-		caches: func() []*respCache { return nil }}
+	g := &memGuard{limit: memGuardLimit, usage: memUsagePercent, now: time.Now, free: debug.FreeOSMemory, settle: memGuardSettle}
 	if v := strings.TrimSpace(os.Getenv(memGuardEnv)); v != "" {
 		if n, err := strconv.ParseFloat(v, 64); err == nil && n >= 1 && n <= 99 {
 			g.limit = n
@@ -90,17 +88,16 @@ func (g *memGuard) Run(stop <-chan struct{}) {
 
 // trimmed is what one round removed.
 type trimmed struct {
-	statSlots, statMinutes, hostMinutes, cacheEntries int
+	statSlots, statMinutes, hostMinutes int
 }
 
 func (t *trimmed) add(o trimmed) {
 	t.statSlots += o.statSlots
 	t.statMinutes += o.statMinutes
 	t.hostMinutes += o.hostMinutes
-	t.cacheEntries += o.cacheEntries
 }
 
-func (t trimmed) any() bool { return t.statSlots+t.statMinutes+t.hostMinutes+t.cacheEntries > 0 }
+func (t trimmed) any() bool { return t.statSlots+t.statMinutes+t.hostMinutes > 0 }
 
 // check measures once and, at or above the limit, trims.  It reports whether it dropped anything.
 func (g *memGuard) check() bool {
@@ -128,11 +125,11 @@ func (g *memGuard) check() bool {
 		}
 	}
 	if !total.any() {
-		warnf("memory guard: memory use is %.1f%% (limit %.0f%%), but there is no statistics, host history or cache left to drop", start, g.limit)
+		warnf("memory guard: memory use is %.1f%% (limit %.0f%%), but there is no statistics or host history left to drop", start, g.limit)
 		return false
 	}
-	note := fmt.Sprintf("memory was %.1f%% (limit %.0f%%): dropped the oldest history (%d statistics minutes and %d top-list slots, %d host minutes) and %d cached answers; now %.1f%%",
-		start, g.limit, total.statMinutes, total.statSlots, total.hostMinutes, total.cacheEntries, pct)
+	note := fmt.Sprintf("memory was %.1f%% (limit %.0f%%): dropped the oldest history (%d statistics minutes and %d top-list slots, %d host minutes); now %.1f%%",
+		start, g.limit, total.statMinutes, total.statSlots, total.hostMinutes, pct)
 	warnf("memory guard: %s", note)
 	g.mu.Lock()
 	g.info.Trims++
@@ -142,7 +139,7 @@ func (g *memGuard) check() bool {
 	return true
 }
 
-// trimRound drops the oldest tenth of the history and of the cache.  The second result is where the
+// trimRound drops the oldest tenth of the history.  The second result is where the
 // history started before the round.
 func (g *memGuard) trimRound() (trimmed, time.Time) {
 	var r trimmed
@@ -164,11 +161,6 @@ func (g *memGuard) trimRound() (trimmed, time.Time) {
 		if before.After(oldest) {
 			r.statSlots, r.statMinutes = qstats.dropBefore(before)
 			r.hostMinutes = hoststats.dropBefore(before)
-		}
-	}
-	for _, c := range g.caches() {
-		if c != nil {
-			r.cacheEntries += c.dropOldest(memGuardStep)
 		}
 	}
 	return r, oldest
@@ -263,21 +255,6 @@ func (h *HostStats) dropBefore(t time.Time) (minutes int) {
 		}
 	}
 	return
-}
-
-// dropOldest removes a fraction of the entries, least recently used first (at least one if there are any).
-func (c *respCache) dropOldest(frac float64) int {
-	dropped := 0
-	for _, sh := range c.shards { // the same fraction from every shard
-		sh.mu.Lock()
-		n := int(float64(len(sh.m))*frac + 0.999)
-		for i := 0; i < n && sh.lru.Len() > 0; i++ {
-			sh.drop(sh.lru.Back().Value.(*cacheEntry))
-			dropped++
-		}
-		sh.mu.Unlock()
-	}
-	return dropped
 }
 
 // ── how much memory is in use ──

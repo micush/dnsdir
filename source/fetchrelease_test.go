@@ -22,16 +22,16 @@ func fakeGitHub(t *testing.T, release string, tags string, archives map[string][
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n.Add(1)
 		switch {
-		case r.URL.Path == "/repos/micush/dnsdir/releases/latest":
+		case r.URL.Path == "/repos/micush/ntpdir/releases/latest":
 			if release == "" {
 				http.NotFound(w, r)
 				return
 			}
 			w.Write([]byte(`{"tag_name":"` + release + `"}`))
-		case r.URL.Path == "/repos/micush/dnsdir/tags":
+		case r.URL.Path == "/repos/micush/ntpdir/tags":
 			w.Write([]byte(tags))
-		case strings.HasPrefix(r.URL.Path, "/micush/dnsdir/archive/refs/tags/"):
-			tag := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/micush/dnsdir/archive/refs/tags/"), ".tar.gz")
+		case strings.HasPrefix(r.URL.Path, "/micush/ntpdir/archive/refs/tags/"):
+			tag := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/micush/ntpdir/archive/refs/tags/"), ".tar.gz")
 			if b, ok := archives[tag]; ok {
 				w.Write(b)
 				return
@@ -92,11 +92,11 @@ func TestNormalizeRepo(t *testing.T) {
 	good := map[string]string{
 		"":                                       "",
 		"default":                                "",
-		"https://github.com/micush/dnsdir":       "", // the default is stored as empty
-		"https://github.com/micush/dnsdir/":      "",
-		"github.com/micush/dnsdir.git":           "",
-		"micush/dnsdir":                          "",
-		"https://github.com/someone/dnsdir-fork": "someone/dnsdir-fork",
+		"https://github.com/micush/ntpdir":       "", // the default is stored as empty
+		"https://github.com/micush/ntpdir/":      "",
+		"github.com/micush/ntpdir.git":           "",
+		"micush/ntpdir":                          "",
+		"https://github.com/someone/ntpdir-fork": "someone/ntpdir-fork",
 		"  https://www.github.com/a.b/c_d.git ":  "a.b/c_d",
 		"someone/fork":                           "someone/fork",
 	}

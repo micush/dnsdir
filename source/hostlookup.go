@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Name and address lookups for the "add DNS server" form (and `dnsdir --dns-lookup`): given an IP address, its reverse
+// Name and address lookups for the "add DNS server" form (and `ntpdir --dns-lookup`): given an IP address, its reverse
 // (PTR) name; given a host name, its address.  They are asked of this node's own resolver, once, when the person fills
 // in one of the two fields, and nothing is stored: the form puts the answer in the other field, where it can be
 // changed freely.
@@ -68,7 +68,7 @@ func hostLookup(q string) (LookupResult, error) {
 		}
 		sort.Strings(names)
 		n := strings.TrimSuffix(names[0], ".")
-		if len([]rune(n)) > maxServerName { // longer than a name can be: fall back to the first label
+		if len([]rune(n)) > 40 { // the diagram label is at most 40 characters: fall back to the first label
 			n = strings.SplitN(n, ".", 2)[0]
 		}
 		r.Name, r.Found = n, true

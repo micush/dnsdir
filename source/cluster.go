@@ -196,11 +196,11 @@ func (n *ClusterNode) loadIdentity() error {
 	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 120))
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "dnsdir-node-" + n.st.NodeID},
+		Subject:      pkix.Name{CommonName: "ntpdir-node-" + n.st.NodeID},
 		NotBefore:    time.Now().Add(-time.Hour), NotAfter: time.Now().Add(10 * 365 * 24 * time.Hour),
 		KeyUsage:    x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames:    []string{peerServerName},
+		DNSNames:    []string{"ntpdir-node"},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &k.PublicKey, k)
 	if err != nil {
@@ -586,7 +586,7 @@ func (n *ClusterNode) BumpShared(hash string) bool {
 // ── join tokens ──────────────────────────────────────────────────────────────
 
 func hashToken(tok string) string {
-	h := sha256.Sum256([]byte("ddgw-join-v1\x00" + tok))
+	h := sha256.Sum256([]byte("ntpdir-join-v1\x00" + tok))
 	return hex.EncodeToString(h[:])
 }
 

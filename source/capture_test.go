@@ -71,33 +71,37 @@ func arpPkt(op uint16, sha []byte, spa string, tha []byte, tpa string) []byte {
 	return append(p, net.ParseIP(tpa).To4()...)
 }
 
-func dnsQuery(name string, qt uint16) []byte { return cacheQuery(name, qt, nil) }
+// ntpQuery is a client request; ntpReply the answer of a server at the given stratum (0 is a kiss-o'-death).
+func ntpQuery() []byte { return buildNTPRequest(0x1122334455667788) }
 
-func dnsReply(q []byte, rcode byte, an int) []byte {
+func ntpReply(q []byte, stratum byte) []byte {
 	r := append([]byte(nil), q...)
-	r[2] |= 0x80
-	r[3] = r[3]&0xf0 | rcode
-	binary.BigEndian.PutUint16(r[6:], uint16(an))
+	r[0] = r[0]&^7 | ntpModeServer
+	r[1] = stratum
+	if stratum == 0 {
+		copy(r[12:16], "RATE")
+	} else {
+		copy(r[12:16], []byte{10, 0, 0, 1})
+	}
 	return r
 }
 
 func TestCapSummaries(t *testing.T) {
-	q := dnsQuery("Example.COM", 1)
+	q := ntpQuery()
 	for name, c := range map[string]struct {
 		frame []byte
 		want  string
 	}{
-		"dns query":       {eth(macA, macB, 0x0800, ip4("192.0.2.1", "10.20.0.205", 17, udp(53124, 53, q))), "UDP 192.0.2.1.53124 > 10.20.0.205.53, length"},
-		"dns query text":  {eth(macA, macB, 0x0800, ip4("192.0.2.1", "10.20.0.205", 17, udp(53124, 53, q))), "DNS A? example.com"},
-		"dns reply":       {eth(macB, macA, 0x0800, ip4("10.20.0.205", "192.0.2.1", 17, udp(53, 53124, dnsReply(q, 3, 0)))), "DNS NXDOMAIN 0 ans A example.com"},
-		"dns reply ok":    {eth(macB, macA, 0x0800, ip4("10.20.0.205", "192.0.2.1", 17, udp(53, 53124, dnsReply(q, 0, 2)))), "DNS NOERROR 2 ans"},
-		"dns over tcp":    {eth(macA, macB, 0x0800, ip4("192.0.2.1", "10.20.0.205", 6, tcp(40000, 53, 0x18, append([]byte{0, byte(len(q))}, q...)))), "DNS A? example.com"},
+		"ntp query":       {eth(macA, macB, 0x0800, ip4("192.0.2.1", "10.20.0.205", 17, udp(53124, 123, q))), "UDP 192.0.2.1.53124 > 10.20.0.205.123, length"},
+		"ntp query text":  {eth(macA, macB, 0x0800, ip4("192.0.2.1", "10.20.0.205", 17, udp(53124, 123, q))), "NTPv4 client"},
+		"ntp reply":       {eth(macB, macA, 0x0800, ip4("10.20.0.205", "192.0.2.1", 17, udp(123, 53124, ntpReply(q, 2)))), "NTPv4 server stratum 2 ref 10.0.0.1"},
+		"ntp kod":         {eth(macB, macA, 0x0800, ip4("10.20.0.205", "192.0.2.1", 17, udp(123, 53124, ntpReply(q, 0)))), "kiss-o'-death RATE"},
 		"tcp syn":         {eth(macA, macB, 0x0800, ip4("192.0.2.1", "10.0.0.2", 6, tcp(1234, 443, 0x02, nil))), "TCP 192.0.2.1.1234 > 10.0.0.2.443 [S]"},
 		"tcp synack":      {eth(macA, macB, 0x0800, ip4("192.0.2.1", "10.0.0.2", 6, tcp(1234, 443, 0x12, nil))), "[S.]"},
 		"icmp echo":       {eth(macA, macB, 0x0800, ip4("192.0.2.1", "10.0.0.2", 1, []byte{8, 0, 0, 0})), "ICMP 192.0.2.1 > 10.0.0.2: echo request"},
 		"arp request":     {eth([]byte{255, 255, 255, 255, 255, 255}, macB, 0x0806, arpPkt(1, macB, "10.20.0.1", make([]byte, 6), "10.20.0.205")), "ARP, who-has 10.20.0.205 tell 10.20.0.1 (eth 02:00:00:aa:bb:cc > ff:ff:ff:ff:ff:ff)"},
 		"arp reply":       {eth(macB, []byte{0x02, 9, 9, 9, 9, 9}, 0x0806, arpPkt(2, macA, "10.20.0.205", macB, "10.20.0.1")), "ARP, 10.20.0.205 is-at 00:1a:7c:01:02:00 (eth 02:09:09:09:09:09 > 02:00:00:aa:bb:cc)"},
-		"ipv6 udp":        {eth(macA, macB, 0x86dd, ip6("2001:db8::1", "2001:db8::2", 17, udp(1000, 53, q))), "UDP 2001:db8::1.1000 > 2001:db8::2.53"},
+		"ipv6 udp":        {eth(macA, macB, 0x86dd, ip6("2001:db8::1", "2001:db8::2", 17, udp(1000, 123, q))), "UDP 2001:db8::1.1000 > 2001:db8::2.123"},
 		"vlan":            {eth(macA, macB, 0x8100, append([]byte{0, 5, 8, 0}, ip4("192.0.2.1", "10.0.0.2", 17, udp(1, 2, nil))...)), "UDP 192.0.2.1.1 > 10.0.0.2.2"},
 		"other ethertype": {eth(macA, macB, 0x88cc, []byte{1, 2, 3}), "ethertype 0x88cc"},
 		"short":           {[]byte{1, 2, 3}, "short frame (3 bytes)"},
@@ -122,44 +126,44 @@ func TestCapSummaries(t *testing.T) {
 }
 
 func TestCapFilter(t *testing.T) {
-	q := dnsQuery("example.com", 1)
-	dq := eth(macA, macB, 0x0800, ip4("192.0.2.1", "10.20.0.205", 17, udp(53124, 53, q))) // client > VIP, DNS
-	dr := eth(macB, macA, 0x0800, ip4("10.20.0.205", "192.0.2.1", 17, udp(53, 53124, q))) // VIP > client
+	q := ntpQuery()
+	dq := eth(macA, macB, 0x0800, ip4("192.0.2.1", "10.20.0.205", 17, udp(53124, 123, q))) // client > VIP, DNS
+	dr := eth(macB, macA, 0x0800, ip4("10.20.0.205", "192.0.2.1", 17, udp(123, 53124, q))) // VIP > client
 	web := eth(macA, macB, 0x0800, ip4("192.0.2.9", "10.0.0.2", 6, tcp(40000, 443, 0x02, nil)))
-	v6 := eth(macA, macB, 0x86dd, ip6("2001:db8::1", "2001:db8::2", 6, tcp(40000, 53, 0x02, nil)))
+	v6 := eth(macA, macB, 0x86dd, ip6("2001:db8::1", "2001:db8::2", 6, tcp(40000, 123, 0x02, nil)))
 	arpq := eth([]byte{255, 255, 255, 255, 255, 255}, macB, 0x0806, arpPkt(1, macB, "10.20.0.1", make([]byte, 6), "10.20.0.205"))
 	ping := eth(macA, macB, 0x0800, ip4("192.0.2.1", "10.0.0.2", 1, []byte{8, 0, 0, 0}))
 	frames := map[string][]byte{"dq": dq, "dr": dr, "web": web, "v6": v6, "arp": arpq, "ping": ping}
 	for filter, want := range map[string]string{
-		"":                                     "dq dr web v6 arp ping",
-		"host 10.20.0.205":                     "dq dr arp", // the ARP's target address counts, as in tcpdump
-		"src host 10.20.0.205":                 "dr",
-		"dst host 10.20.0.205":                 "dq arp",
-		"net 192.0.2.0/24":                     "dq dr web ping",
-		"src net 192.0.2.0/24 and not port 53": "web ping",
-		"port 53":                              "dq dr v6",
-		"dst port 53":                          "dq v6",
-		"src port 53":                          "dr",
-		"portrange 50-60":                      "dq dr v6",
-		"dns":                                  "dq dr v6",
-		"udp":                                  "dq dr",
-		"tcp":                                  "web v6",
-		"tcp port 53":                          "v6",
-		"udp port 53 and host 192.0.2.1":       "dq dr",
-		"ip6":                                  "v6",
-		"ip6 host 2001:db8::1":                 "v6",
-		"ip host 2001:db8::1":                  "",
-		"arp":                                  "arp",
-		"icmp":                                 "ping",
-		"host 10.20.0.205 and not arp":         "dq dr",
-		"(tcp or icmp) and host 192.0.2.9":     "web",
-		"tcp || icmp":                          "web v6 ping",
-		"! udp && ! arp":                       "web v6 ping",
-		"ether host 00:1a:7c:01:02:00":         "dq dr web v6 ping",
-		"ether src 00:1a:7c:01:02:00":          "dr",
-		"ether dst 02:00:00:aa:bb:cc":          "dr",
-		"UDP PORT DOMAIN":                      "dq dr",
-		"port https":                           "web",
+		"":                                      "dq dr web v6 arp ping",
+		"host 10.20.0.205":                      "dq dr arp", // the ARP's target address counts, as in tcpdump
+		"src host 10.20.0.205":                  "dr",
+		"dst host 10.20.0.205":                  "dq arp",
+		"net 192.0.2.0/24":                      "dq dr web ping",
+		"src net 192.0.2.0/24 and not port 123": "web ping",
+		"port 123":                              "dq dr v6",
+		"dst port 123":                          "dq v6",
+		"src port 123":                          "dr",
+		"portrange 100-130":                     "dq dr v6",
+		"ntp":                                   "dq dr v6",
+		"udp":                                   "dq dr",
+		"tcp":                                   "web v6",
+		"tcp port 123":                          "v6",
+		"udp port 123 and host 192.0.2.1":       "dq dr",
+		"ip6":                                   "v6",
+		"ip6 host 2001:db8::1":                  "v6",
+		"ip host 2001:db8::1":                   "",
+		"arp":                                   "arp",
+		"icmp":                                  "ping",
+		"host 10.20.0.205 and not arp":          "dq dr",
+		"(tcp or icmp) and host 192.0.2.9":      "web",
+		"tcp || icmp":                           "web v6 ping",
+		"! udp && ! arp":                        "web v6 ping",
+		"ether host 00:1a:7c:01:02:00":          "dq dr web v6 ping",
+		"ether src 00:1a:7c:01:02:00":           "dr",
+		"ether dst 02:00:00:aa:bb:cc":           "dr",
+		"UDP PORT NTP":                          "dq dr",
+		"port https":                            "web",
 	} {
 		f, err := compileCapFilter(filter)
 		if err != nil {
@@ -182,13 +186,13 @@ func TestCapFilter(t *testing.T) {
 		}
 	}
 	// a fragment other than the first carries no ports
-	frag := ip4("192.0.2.1", "10.0.0.2", 17, udp(1000, 53, nil))
+	frag := ip4("192.0.2.1", "10.0.0.2", 17, udp(1000, 123, nil))
 	binary.BigEndian.PutUint16(frag[6:], 0x00b9) // fragment offset 185
-	if f, _ := compileCapFilter("port 53"); f.match(linktypeEthernet, eth(macA, macB, 0x0800, frag)) {
+	if f, _ := compileCapFilter("port 123"); f.match(linktypeEthernet, eth(macA, macB, 0x0800, frag)) {
 		t.Error("a later fragment matched on a port")
 	}
 	// a truncated frame never panics
-	f, _ := compileCapFilter("tcp port 53 or host 1.2.3.4 or ether host 00:00:00:00:00:00")
+	f, _ := compileCapFilter("tcp port 123 or host 1.2.3.4 or ether host 00:00:00:00:00:00")
 	for n := 0; n <= len(v6); n++ {
 		f.match(linktypeEthernet, v6[:n])
 		summarizePacket(linktypeEthernet, v6[:n])
@@ -250,7 +254,7 @@ func TestPcapRoundTripAndLimit(t *testing.T) {
 	t0 := time.Unix(1700000000, 123456000)
 	var frames [][]byte
 	for i := 0; i < 20; i++ {
-		f := eth(macA, macB, 0x0800, ip4("192.0.2.1", "10.0.0.2", 17, udp(uint16(1000+i), 53, dnsQuery("x.example", 1))))
+		f := eth(macA, macB, 0x0800, ip4("192.0.2.1", "10.0.0.2", 17, udp(uint16(1000+i), 123, ntpQuery())))
 		frames = append(frames, f)
 		cs.add(ep, nil, t0.Add(time.Duration(i)*time.Millisecond), f)
 	}
@@ -311,7 +315,7 @@ func sendUDP(t *testing.T, port int, n int) {
 	}
 	defer c.Close()
 	for i := 0; i < n; i++ {
-		c.Write([]byte("dnsdir capture test"))
+		c.Write([]byte("ntpdir capture test"))
 		time.Sleep(5 * time.Millisecond)
 	}
 }
@@ -714,11 +718,11 @@ func TestNodeAddrCandidatesLeaveOutSharedAddresses(t *testing.T) {
 	ifs := []ifaceAddrs{
 		{Name: "lo", Loopback: true, Addrs: []net.Addr{ipn("127.0.0.1/8"), ipn("192.168.168.168/32")}}, // the anycast address is on lo
 		{Name: "eth0", Addrs: []net.Addr{ipn("192.0.2.5/24"), ipn("2001:db8::5/64"), ipn("fe80::1/64"), ipn("192.0.2.9/24")}},
-		{Name: "dnsdir1.2", Addrs: []net.Addr{ipn("192.0.2.9/24"), ipn("2001:db8::9/64")}}, // the VIPs, on the virtual-MAC interface
+		{Name: "ntpdir1.2", Addrs: []net.Addr{ipn("192.0.2.9/24"), ipn("2001:db8::9/64")}}, // the VIPs, on the virtual-MAC interface
 		{Name: "eth1", Addrs: []net.Addr{ipn("198.51.100.7/24")}},
 	}
-	got := nodeAddrCandidates("192.0.2.5:53854", "ns1", ifs, map[string]bool{"192.0.2.9": true, "2001:db8::9": true, "192.168.168.168": true})
-	want := []string{"192.0.2.5:53854", "ns1:53854", "[2001:db8::5]:53854", "198.51.100.7:53854"}
+	got := nodeAddrCandidates("192.0.2.5:12381", "ns1", ifs, map[string]bool{"192.0.2.9": true, "2001:db8::9": true, "192.168.168.168": true})
+	want := []string{"192.0.2.5:12381", "ns1:12381", "[2001:db8::5]:12381", "198.51.100.7:12381"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("got %v, want %v", got, want)
 	}
@@ -735,14 +739,14 @@ func TestSharedAddrsComeFromTheGateways(t *testing.T) {
 	e := newWebEnv(t)
 	dc, _, _ := e.mg.LiveConfig()
 	g := defaultGroup()
-	g.GroupID, g.VIP4, g.VIP6, g.ExtraVIPs = 1, "10.20.0.205/28", "2620:ad:8081:c0cf:10:129:0:205/64", []string{"192.168.168.168", "fd00::53/128"}
+	g.GroupID, g.VIP4, g.VIP6, g.ExtraVIPs = 1, "10.20.0.205/28", "2620:ad:8081:c0cf:10:129:0:205/64", []string{"192.168.168.168", "fd00::123/128"}
 	dc.Groups = []GroupConfig{g}
 	if err := e.mg.PutConfig(dc, "t", ""); err != nil {
 		t.Skipf("cannot set the test config: %v", err)
 	}
 	c := &Cluster{mg: e.mg}
 	sh := c.sharedAddrs()
-	for _, want := range []string{"10.20.0.205", "2620:ad:8081:c0cf:10:129:0:205", "192.168.168.168", "fd00::53"} {
+	for _, want := range []string{"10.20.0.205", "2620:ad:8081:c0cf:10:129:0:205", "192.168.168.168", "fd00::123"} {
 		if !sh[want] {
 			t.Errorf("%s is not among the shared addresses %v", want, sh)
 		}

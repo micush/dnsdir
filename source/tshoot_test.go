@@ -9,11 +9,11 @@ import (
 func TestTshootRedactsSecrets(t *testing.T) {
 	var v any
 	json.Unmarshal([]byte(`{"groups":[{"key":"dgw","priority":100,"neighbors":[]}],"bgp":{"neighbors":[{"peer":"192.0.2.1","password":"hunter2","multihop":0}]},
-		"web":{"key_file":"/x/key.pem","listen":"127.0.0.1:1"},"cluster":{"join_code":"ddgw-join-v1:abc","token":"zzz","code":""},"rcode":"NOERROR"}`), &v)
+		"web":{"key_file":"/x/key.pem","listen":"127.0.0.1:1"},"cluster":{"join_code":"ntpdir-join-v1:abc","token":"zzz","code":""},"rcode":"NOERROR"}`), &v)
 	out, n := redactJSON(v)
 	raw, _ := json.Marshal(out)
 	s := string(raw)
-	for _, leak := range []string{"dgw\"", "hunter2", "ddgw-join-v1:abc", "zzz", "/x/key.pem"} {
+	for _, leak := range []string{"dgw\"", "hunter2", "ntpdir-join-v1:abc", "zzz", "/x/key.pem"} {
 		if leak == "dgw\"" {
 			if strings.Contains(s, `"key":"dgw"`) {
 				t.Errorf("the gateway key leaked: %s", s)
@@ -70,15 +70,15 @@ func TestTshootNodeBundle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"README.txt", "dnsdir/config.json", "dnsdir/cluster.json", "system/system.txt", "net/ip-addr.txt", "dnsdir/virtual-mac-tests.json", "dnsdir/goroutines.txt"} {
+	for _, want := range []string{"README.txt", "ntpdir/config.json", "ntpdir/cluster.json", "system/system.txt", "net/ip-addr.txt", "ntpdir/virtual-mac-tests.json", "ntpdir/goroutines.txt"} {
 		if _, ok := files[want]; !ok {
 			t.Errorf("%s is missing; have %d files", want, len(files))
 		}
 	}
-	if g := string(files["dnsdir/goroutines.txt"]); !strings.Contains(g, "goroutine ") || !strings.Contains(g, "TestTshootNodeBundle") {
+	if g := string(files["ntpdir/goroutines.txt"]); !strings.Contains(g, "goroutine ") || !strings.Contains(g, "TestTshootNodeBundle") {
 		t.Fatalf("the goroutine dump is missing or empty: %.200s", g)
 	}
-	if c := string(files["dnsdir/config.json"]); strings.Contains(c, `"key": "dgw"`) {
+	if c := string(files["ntpdir/config.json"]); strings.Contains(c, `"key": "dgw"`) {
 		t.Errorf("the gateway key is in the bundle: %s", c)
 	}
 	if !strings.Contains(string(files["README.txt"]), "secrets were removed") {
@@ -106,9 +106,9 @@ func TestTshootClusterBundle(t *testing.T) {
 	var mine, theirs int
 	for n := range files {
 		switch {
-		case strings.Contains(n, "-this-node/dnsdir/config.json"):
+		case strings.Contains(n, "-this-node/ntpdir/config.json"):
 			mine++
-		case strings.HasSuffix(n, "/dnsdir/config.json"):
+		case strings.HasSuffix(n, "/ntpdir/config.json"):
 			theirs++
 		}
 	}

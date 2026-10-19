@@ -14,7 +14,7 @@ func mustAddr(s string) netip.Addr { return netip.MustParseAddr(s) }
 func newTestEngine() *Engine {
 	cfg := defaultGroup()
 	cfg.Interface = "dgwtest0" // does not exist: ip(8) calls fail quietly
-	e := NewEngine(cfg, afIPv4, func() DNSConfig { return defaultDNS() }, func() *Pool { return nil })
+	e := NewEngine(cfg, afIPv4, func() NTPConfig { return defaultNTP() }, func() *Pool { return nil })
 	e.running = true
 	e.myIP = "10.0.0.5"
 	return e
@@ -196,11 +196,7 @@ func TestConfigRoundTripAndValidation(t *testing.T) {
 	if err := dc.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	dc.DNS.Servers = []string{"127.0.0.1"}
-	if dc.Validate() == nil {
-		t.Fatal("a server without probe queries should be rejected")
-	}
-	dc.DNS.Queries = []DNSQuery{{Name: "example.com", Type: "A"}}
+	dc.NTP.Servers = []string{"127.0.0.1"}
 	if err := dc.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -209,14 +205,8 @@ func TestConfigRoundTripAndValidation(t *testing.T) {
 	if err := back.UnmarshalJSON(b); err != nil {
 		t.Fatal(err)
 	}
-	if back.Groups[0].LBMethod != lbRoundRobin || !back.Groups[0].DNSProxy || back.DNS.Servers[0] != "127.0.0.1:53" {
+	if back.Groups[0].LBMethod != lbRoundRobin || back.NTP.Servers[0] != "127.0.0.1:123" {
 		t.Fatalf("round trip lost data: %+v", back)
-	}
-	// "dns_proxy" is no longer a switch: an old file that turned it off still serves DNS
-	off := []byte(`{"groups":[{"vip4":"10.9.9.1/24","dns_proxy":false}]}`)
-	var offDC DaemonConfig
-	if err := offDC.UnmarshalJSON(off); err != nil || offDC.Validate() != nil || !offDC.Groups[0].DNSProxy {
-		t.Fatalf("dns_proxy:false must be accepted and forced on: %v %+v", err, offDC.Groups)
 	}
 	old := []byte(`{"groups":[{"vip":"10.9.9.1/24"}]}`)
 	var oldDC DaemonConfig

@@ -284,29 +284,26 @@ func TestScheduleDescribe(t *testing.T) {
 
 func TestScheduleSurvivesConfigSave(t *testing.T) {
 	dc := newDaemonConfig()
-	dc.DNS.Schedule = []SchedTask{{Name: "n", Action: "stats_clear", Freq: "daily", At: "03:00"}}
+	dc.NTP.Schedule = []SchedTask{{Name: "n", Action: "stats_clear", Freq: "daily", At: "03:00"}}
 	if err := dc.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if dc.DNS.Schedule[0].ID == "" {
+	if dc.NTP.Schedule[0].ID == "" {
 		t.Fatal("no id given")
 	}
 	sh := sharedOf(dc)
-	if len(sh.DNS.Schedule) != 1 {
+	if len(sh.NTP.Schedule) != 1 {
 		t.Fatal("the schedule is not replicated")
 	}
 	h1 := sh.hash()
-	dc.DNS.Schedule[0].Name = "changed"
+	dc.NTP.Schedule[0].Name = "changed"
 	if sharedOf(dc).hash() == h1 {
 		t.Fatal("a change of the schedule does not change the shared hash")
 	}
-	c := cloneDNS(dc.DNS)
-	c = ownPoolFrom(dc.DNS)
-	if c.Schedule != nil || dc.DNS.Schedule == nil {
-		t.Fatal("a gateway's own pool must not carry the schedule")
-	}
-	if dc.DNS.live().Schedule != nil {
-		t.Fatal("the live pool settings must not carry the schedule (a change would restart the pool)")
+	c := cloneNTP(dc.NTP)
+	c.clearNodeWide()
+	if c.Schedule != nil || dc.NTP.Schedule == nil {
+		t.Fatal("clearNodeWide must drop the schedule from the copy only")
 	}
 }
 
@@ -322,16 +319,16 @@ func TestScheduleSetAndDeleteThroughMgmt(t *testing.T) {
 		t.Fatalf("add: %+v %v", task, err)
 	}
 	got, _, _ := mg.LiveConfig()
-	if len(got.DNS.Schedule) != 1 || got.DNS.Schedule[0].Name != "nightly" {
-		t.Fatalf("not saved: %+v", got.DNS.Schedule)
+	if len(got.NTP.Schedule) != 1 || got.NTP.Schedule[0].Name != "nightly" {
+		t.Fatalf("not saved: %+v", got.NTP.Schedule)
 	}
 	task.At = "04:30"
 	if _, err := mg.SchedSet(task, "test"); err != nil {
 		t.Fatal(err)
 	}
 	got, _, _ = mg.LiveConfig()
-	if len(got.DNS.Schedule) != 1 || got.DNS.Schedule[0].At != "04:30:00" {
-		t.Fatalf("not replaced: %+v", got.DNS.Schedule)
+	if len(got.NTP.Schedule) != 1 || got.NTP.Schedule[0].At != "04:30:00" {
+		t.Fatalf("not replaced: %+v", got.NTP.Schedule)
 	}
 	if _, err := mg.SchedSet(SchedTask{Name: "NIGHTLY", Action: "stats_clear", Freq: "daily"}, "test"); err == nil {
 		t.Fatal("a second task with the same name was accepted")
@@ -343,8 +340,8 @@ func TestScheduleSetAndDeleteThroughMgmt(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _, _ = mg.LiveConfig()
-	if len(got.DNS.Schedule) != 0 {
-		t.Fatalf("not deleted: %+v", got.DNS.Schedule)
+	if len(got.NTP.Schedule) != 0 {
+		t.Fatalf("not deleted: %+v", got.NTP.Schedule)
 	}
 }
 
@@ -509,6 +506,30 @@ func TestEachDayRunsOnEveryMatchingDay(t *testing.T) {
 	}
 }
 
+// An hourly task can have a To minute: the window is from the At minute to it, never more than 59 minutes, and the
+// next hour when To is earlier than At.
+func TestHourlyToMinute(t *testing.T) {
+	a := mustTask(t, SchedTask{Freq: "hourly", At: "00:10:00", Until: "00:40"})
+	if a.WindowSec != 30*60 || a.Until != "00:40" {
+		t.Fatalf("10 to 40: window %d until %q", a.WindowSec, a.Until)
+	}
+	b := mustTask(t, SchedTask{Freq: "hourly", At: "00:50:00", Until: "00:05"})
+	if b.WindowSec != 15*60 {
+		t.Fatalf("50 to 05 wraps to the next hour: window %d", b.WindowSec)
+	}
+	c := mustTask(t, SchedTask{Freq: "hourly", At: "00:00:00", Until: "07:59"}) // only the minute counts
+	if c.WindowSec != 59*60 || c.Until != "00:59" {
+		t.Fatalf("59 minutes: window %d until %q", c.WindowSec, c.Until)
+	}
+	if !strings.Contains(a.describe(), "between minute 10 and minute 40") {
+		t.Fatalf("describe: %q", a.describe())
+	}
+	d := SchedTask{ID: "x", Name: "n", Action: "stats_clear", Freq: "hourly", At: "00:10:00", Until: "00:10"}
+	if err := d.validate(); err == nil {
+		t.Fatal("To equal to At on an hourly task must be refused (it would be a 60 minute window)")
+	}
+}
+
 func TestOnceRunsOnlyOnItsDate(t *testing.T) {
 	utc := func(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 0, 0, 0, 0, time.UTC) }
 	task := mustTask(t, SchedTask{Freq: "once", Date: "2026-11-14", At: "03:30", Until: "05:00", Every: 1, Days: []int{1}})
@@ -537,30 +558,6 @@ func TestOnceRunsOnlyOnItsDate(t *testing.T) {
 	daily := mustTask(t, SchedTask{Freq: "daily", Date: "2026-11-14"})
 	if daily.Date != "" {
 		t.Fatal("date kept on a daily task")
-	}
-}
-
-// An hourly task can have a To minute: the window is from the At minute to it, never more than 59 minutes, and the
-// next hour when To is earlier than At.
-func TestHourlyToMinute(t *testing.T) {
-	a := mustTask(t, SchedTask{Freq: "hourly", At: "00:10:00", Until: "00:40"})
-	if a.WindowSec != 30*60 || a.Until != "00:40" {
-		t.Fatalf("10 to 40: window %d until %q", a.WindowSec, a.Until)
-	}
-	b := mustTask(t, SchedTask{Freq: "hourly", At: "00:50:00", Until: "00:05"})
-	if b.WindowSec != 15*60 {
-		t.Fatalf("50 to 05 wraps to the next hour: window %d", b.WindowSec)
-	}
-	c := mustTask(t, SchedTask{Freq: "hourly", At: "00:00:00", Until: "07:59"}) // only the minute counts
-	if c.WindowSec != 59*60 || c.Until != "00:59" {
-		t.Fatalf("59 minutes: window %d until %q", c.WindowSec, c.Until)
-	}
-	if !strings.Contains(a.describe(), "between minute 10 and minute 40") {
-		t.Fatalf("describe: %q", a.describe())
-	}
-	d := SchedTask{ID: "x", Name: "n", Action: "stats_clear", Freq: "hourly", At: "00:10:00", Until: "00:10"}
-	if err := d.validate(); err == nil {
-		t.Fatal("To equal to At on an hourly task must be refused (it would be a 60 minute window)")
 	}
 }
 

@@ -15,7 +15,7 @@ func TestRestartStopsEnginesOutsideTheLock(t *testing.T) {
 	defer func() { leaveGrace = old }()
 
 	g := defaultGroup()
-	g.Interface = "dnsdirnone0"
+	g.Interface = "ntpdirnone0"
 	dc := newDaemonConfig()
 	dc.Groups = []GroupConfig{g}
 	s := NewSupervisor(context.Background(), dc)

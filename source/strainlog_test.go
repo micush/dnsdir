@@ -76,20 +76,18 @@ func TestClusterLogsHostStrain(t *testing.T) {
 func TestSummaryWordsEnableDisable(t *testing.T) {
 	a, b := newDaemonConfig(), newDaemonConfig()
 	b.Groups[0].Preempt = true
-	b.DNS.Cache = false
-	b.DNS.TLSInsecure = true
-	b.DNS.DoTPort = 853
-	b.DNS.ClientRate = 50
-	b.DNS.Spread = false
+	b.NTP.MaxOffsetMS = 0
+	b.NTP.ClientRate = 50
+	b.NTP.Spread = false
 	got := summarizeSections(configSections(a, b))
-	for _, w := range []string{"preempt enabled", "cache disabled", "tls_insecure enabled", "dot_port enabled (853)", "client_rate enabled (50)", "spread disabled"} {
+	for _, w := range []string{"preempt enabled", "max_offset_ms disabled", "client_rate enabled (50)", "spread disabled"} {
 		if !strings.Contains(got, w) {
 			t.Errorf("missing %q in %q", w, got)
 		}
 	}
 	a, b = b, a
 	got = summarizeSections(configSections(a, b))
-	for _, w := range []string{"preempt disabled", "cache enabled", "tls_insecure disabled", "dot_port disabled", "client_rate disabled"} {
+	for _, w := range []string{"preempt disabled", "max_offset_ms enabled (128)", "client_rate disabled"} {
 		if !strings.Contains(got, w) {
 			t.Errorf("missing %q in %q", w, got)
 		}

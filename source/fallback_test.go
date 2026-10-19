@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-func fbCfg(servers, fallback []string) DNSConfig {
-	d := testDNSCfg(servers...)
+func fbCfg(servers, fallback []string) NTPConfig {
+	d := testNTPCfg(servers...)
 	d.FallbackServers = fallback
 	return d
 }
@@ -15,7 +15,7 @@ func fbCfg(servers, fallback []string) DNSConfig {
 // Fallback servers take no queries while a normal server is up, take over when every normal server is
 // down, and are dropped again as soon as one normal server answers.
 func TestFallbackServersOnlyWhenAllDown(t *testing.T) {
-	a, b, fb := newFakeDNS(t), newFakeDNS(t), newFakeDNS(t)
+	a, b, fb := newFakeNTP(t), newFakeNTP(t), newFakeNTP(t)
 	p := NewPool(fbCfg([]string{a.addr, b.addr}, []string{fb.addr}))
 	ctx := context.Background()
 	p.ProbeNow(ctx)
@@ -25,14 +25,8 @@ func TestFallbackServersOnlyWhenAllDown(t *testing.T) {
 	if p.UsingFallback() {
 		t.Fatal("not using the fallback while the normal servers are up")
 	}
-	q, _ := buildQuery(0x1111, "www.example", "A")
-	for i := 0; i < 6; i++ {
-		if _, err := p.Forward(ctx, q, false); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if fb.hits.Load() != 0 { // a fallback is never probed, and gets no client traffic while a normal server is up
-		t.Fatalf("fallback got %d queries, want none", fb.hits.Load())
+	if fb.hits.Load() != 0 { // a fallback is never probed
+		t.Fatalf("fallback got %d packets, want none", fb.hits.Load())
 	}
 
 	// one normal server down: still no fallback
@@ -50,13 +44,6 @@ func TestFallbackServersOnlyWhenAllDown(t *testing.T) {
 	}
 	if got := rankedAddrs(p); len(got) != 1 || got[0] != fb.addr {
 		t.Fatalf("ranked %v, want just the fallback", got)
-	}
-	before := fb.hits.Load()
-	if _, err := p.Forward(ctx, q, false); err != nil {
-		t.Fatalf("forward through the fallback: %v", err)
-	}
-	if fb.hits.Load() <= before {
-		t.Fatal("the query did not reach the fallback")
 	}
 	var marked bool
 	for _, s := range p.Snapshot() {
@@ -77,34 +64,24 @@ func TestFallbackServersOnlyWhenAllDown(t *testing.T) {
 	if got := rankedAddrs(p); len(got) != 1 || got[0] != b.addr {
 		t.Fatalf("ranked %v, want just %s", got, b.addr)
 	}
-	before = fb.hits.Load()
-	for i := 0; i < 4; i++ {
-		if _, err := p.Forward(ctx, q, false); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if fb.hits.Load() != before {
-		t.Fatalf("the fallback still got %d queries after the switch back", fb.hits.Load()-before)
-	}
 }
 
 // Without any fallback and with every server down the pool has nothing, as before.
 func TestNoFallbackStillFails(t *testing.T) {
-	a := newFakeDNS(t)
+	a := newFakeNTP(t)
 	a.mode.Store(2)
 	p := NewPool(fbCfg([]string{a.addr}, nil))
 	p.ProbeNow(context.Background())
-	q, _ := buildQuery(1, "www.example", "A")
-	if _, err := p.Forward(context.Background(), q, false); err == nil {
-		t.Fatal("expected an error with every server down and no fallback")
+	if len(p.Ranked()) != 0 {
+		t.Fatal("expected nothing in service with every server down and no fallback")
 	}
 }
 
-// A fallback is a last resort: it is never probed and always counts as up, even though the domains the
-// normal servers are tested with may be ones it knows nothing about.
+// A fallback is a last resort: it is never probed and always counts as up, even though a probe
+// of it would fail.
 func TestFallbackNeverProbedAlwaysUp(t *testing.T) {
-	a, fb := newFakeDNS(t), newFakeDNS(t)
-	fb.mode.Store(1) // NXDOMAIN for everything: a probe would fail it
+	a, fb := newFakeNTP(t), newFakeNTP(t)
+	fb.mode.Store(fakeKoD) // refuses everything: a probe would fail it
 	p := NewPool(fbCfg([]string{a.addr}, []string{fb.addr}))
 	p.ProbeNow(context.Background())
 	p.ProbeNow(context.Background())
@@ -119,34 +96,34 @@ func TestFallbackNeverProbedAlwaysUp(t *testing.T) {
 }
 
 func TestFallbackValidation(t *testing.T) {
-	d := testDNSCfg("10.0.0.53")
-	d.FallbackServers = []string{"1.1.1.1", "[2001:db8::1]", "tls://dns.example.net"}
+	d := testNTPCfg("10.0.0.53")
+	d.FallbackServers = []string{"1.1.1.1", "[2001:db8::1]"}
 	if err := d.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"1.1.1.1:53", "[2001:db8::1]:53", "tls://dns.example.net:853"}
+	want := []string{"1.1.1.1:123", "[2001:db8::1]:123"}
 	for i, w := range want {
 		if d.FallbackServers[i] != w {
 			t.Fatalf("fallback %d = %q, want %q", i, d.FallbackServers[i], w)
 		}
 	}
-	dup := testDNSCfg("10.0.0.53")
+	dup := testNTPCfg("10.0.0.53")
 	dup.FallbackServers = []string{"10.0.0.53"}
 	if err := dup.Validate(); err == nil || !strings.Contains(err.Error(), "also a normal server") {
 		t.Fatalf("a normal server as fallback: %v", err)
 	}
-	twice := testDNSCfg("10.0.0.53")
-	twice.FallbackServers = []string{"1.1.1.1", "1.1.1.1:53"}
+	twice := testNTPCfg("10.0.0.53")
+	twice.FallbackServers = []string{"1.1.1.1", "1.1.1.1:123"}
 	if err := twice.Validate(); err == nil {
 		t.Fatal("a fallback listed twice must be refused")
 	}
-	bad := testDNSCfg("10.0.0.53")
+	bad := testNTPCfg("10.0.0.53")
 	bad.FallbackServers = []string{"not a host!"}
 	if err := bad.Validate(); err == nil {
 		t.Fatal("a bad fallback address must be refused")
 	}
 	// an empty list is the same as none (and is not written out)
-	none := testDNSCfg("10.0.0.53")
+	none := testNTPCfg("10.0.0.53")
 	none.FallbackServers = []string{}
 	if err := none.Validate(); err != nil || none.FallbackServers != nil {
 		t.Fatalf("empty fallback list: %v %v", err, none.FallbackServers)
@@ -154,25 +131,25 @@ func TestFallbackValidation(t *testing.T) {
 }
 
 func TestFallbackReplicatesAndSurvivesClone(t *testing.T) {
-	d := testDNSCfg("10.0.0.53")
-	d.FallbackServers = []string{"1.1.1.1:53"}
-	c := cloneDNS(d)
-	c.FallbackServers[0] = "9.9.9.9:53"
-	if d.FallbackServers[0] != "1.1.1.1:53" {
-		t.Fatal("cloneDNS shares the fallback slice")
+	d := testNTPCfg("10.0.0.53")
+	d.FallbackServers = []string{"1.1.1.1:123"}
+	c := cloneNTP(d)
+	c.FallbackServers[0] = "9.9.9.9:123"
+	if d.FallbackServers[0] != "1.1.1.1:123" {
+		t.Fatal("cloneNTP shares the fallback slice")
 	}
 }
 
 func TestCanvasShowsFallbackInUse(t *testing.T) {
-	a, fb := newFakeDNS(t), newFakeDNS(t)
+	a, fb := newFakeNTP(t), newFakeNTP(t)
 	d := fbCfg([]string{a.addr}, []string{fb.addr})
 	g := defaultGroup()
-	g.DNSProxy, g.DNS = true, &d
+	g.NTP = &d
 	dc := newDaemonConfig()
 	dc.Groups = []GroupConfig{g}
 	p := NewPool(d)
 	pools := []poolInfo{{Key: 1, Groups: []int{1}, Pool: p, Cfg: d}}
-	rows := []SnapshotRow{{GroupID: 1, AF: "v4", Local: true, State: "active", DNSUp: true}}
+	rows := []SnapshotRow{{GroupID: 1, AF: "v4", Local: true, State: "active", NTPUp: true}}
 
 	p.ProbeNow(context.Background())
 	cv := buildCanvas(dc, rows, pools)
@@ -194,13 +171,13 @@ func TestCanvasEditFallback(t *testing.T) {
 		_, err := applyCanvasEdit(dc, canvasEdit{Action: action, Kind: "fallback", Group: 1, Server: srv})
 		return err
 	}
-	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "add", Kind: "server", Group: 1, Server: "8.8.8.8", Name: "google.com"}); err != nil {
+	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "add", Kind: "server", Group: 1, Server: "8.8.8.8"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := edit("add", "1.1.1.1"); err != nil {
 		t.Fatal(err)
 	}
-	if got := dc.Groups[0].DNS.FallbackServers; len(got) != 1 || got[0] != "1.1.1.1:53" {
+	if got := dc.Groups[0].NTP.FallbackServers; len(got) != 1 || got[0] != "1.1.1.1:123" {
 		t.Fatalf("fallbacks %v", got)
 	}
 	if edit("add", "1.1.1.1") == nil {
@@ -215,16 +192,14 @@ func TestCanvasEditFallback(t *testing.T) {
 	if err := edit("del", "9.9.9.9"); err == nil {
 		t.Fatal("deleting an unknown fallback must fail")
 	}
-	if err := edit("del", "1.1.1.1"); err != nil || dc.Groups[0].DNS.FallbackServers != nil {
-		t.Fatalf("delete: %v %v", err, dc.Groups[0].DNS.FallbackServers)
+	if err := edit("del", "1.1.1.1"); err != nil || dc.Groups[0].NTP.FallbackServers != nil {
+		t.Fatalf("delete: %v %v", err, dc.Groups[0].NTP.FallbackServers)
 	}
 }
 
-// Fallbacks need no probe queries, so a gateway whose servers carry their own domains (as the canvas makes them)
-// or has no servers at all can still have them.
-func TestFallbackNeedsNoQueries(t *testing.T) {
-	d := testDNSCfg()
-	d.Queries = nil
+// A gateway with no servers at all can still have fallbacks.
+func TestFallbackWithoutServers(t *testing.T) {
+	d := testNTPCfg()
 	d.FallbackServers = []string{"1.1.1.1"}
 	if err := d.Validate(); err != nil {
 		t.Fatal(err)

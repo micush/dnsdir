@@ -1,0 +1,6 @@
+# /etc/pam.d/ntpdir — Debian / Ubuntu
+# Password check for the ntpdir web GUI. Group membership (default group "ntpdir")
+# is enforced by ntpdir itself; PAM only proves who the user is and that the
+# account is valid.
+@include common-auth
+@include common-account

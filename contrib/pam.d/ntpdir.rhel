@@ -1,0 +1,7 @@
+#%PAM-1.0
+# /etc/pam.d/ntpdir — RHEL / Fedora / Rocky / Alma
+# Password check for the ntpdir web GUI. Group membership (default group "ntpdir")
+# is enforced by ntpdir itself; PAM only proves who the user is and that the
+# account is valid.
+auth       substack     system-auth
+account    include      system-auth

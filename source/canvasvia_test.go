@@ -38,7 +38,7 @@ func TestServingPeersAreAskedOnlyWhenThisNodeDoesNotServe(t *testing.T) {
 
 func TestTakeFromKeepsThisNodesOwnEntry(t *testing.T) {
 	mine := CanvasGateway{GroupID: 1, Name: "x", Status: "idle", Detail: "not running here", Nodes: viaNodes("notserving"), Servers: []CanvasServer{}, Paused: true, NodePaused: true}
-	theirs := CanvasGateway{GroupID: 1, Status: "ok", Detail: "running and answering", Servers: []CanvasServer{{Addr: "192.0.2.1:53", Status: "ok"}}, Families: []CanvasFamily{{AF: "v4", Status: "ok"}}}
+	theirs := CanvasGateway{GroupID: 1, Status: "ok", Detail: "running and answering", Servers: []CanvasServer{{Addr: "192.0.2.1:123", Status: "ok"}}, Families: []CanvasFamily{{AF: "v4", Status: "ok"}}}
 	mine.takeFrom(theirs, peer("2", "ok"))
 	if mine.Status != "ok" || mine.Detail != "running and answering" || len(mine.Servers) != 1 || len(mine.Families) != 1 {
 		t.Fatalf("not taken: %+v", mine)
@@ -75,20 +75,20 @@ func TestTakeGatewayRowsAddsTheOtherGroupsWithoutStars(t *testing.T) {
 	}
 }
 
-func TestAddDNSPoolsTakesTheOtherGatewaysPool(t *testing.T) {
+func TestAddNTPPoolsTakesTheOtherGatewaysPool(t *testing.T) {
 	resp := map[string]any{"ok": true, "data": map[string]any{
 		"pools":     []map[string]any{{"key": 2, "groups": []int{2}}},
-		"listeners": []string{"group 2 10.2.0.1:53"},
+		"listeners": []string{"group 2 10.2.0.1:123"},
 		"servers":   "x",
 	}}
-	var from dnsAnswer
-	if err := json.Unmarshal([]byte(`{"data":{"pools":[{"key":1,"groups":[1],"servers":[]},{"key":2,"groups":[2]}],"listeners":["group 1 10.1.0.1:53","group 2 10.2.0.9:53"]}}`), &from); err != nil {
+	var from ntpAnswer
+	if err := json.Unmarshal([]byte(`{"data":{"pools":[{"key":1,"groups":[1],"servers":[]},{"key":2,"groups":[2]}],"listeners":["group 1 10.1.0.1:123","group 2 10.2.0.9:123"]}}`), &from); err != nil {
 		t.Fatal(err)
 	}
-	if addDNSPools(resp, from, 3) {
+	if addNTPPools(resp, from, 3) {
 		t.Fatal("a group nobody has was found")
 	}
-	if !addDNSPools(resp, from, 1) {
+	if !addNTPPools(resp, from, 1) {
 		t.Fatal("group 1 not found")
 	}
 	d := resp["data"].(map[string]any)
@@ -96,15 +96,15 @@ func TestAddDNSPoolsTakesTheOtherGatewaysPool(t *testing.T) {
 	if len(pools) != 2 || pools[0]["key"].(float64) != 1 || pools[1]["key"].(int) != 2 {
 		t.Fatalf("wrong pools or order: %+v", pools)
 	}
-	if ls := d["listeners"].([]string); len(ls) != 2 || ls[1] != "group 1 10.1.0.1:53" {
+	if ls := d["listeners"].([]string); len(ls) != 2 || ls[1] != "group 1 10.1.0.1:123" {
 		t.Fatalf("listeners: %v", ls)
 	}
-	if !addDNSPools(resp, from, 2) || len(d["pools"].([]map[string]any)) != 2 {
+	if !addNTPPools(resp, from, 2) || len(d["pools"].([]map[string]any)) != 2 {
 		t.Fatal("a pool this node has was added again")
 	}
 	// a node with no pool at all gets a whole answer
 	none := map[string]any{"ok": false, "error": "no gateway"}
-	if !addDNSPools(none, from, 1) || none["ok"] != true || none["error"] != nil || len(none["data"].(map[string]any)["pools"].([]map[string]any)) != 1 {
+	if !addNTPPools(none, from, 1) || none["ok"] != true || none["error"] != nil || len(none["data"].(map[string]any)["pools"].([]map[string]any)) != 1 {
 		t.Fatalf("empty node: %+v", none)
 	}
 }

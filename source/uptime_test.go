@@ -48,11 +48,11 @@ func TestUpTrackerAnnotate(t *testing.T) {
 	t0 := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	mk := func(srv string) []CanvasGateway {
 		return []CanvasGateway{{GroupID: 1, Status: "ok", Anycast: []AnycastState{{Addr: "10.9.9.9", Up: true}},
-			Servers: []CanvasServer{{Addr: "1.1.1.1", Status: srv, Tests: []CanvasTest{{Name: "x.example", Type: "A", Status: srv}}}}}}
+			Servers: []CanvasServer{{Addr: "1.1.1.1", Status: srv}}}}
 	}
 	g := mk("ok")
 	u.annotate(g, t0)
-	if g[0].Uptime == nil || g[0].Anycast[0].Uptime == nil || g[0].Servers[0].Uptime == nil || g[0].Servers[0].Tests[0].Uptime == nil {
+	if g[0].Uptime == nil || g[0].Anycast[0].Uptime == nil || g[0].Servers[0].Uptime == nil {
 		t.Fatalf("not annotated: %+v", g[0])
 	}
 	g = mk("bad")

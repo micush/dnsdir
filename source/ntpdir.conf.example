@@ -1,0 +1,47 @@
+{
+  "log_level": "info",
+  "groups": [
+    {
+      "group_id": 1,
+      "interface": "eth0",
+      "vip4": "10.0.0.123/24",
+      "priority": 100,
+      "lb_method": "roundrobin",
+      "key": "change-me",
+      "ntp": {
+        "servers": ["10.0.0.123", "10.0.0.124"],
+        "fallback_servers": ["0.pool.ntp.org"]
+      }
+    }
+  ],
+  "ntp": {
+    "servers": ["10.0.10.1", "10.0.10.2", "10.0.20.1:1123"],
+    "listen_port": 123,
+    "allowed_clients": [],
+    "client_rate": 0,
+    "max_stratum": 15,
+    "max_root_distance_ms": 1500,
+    "max_offset_ms": 128,
+    "max_rtt_ms": 500,
+    "serve_offset_ms": 50,
+    "probe_interval_ms": 16000,
+    "probe_timeout_ms": 1000,
+    "fail_threshold": 2
+  },
+  "web": {
+    "listen": ":12380",
+    "group": "ntpdir",
+    "pam_service": "ntpdir",
+    "session_idle_minutes": 30,
+    "max_failed_logins": 3,
+    "failed_login_window_minutes": 1,
+    "lockout_minutes": 15,
+    "cert_file": "",
+    "key_file": ""
+  },
+  "cluster": {
+    "listen": ":12381",
+    "self": "10.0.0.5:12381",
+    "sync_interval_sec": 5
+  }
+}

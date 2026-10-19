@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// NodePauseState is what the Node page and `dnsdir --node-status` show.
+// NodePauseState is what the Node page and `ntpdir --node-status` show.
 type NodePauseState struct {
 	Paused bool `json:"paused"`
 }
@@ -51,11 +51,18 @@ func (m *Mgmt) NodePause(pause bool, actor string) (string, error) {
 		return "", err
 	}
 	if pause {
-		// the primary role does not stay on a node that is out of service: it goes to the most up-to-date replica
-		m.handOver(actor, "pausing this node")
-		return "node paused — its gateways stop serving and the other nodes take over; resume it when maintenance is done", nil
+		msg := "node paused — its gateways stop serving and the other nodes take over; resume it when maintenance is done"
+		// the primary role moves too (the controller role moves by itself when the gateways resign)
+		if m.cl != nil {
+			if to, err := m.cl.HandOverPrimary(actor, "pausing the node"); err != nil {
+				msg += "; the primary role could not be moved (" + err.Error() + ")"
+			} else if to != "" {
+				msg += "; " + to + " is now the primary"
+			}
+		}
+		return msg, nil
 	}
-	return "node resumed — its gateways rejoin once their DNS servers answer", nil
+	return "node resumed — its gateways rejoin once their NTP servers answer", nil
 }
 
 func (m *Mgmt) othersInService() int {

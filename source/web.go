@@ -34,7 +34,7 @@ var webFS embed.FS
 var failDelay = 400 * time.Millisecond
 
 const (
-	sessionCookie  = "__Host-dnsdir_session" // the prefix makes a browser take it only if Secure, Path=/ and without Domain
+	sessionCookie  = "__Host-ntpdir_session" // the prefix makes a browser take it only if Secure, Path=/ and without Domain
 	sessionMaxAge  = 12 * time.Hour
 	groupRecheck   = time.Minute
 	failWindow     = 10 * time.Minute // join-token failures (cluster)
@@ -325,13 +325,13 @@ func (w *WebServer) Handler() http.Handler {
 	mux.HandleFunc("GET /api/session", w.authed(w.handleSession))
 	mux.HandleFunc("GET /api/gateways", w.authed(w.handleGateways))
 	mux.HandleFunc("GET /api/neighbors", w.authed(w.handleNeighbors))
-	mux.HandleFunc("GET /api/dns", w.authed(w.handleDNS))
+	mux.HandleFunc("GET /api/ntp", w.authed(w.handleNTP))
 	mux.HandleFunc("GET /api/canvas", w.authed(func(rw http.ResponseWriter, r *http.Request, s *session) {
 		groups := w.status.canvasGroups()
 		if r.URL.Query().Get("own") == "" { // ?own=1: this node's own view, as asked by another node or by the sidebar
 			w.status.viaServing(r.Context(), groups)
 		}
-		writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": groups})
+		writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": groups, "dnsdir": dnsdirInfo()})
 	}))
 	mux.HandleFunc("POST /api/assert-agc", w.authed(w.handleAssertAGC))
 	mux.HandleFunc("GET /api/config", w.authed(w.handleGetConfig))
@@ -776,7 +776,7 @@ func (w *WebServer) handleSession(rw http.ResponseWriter, r *http.Request, s *se
 	writeJSON(rw, http.StatusOK, w.sessionInfo(s))
 }
 
-// ── read-only views (CLI: --show-gateways / --show-neighbors / --show-dns) ──
+// ── read-only views (CLI: --show-gateways / --show-neighbors / --show-ntp) ──
 
 func (w *WebServer) handleGateways(rw http.ResponseWriter, r *http.Request, s *session) {
 	gs := buildGateways(w.status.snapshot())
@@ -798,10 +798,10 @@ func (w *WebServer) handleNeighbors(rw http.ResponseWriter, r *http.Request, s *
 	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": peersOnly(rows)})
 }
 
-func (w *WebServer) handleDNS(rw http.ResponseWriter, r *http.Request, s *session) {
-	resp := w.status.dnsStatus()
+func (w *WebServer) handleNTP(rw http.ResponseWriter, r *http.Request, s *session) {
+	resp := w.status.ntpStatus()
 	if r.URL.Query().Get("own") == "" { // ?own=1: only what this node runs, as asked by another node
-		resp = w.status.dnsVia(r.Context(), resp)
+		resp = w.status.ntpVia(r.Context(), resp)
 	}
 	writeJSON(rw, http.StatusOK, resp)
 }

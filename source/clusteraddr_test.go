@@ -6,9 +6,9 @@ import (
 )
 
 func TestValidHostPort(t *testing.T) {
-	good := []string{"10.0.0.5:53854", "[2001:db8::1]:53854", "node-1.example.com:53854", "ns1:1"}
-	bad := []string{"", "10.0.0.5", "10.0.0.5:0", "10.0.0.5:70000", "10.0.0.5:x", "evil@10.0.0.5:53854",
-		"10.0.0.5/x:53854", "a b:1", "host?x:1", "host#x:1", "[fe80::1%eth0]:1", ":53854", "ho/st:1"}
+	good := []string{"10.0.0.5:12381", "[2001:db8::1]:12381", "node-1.example.com:12381", "ns1:1"}
+	bad := []string{"", "10.0.0.5", "10.0.0.5:0", "10.0.0.5:70000", "10.0.0.5:x", "evil@10.0.0.5:12381",
+		"10.0.0.5/x:12381", "a b:1", "host?x:1", "host#x:1", "[fe80::1%eth0]:1", ":12381", "ho/st:1"}
 	for _, a := range good {
 		if !validHostPort(a) {
 			t.Errorf("%q should be accepted", a)
@@ -22,8 +22,8 @@ func TestValidHostPort(t *testing.T) {
 }
 
 func TestVersionPathStaysInside(t *testing.T) {
-	s := &VersionStore{dir: "/var/lib/dnsdir/versions"}
-	if got := s.path("1790827200558"); got != "/var/lib/dnsdir/versions/1790827200558.json" {
+	s := &VersionStore{dir: "/var/lib/ntpdir/versions"}
+	if got := s.path("1790827200558"); got != "/var/lib/ntpdir/versions/1790827200558.json" {
 		t.Fatalf("path: %s", got)
 	}
 	// Whatever text comes in, the file is inside the directory.

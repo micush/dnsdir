@@ -1,6 +1,5 @@
-// dnsdir — DNS Distributed Gateway: a Distributed Gateway Load Balancing Protocol
-// daemon with a built-in DNS proxy that serves the VIP and forwards to the
-// fastest healthy upstream.
+// ntpdir — AnyTime NTP Director: a Distributed Gateway Load Balancing Protocol
+// daemon that tests the configured NTP servers and gives chrony the ones that pass; chrony serves the VIP.
 package main
 
 import (
@@ -11,10 +10,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/netip"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -24,15 +21,15 @@ import (
 	"time"
 )
 
-const usageText = `dnsdir — DNS Distributed Gateway (Distributed Gateway Load Balancing Protocol + DNS proxy)
+const usageText = `ntpdir — AnyTime NTP Director (Distributed Gateway Load Balancing Protocol + chrony NTP serving)
 Run as a systemd service or directly. All options are runtime-configurable
-and persisted to /var/lib/dnsdir/dnsdir.conf.
+and persisted to /var/lib/ntpdir/ntpdir.conf.
 
 Usage:
-    dnsdir [options]
-    dnsdir ?|-h|--help
-    dnsdir --configure       interactive configuration wizard
-    dnsdir --show-config     print current configuration
+    ntpdir [options]
+    ntpdir ?|-h|--help
+    ntpdir --configure       interactive configuration wizard
+    ntpdir --show-config     print current configuration
 
 Options:
   --log-level LEVEL     debug|info|warning|error (default: info)
@@ -40,40 +37,40 @@ Options:
   --show-config         Print current configuration and exit
   --show-neighbors      Print live neighbor table and exit
   --show-gateways       Print all nodes per group with role (AGC/AFN) and exit
-  --show-dns            Print DNS upstream pool(s): health and latency ranking
+  --show-ntp            Print chrony's state and the NTP server pool(s): health
   --canvas              Print the gateway diagram as a tree with live status
   --version             Print the release number and exit
   --assert-agc          Make this node the active gateway (AGC) for all groups
-  --config FILE         Config file path (default: /var/lib/dnsdir/dnsdir.conf)
-  --status-socket PATH  Status socket path (default: /run/dnsdir/dnsdir.sock)
+  --config FILE         Config file path (default: /var/lib/ntpdir/ntpdir.conf)
+  --status-socket PATH  Status socket path (default: /run/ntpdir/ntpdir.sock)
   --state-dir DIR       Where history, cluster identity, certificates and update
-                        data live (default: /var/lib/dnsdir)
+                        data live (default: /var/lib/ntpdir)
 
 Environment of the daemon:
-  DNSDIR_MEMORY_LIMIT_PERCENT  memory use (1-99, default 85) at which the memory guard drops the
-                        oldest statistics, host history and cached answers
+  NTPDIR_MEMORY_LIMIT_PERCENT  memory use (1-99, default 85) at which the memory guard drops the
+                        oldest statistics and host history
 
 Management commands (talk to the running daemon; root only; every one is also in
 the web GUI):
   Topology         --canvas-add gateway --vip ADDR/PREFIX [--vip6 ADDR/PREFIX] [--group N]
-                                        [--interface IF] [--label NAME] [--anycast ADDR[,ADDR]] [--ecs on]
-                                        [--server ADDR --name DOMAIN [--type T]]
-                   --canvas-add server  --group N --server ADDR --name DOMAIN [--type T] [--label NAME]
-                   --canvas-add domain  --group N --server ADDR --name DOMAIN [--type T]
+                                        [--interface IF] [--label NAME] [--anycast ADDR[,ADDR]]
+                                        [--server ADDR]
+                   --canvas-add server  --group N --server ADDR [--label NAME]
                    --canvas-add fallback --group N --server ADDR   (used only while every server of the gateway is down)
                    --canvas-add anycast --group N --address ADDR   (one anycast address; see --anycast)
+                   --canvas-add dnsdirvip --group N --address ADDR   (also answer NTP on an anycast address of dnsdir,
+                                        which must be installed here and announce it; --canvas-del dnsdirvip stops)
                    --canvas-set gateway --group N [--vip A/P] [--vip6 A/P] [--interface IF]
                                         [--label NAME|-]   (a name shown under the address; - clears)
                                         [--anycast ADDR[,ADDR]|-]   (extra addresses of ANY subnet, held on lo
-                                         by every running node while its DNS answers, for BGP; - clears)
+                                         by every running node while its NTP answers, for BGP; - clears)
                                         [--real-macs on|off]   (run without virtual MACs on every node)
-                                        [--ecs on|off] [--ecs-v4 BITS] [--ecs-v6 BITS]
-                                        [--spread on|off] [--spread-band PCT] [--down-percent PCT]
-                                        [--fail-threshold N] [--max-attempts N] [--latency-alpha A]
-                                          (this gateway's own load balancing; --lb settings goes back to
+                                        [--max-stratum N] [--max-root-distance MS] [--max-offset MS|off]
+                                        [--fail-threshold N]
+                                          (this gateway's own health checks; --lb settings goes back to
                                            following Settings, which is the default)
                    --tshoot [--all-nodes] [--tshoot-file F.tgz]
-                                         (a troubleshooting bundle for support: logs, configuration, gateway, DNS, BGP and
+                                         (a troubleshooting bundle for support: logs, configuration, gateway, NTP, BGP and
                                          anycast state, addresses, routes, neighbors, firewall, FRR, service status, host
                                          numbers, 8 s of ARP / neighbor-discovery traffic per gateway interface, a goroutine dump — of
                                          this node, or of every node with --all-nodes. Passwords, the gateway key, tokens
@@ -82,30 +79,26 @@ the web GUI):
                    --test-vmac [--group N]   (can clients' replies reach this node through virtual MACs? sends an ARP/NS
                                          probe from a throwaway virtual MAC and listens for the answer; changes nothing.
                                          When it says "not delivered": --canvas-set gateway --group N --real-macs on)
-                   --canvas-set server  --group N --server ADDR --label NAME|-   (name shown instead of the address on the
-                                         Topology page; - clears; a full name such as dns-a.example.com is also registered
-                                         in DNS for the server's IP address; also on --canvas-add server)
+                   --canvas-set server  --group N --server ADDR --label NAME|-   (name shown instead of the
+                                         address on the Topology page; - clears)
                    --canvas-pause|--canvas-resume gateway --group N   (this node stops/starts serving it)
-                   --canvas-pause|--canvas-resume server --group N --server ADDR  (no queries/probes)
+                   --canvas-pause|--canvas-resume server --group N --server ADDR  (no requests/probes)
                    --canvas-del node --group N --node NODE   (remove a cluster node from the gateway: it stops serving it, on every
                                          node's view; NODE is its address or host name, as --cluster-status lists them)
                    --canvas-add node --group N --node NODE   (put it back; a node that joins starts out removed from every gateway)
-                   --dns-lookup IP|NAME   (the reverse name of an address, or the address of a name, as the Add DNS server form fills them in)
-                   --server-stats ADDR [--stats-range 1h|1d|7d]   (how one DNS server has answered: latency and loss)
-                   --server-stats ADDR --name DOMAIN [--type A]   (one monitored domain on that server)
-                   --gateway-stats GROUP [--stats-range 1h|1d|7d]  (one gateway: client latency, errors, traffic, cache, availability)
+                   --host-lookup IP|NAME   (the reverse name of an address, or the address of a name, as the Add NTP server form fills them in)
+                   --server-stats ADDR [--stats-range 1h|1d|7d]   (how one NTP server has answered: latency, offset and loss)
+                   --gateway-stats GROUP [--stats-range 1h|1d|7d]  (one gateway: client latency, errors, traffic, availability)
                    --schedule | --schedule-history   (the scheduled tasks and when this node runs them next; what ran, with its output)
                    --schedule-set JSON | --schedule-del ID | --schedule-run ID   (add or replace a task, remove one, run one on this node now)
                    --node-pause | --node-resume | --node-status   (this whole node stops/starts serving)
-                   --hostname NAME   (rename this host: its operating-system name and its /etc/hosts entry; a full name such as ns1.example.com is also registered in DNS and the old name removed)
+                   --node-rename NAME   (this node's host name and its /etc/hosts entry; on another node: pick it in the Node menu)
                    --canvas-move server  --group N --server ADDR --to N   (its place in the row, 1 = leftmost; the drag in the drawing)
-                   --canvas-move domain  --group N --server ADDR --name DOMAIN --to N   (its place under the server, 1 = top)
                    --canvas-move anycast --group N --address ADDR --to N   (its place in the list, 1 = top)
                    --canvas-pause|--canvas-resume anycast --group N --address ADDR --scope node|all
                                         (stop/start announcing one anycast address on this node only, or on every node)
                    --canvas-del gateway --group N          (removes everything under it)
-                   --canvas-del server  --group N --server ADDR  (and its domains)
-                   --canvas-del domain  --group N --server ADDR --name DOMAIN
+                   --canvas-del server  --group N --server ADDR
                    --canvas-del fallback --group N --server ADDR
                    --canvas-del anycast --group N --address ADDR
   Config history   --versions  --version-show ID  --version-diff A[..B]
@@ -121,30 +114,24 @@ the web GUI):
                    --bgp-neighbor-del ADDR
                    --bgp-disable | --bgp-enable   (stop / restart BGP on this node, settings kept)
                    --bgp-neighbor-disable ADDR | --bgp-neighbor-enable ADDR
-                                                 (per node; dnsdir then owns /etc/frr/frr.conf; BFD is always on)
+                                                 (per node; ntpdir then owns /etc/frr/frr.conf; BFD is always on)
   Cluster          --cluster-status  --cluster-token  --cluster-join CODE
                    --cluster-promote  --cluster-remove ADDR
-                   --cluster-failover auto|on|off   (the primary promotes a replica by itself
-                                                 after 5 minutes offline; auto = on from 3 members)
                    --cluster-unremove ADDR  --cluster-leave  --cluster-sync
                    (GUI: the Node menu, top right, configures any member)
   Upgrade          --update-status  --update-history  --update-upload FILE
                    --update-apply  --update-push all|ADDR,...
                    --update-cancel all|ADDR,...  --update-auto on|off
                    --update-repo URL|default   (where "fetch online" downloads from;
-                   default https://github.com/micush/dnsdir)
+                   default https://github.com/micush/ntpdir)
   Statistics       --stats [--stats-range now|1h|1d|7d|30d]
-                   [--stats-rcode nxdomain|servfail|refused|noerror|other|update]
-                   [--stats-client ADDR | --stats-domain NAME]
+                   [--stats-outcome answered|failed|kod|refused]
+                   [--stats-client ADDR | --stats-server ADDR]
                    [--all-nodes]   (every cluster node's numbers added together)
                    --stats-clear [--all-nodes]   (forget the counts and top lists, here or on every node)
                    --scan ADDR   (nmap of a client, run from this node; needs the nmap package)
-                   --ping ADDR|NAME  --traceroute ADDR|NAME   (ping / mtr of a client or domain, run from this node; needs ping and mtr)
-                   --lookup ADDR|NAME   (what this node's resolver says: PTR of an address; A, AAAA, CNAME, MX, NS, TXT of a name)
-                   --cache-flush NAME   (drop a name from the answer cache of every node)
-                   --cache-clear   (empty the answer cache of every node)
-                   --whois NAME   (registration data of a domain, asked of its registry from this node)
-                   --dns-updates   (the recent dynamic DNS updates: who, which zone, what, the primary's answer)
+                   --ping ADDR|NAME  --traceroute ADDR|NAME   (ping / mtr of a client or server, run from this node; needs ping and mtr)
+                   --whois NAME   (registration data of a host name or address, asked of its registry from this node)
   Capture          --capture IFACE [--capture-seconds N] [--capture-filter EXPR] [--capture-file FILE] [--all-nodes]
                    --capture-interfaces   (a packet capture on this node, printed or written as .pcap;
                                            --all-nodes: every cluster node at once, one .pcap each in a .tgz)
@@ -165,76 +152,53 @@ the web GUI):
 Per-group settings are managed via --configure or by editing the config
 file directly. Each group entry supports:
   group_id, interface, vip4, vip6, priority, lb_method, weight,
-  hello_ms, hold_ms, preempt, max_afns, key, neighbors, real_macs, dns
+  hello_ms, hold_ms, preempt, max_afns, key, neighbors, real_macs, ntp
 
   vip4: IPv4 VIP with prefix, e.g. 10.0.0.1/24  (required when no vip6)
   vip6: IPv6 VIP with prefix, e.g. 2001:db8::1/64 (required when no vip4)
   neighbors: list of peer IP addresses for unicast mode (optional).
-    When present, dnsdir sends hellos directly to each neighbor via unicast
+    When present, ntpdir sends hellos directly to each neighbor via unicast
     instead of multicast — required when peers are on different VNIs or
     separated by a routed boundary.
-  Every ACTIVE/FORWARD node answers DNS on the VIP (there is no switch for it; an old
-  "dns_proxy" key is accepted and ignored).
+  Every ACTIVE/FORWARD node answers NTP on the VIP through chrony (there is no switch for it).
 
-DNS proxy ("dns" block at the top level of the config):
-  servers            upstream resolvers, e.g. ["10.0.0.53", "10.0.1.53:5353", "tls://dns.example.com", "https://dns.example.com/dns-query"]
-                     (tls://host[:853] is DNS over TLS, https://host[:443][/dns-query] is DNS over HTTPS;
-                     the certificate must match the host)
-  tls_insecure       true accepts any certificate from tls:// and https:// servers (default false; not safe)
-  queries            probe queries: "example.com" or {"name":..., "type":"AAAA"}
-  down_percent       a server is down when at least this % of its probe queries fail (default
-                     100); with fewer failing it stays in use and shows as degraded. The old
-                     "require" key is read and ignored
-  listen_port        port served on the VIP, UDP+TCP (default 53)
-  doh_port           serve DNS over HTTPS to clients at /dns-query on this TCP port, e.g. 443 (default 0 = off);
-                     the certificate is the GUI's
-  dot_port           serve DNS over TLS to clients on this TCP port, e.g. 853 (default 0 = off);
-                     the certificate is the GUI's (see --tls-status)
-  allowed_clients    networks that may use the proxy, e.g. ["10.0.0.0/8", "192.168.1.5"]; empty (default) =
-                     everyone. Anyone else is answered REFUSED, dynamic updates included; the node itself always may
-  client_rate        queries per second one client (an IPv4 address or an IPv6 /64) may send; 0 (default) = no limit
+NTP ("ntp" block at the top level of the config):
+  chrony serves the clients; ntpdir tests the upstream servers and gives chrony the ones that pass (see
+  the NTP page and --show-ntp).
+  servers            upstream NTP servers, e.g. ["10.0.0.123", "10.0.1.123:1123", "ntp.example.com"]
+                     (a host name is resolved when the server is probed; the default port is 123)
+  fallback_servers   used only while every server in "servers" is down; never probed, always counted as up
+  listen_port        UDP port chrony serves on (default 123; written to chrony as "port")
+  allowed_clients    networks that may ask, e.g. ["10.0.0.0/8", "192.168.1.5"]; empty (default) =
+                     everyone (chrony "allow"); the node itself always may
+  client_rate        requests per second one client may send; 0 (default) = no limit (chrony "ratelimit")
   client_burst       how many it may send at once before client_rate applies; 0 (default) = twice the rate, at least 10
-  client_action      what a client over its rate gets: drop (default; nothing is sent), truncate (UDP: a short answer
-                     with the TC bit, so a real client retries over TCP) or refused. Over TCP/DoT/DoH: always REFUSED
-  client_exempt      networks never rate limited (still subject to allowed_clients)
-  client_limits      a rate of its own for one client or network, one entry each: "192.168.1.5 50" (queries per second;
-                     burst twice that, at least 10). Applies even when client_rate is 0 or the network is in client_exempt
-  sortlist_on        true (default) uses sortlist; false keeps the list but does not sort
-  sortlist           per-client-network order of the A/AAAA records in answers, one entry each:
-                     "client-network: preferred-network, ...", e.g. ["10.1.0.0/16: 10.1.0.0/16, 10.0.0.0/8"];
-                     "any" matches every client; unmatched addresses keep their order after the preferred ones.
-                     A plain network ("10.20.0.0/16") is for every client; the one the client is in comes first
-  ecs                true (default) passes the client's network to the servers (EDNS Client
-                     Subnet, RFC 7871); ecs_prefix4 (24) / ecs_prefix6 (56) bits only; a server that
-                     refuses it (FORMERR/REFUSED) is asked again without and then left alone
-  forward_updates    true (default) forwards dynamic DNS updates (RFC 2136) to the primary
-                     server named in the zone's SOA record, unchanged; false answers REFUSED
-  policy_block_ttl   seconds (default 14400) a client may remember a blocked answer (nodata,
-                     nxdomain, null for other types): they carry a made-up SOA with this time
-  spread             true (default) shares queries out: servers within spread_band (20) percent
-                     of the fastest one's latency take turns (round-robin); false = fastest first
-  cache              true (default) answers repeated queries from memory while the records'
-                     TTLs allow (negative answers per their SOA); cache_entries (1000000) is the
-                     most answers kept, cache_max_ttl (3600) the most seconds one is kept
-                     failure_cache_seconds (60) how long SERVFAIL/REFUSED/no answer is remembered (0 = off, max 300)
-  probe_interval_ms  default 5000     probe_timeout_ms  default 1000
-  query_timeout_ms   default 1500     max_attempts      default 3
+  client_action      drop (default) or kod: what chrony mostly sends a client over its rate (the ratelimit leak)
+  max_stratum        a server answering with a higher stratum counts as down (default 15)
+  max_root_distance_ms  a server whose root distance is larger counts as down (default 1500)
+  max_rtt_ms         a server whose round trip is longer is too slow and counts as down (default 500; 0 = off)
+  serve_offset_ms    this node serves only while its clock is within this of what chrony measures (default 50; 0 = off)
+  max_offset_ms      with three or more servers, one whose clock differs from the median by more than this is
+                     a falseticker and counts as down (default 128; 0 = off)
+  probe_interval_ms  default 16000    probe_timeout_ms  default 1000
   fail_threshold     consecutive failures before a server is dropped (2)
-  latency_alpha      EWMA smoothing for response latency (default 0.3)
-  server_queries     optional per-server probe queries: {"8.8.8.8": ["google.com"]}
-  server_names       optional names shown under the addresses: {"8.8.8.8": "google-a"}
-A server may also be a host name. A group can have its own pool: put the same
-keys in a "dns" block inside the group (that is what the Topology page writes); groups
-without one share the top-level block. A server receives traffic only while its
-probe queries succeed; eligible servers are tried in turns within the spread band of the fastest (or fastest-first with spread off) (live query
-latency feeds the same estimate). An explicit "groups": [] means no gateways.
+  server_names       optional names shown under the addresses: {"10.0.0.123": "ntp-a"}
+  spread, spread_band, query_timeout_ms, max_attempts, latency_alpha, client_exempt and client_limits are
+  still accepted in a file but have no effect: chrony picks among its sources itself and answers the clients.
+  Every few seconds the servers that pass are written to /etc/chrony/ntpdir.sources.d/ntpdir.sources and chrony
+  re-reads them (chronyc reload sources); a server that stops passing is dropped from there. With none passing,
+  chrony keeps the sources it has. The allow, ratelimit and port settings go to /etc/chrony/ntpdir.conf.d/ntpdir.conf
+  and chrony is restarted when they change. The installer points chrony at both directories.
+A group can have its own servers: put the same keys in a "ntp" block inside the group (that is what the
+Topology page writes); groups without one share the top-level block. Every node's chrony uses the servers of
+all its gateways together. An explicit "groups": [] means no gateways.
 
 Web GUI ("web" block): everything above is also available in a browser.
-  Served over HTTPS (default port 53853). Log in with a system account that
-  is a member of the dnsdir group; passwords are checked through PAM (service
-  "dnsdir", see contrib/pam.d/). The page follows the system light/dark theme.
-  The GUI is always on.      listen   default ":53853"
-  group                default "dnsdir"      pam_service  default "dnsdir"
+  Served over HTTPS (default port 12380). Log in with a system account that
+  is a member of the ntpdir group; passwords are checked through PAM (service
+  "ntpdir", see contrib/pam.d/). The page follows the system light/dark theme.
+  The GUI is always on.      listen   default ":12380"
+  group                default "ntpdir"      pam_service  default "ntpdir"
   session_idle_minutes default 30
   max_failed_logins    default 3   wrong passwords ...
   failed_login_window_minutes default 1    ... within this window lock the
@@ -242,9 +206,9 @@ Web GUI ("web" block): everything above is also available in a browser.
   min_password_length  default 8   fewest characters of a password set on the Users page
   The certificate is managed with --tls-* / Configure ▸ Web GUI (the old
   cert_file/key_file settings still work and take precedence).
-  Pages: Topology (--canvas, --canvas-add/-del: draw gateways, DNS servers and
-  the domains to test as circle, squares and trapezoids), Gateways (--show-gateways, --show-neighbors),
-  Cluster monitor (--cluster-status), DNS (--show-dns), Configure (--show-config,
+  Pages: Topology (--canvas, --canvas-add/-del: draw gateways and NTP servers
+  as circles and squares), Gateways (--show-gateways, --show-neighbors),
+  Cluster monitor (--cluster-status), NTP (--show-ntp), Configure (--show-config,
   --configure: form), History (--versions...), Certificate
   (--tls-...), Node (--assert-agc, --node-pause..., --power), Cluster (--cluster-...), Upgrade (--update-...); the ? at the top right
   opens help for the page. Version is in the header. A certificate installed through the GUI/CLI is
@@ -255,28 +219,28 @@ Config history: every change (GUI, CLI, cluster sync or a hand edit of the
   version can be compared, downloaded or restored; secrets are hidden in summaries.
 
 Cluster ("cluster" block; management only, independent of the AGC/AFN election):
-  listen             default ":53854" (TCP)
-  self               address other nodes use to reach this one, e.g. "10.0.0.5:53854"
+  listen             default ":12381" (TCP)
+  self               address other nodes use to reach this one, e.g. "10.0.0.5:12381"
   sync_interval_sec  default 5
   One node is the primary, the others replicas. Settings shared by the cluster
-  (the DNS block, group VIPs/keys/timers, ...) are edited anywhere and applied
+  (the NTP block, group VIPs/keys/timers, ...) are edited anywhere and applied
   on the primary; interface, priority, weight and the web/cluster blocks stay
   per node. Create a join code on a member (--cluster-token), use it on the new
   node (--cluster-join). Nodes pin each other's certificates and sign requests;
   a code works once for an hour. Promotion is explicit (--cluster-promote), apart from the
-  automatic failover (--cluster-failover) and the hand-over before a planned restart.
+  automatic failover (from three members, after 5 minutes) and the hand-over before a planned restart.
   The primary's GUI certificate is replicated to every member.
 
-Updates: upload dnsdir_vN.tgz (or .zip) on any node (--update-upload); the node
+Updates: upload ntpdir_vN.tgz (or .zip) on any node (--update-upload); the node
   checks it, keeps the source, and each member that is asked to update (or all of
   them with --update-auto on) pulls it from a peer, builds it with its own Go
   toolchain (gcc + PAM headers needed), swaps the binary and restarts - one node
   at a time. A new binary that fails to start is rolled back automatically.
 
 Live reload: the daemon watches the config file via inotify.
-  Edit and save dnsdir.conf — changes apply within ~50ms, no restart needed.
+  Edit and save ntpdir.conf — changes apply within ~50ms, no restart needed.
   Live fields (no engine restart): priority, lb_method, weight,
-    hello_ms, hold_ms, preempt, max_afns, log_level, the whole "dns" block,
+    hello_ms, hold_ms, preempt, max_afns, log_level, the whole "ntp" block,
     web group/pam_service/session timeout, web cert/key (only listen restarts the GUI)
   Restart fields (engine restarts, brief per-group disruption):
     interface, vip4, vip6, group_id, key, neighbors, real_macs
@@ -296,14 +260,14 @@ func main() {
 		fmt.Println(usageText)
 		return
 	}
-	fs := flag.NewFlagSet("dnsdir", flag.ContinueOnError)
+	fs := flag.NewFlagSet("ntpdir", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var (
 		configure    = fs.Bool("configure", false, "")
 		showConfig   = fs.Bool("show-config", false, "")
 		showNeigh    = fs.Bool("show-neighbors", false, "")
 		showGateways = fs.Bool("show-gateways", false, "")
-		showDNS      = fs.Bool("show-dns", false, "")
+		showNTP      = fs.Bool("show-ntp", false, "")
 		showVersion  = fs.Bool("version", false, "")
 		assertAGC    = fs.Bool("assert-agc", false, "")
 		conf         = fs.String("config", confPath, "")
@@ -312,57 +276,32 @@ func main() {
 		stateDir     = fs.String("state-dir", defaultStateDir, "")
 		cli          = registerCLIFlags(fs)
 	)
-	// install.sh runs this once, as root, before it creates the group and the PAM service, so an
-	// install that was called ddgw keeps its group members and settings (not a user-facing flag)
-	if len(os.Args) == 2 && os.Args[1] == "--migrate-old-install" {
-		did, err := migrateOldInstall(filepath.Dir(confPath))
-		for _, d := range did {
-			fmt.Println("    moved: " + d)
-		}
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "dnsdir:", err)
-			os.Exit(1)
-		}
-		return
-	}
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Println(usageText)
 			return
 		}
-		fmt.Fprintln(os.Stderr, "dnsdir:", err)
-		fmt.Fprintln(os.Stderr, "try: dnsdir --help")
+		fmt.Fprintln(os.Stderr, "ntpdir:", err)
+		fmt.Fprintln(os.Stderr, "try: ntpdir --help")
 		os.Exit(2)
 	}
 
 	if *showVersion {
-		name := "dnsdir"
-		// a node still running a pre-v367 updater builds this tree under its old cache name
-		// (ddgw-v…) and accepts only a binary that calls itself ddgw
-		if strings.HasPrefix(filepath.Base(os.Args[0]), "ddgw-v") {
-			name = "ddgw"
-		}
-		fmt.Println(name + " v" + version())
+		fmt.Println("ntpdir v" + version())
 		return
 	}
 
 	// pre-v15 installs kept the config in /etc/liras: bring it over once, and never
 	// use that location again, even if an old service unit still names it
 	if *conf == legacyConfPath {
-		fmt.Fprintf(os.Stderr, "dnsdir: %s is no longer used; using %s (update the service unit's --config, or re-run install.sh)\n", legacyConfPath, confPath)
+		fmt.Fprintf(os.Stderr, "ntpdir: %s is no longer used; using %s (update the service unit's --config, or re-run install.sh)\n", legacyConfPath, confPath)
 	}
 	*conf = canonicalConf(*conf)
 	if *conf == confPath && os.Geteuid() == 0 {
-		// releases before v367 were called ddgw: take their state over under the new names
-		if did, err := migrateOldInstall(filepath.Dir(confPath)); err != nil {
-			fmt.Fprintf(os.Stderr, "dnsdir: moving the old ddgw install: %v\n", err)
-		} else if len(did) > 0 {
-			fmt.Fprintf(os.Stderr, "dnsdir: this install was called ddgw before: %s\n", strings.Join(did, "; "))
-		}
 		if moved, err := migrateLegacyConfig(confPath, legacyConfPath); err != nil {
-			fmt.Fprintf(os.Stderr, "dnsdir: could not move %s to %s: %v\n", legacyConfPath, confPath, err)
+			fmt.Fprintf(os.Stderr, "ntpdir: could not move %s to %s: %v\n", legacyConfPath, confPath, err)
 		} else if moved {
-			fmt.Fprintf(os.Stderr, "dnsdir: moved your configuration from %s to %s and removed the old files\n",
+			fmt.Fprintf(os.Stderr, "ntpdir: moved your configuration from %s to %s and removed the old files\n",
 				legacyConfPath, confPath)
 		}
 	}
@@ -379,8 +318,8 @@ func main() {
 	case *showGateways:
 		showGatewayTable(*sock)
 		return
-	case *showDNS:
-		showDNSTable(*sock)
+	case *showNTP:
+		showNTPTable(*sock)
 		return
 	case cli.run(*sock):
 		return
@@ -428,9 +367,9 @@ func main() {
 	setupLogging(dc.LogLevel)
 	startLogFile(*stateDir)
 	if !created {
-		infof("dnsdir starting — %d group(s)", len(dc.Groups))
+		infof("ntpdir starting — %d group(s)", len(dc.Groups))
 	} else {
-		infof("dnsdir starting — config file %s not found, created it with the defaults", *conf)
+		infof("ntpdir starting — config file %s not found, created it with the defaults", *conf)
 	}
 	if err := run(dc, *conf, *sock, *stateDir); err != nil {
 		fatal(err)
@@ -451,7 +390,7 @@ func run(dc *DaemonConfig, confFile, sockPath, stateDir string) error {
 			case <-ctx.Done():
 				return
 			case <-usr1:
-				warnf("SIGUSR1: every goroutine's stack is written to standard error (journalctl -u dnsdir)")
+				warnf("SIGUSR1: every goroutine's stack is written to standard error (journalctl -u ntpdir)")
 				fmt.Fprintf(os.Stderr, "--- goroutine dump (SIGUSR1) %s ---\n%s--- end of goroutine dump ---\n", time.Now().Format(time.RFC3339), goroutineDump())
 			}
 		}
@@ -476,15 +415,12 @@ func run(dc *DaemonConfig, confFile, sockPath, stateDir string) error {
 	var reexec atomic.Bool
 	mg.restartFn = func() { reexec.Store(true); stop() }
 
-	// the saved statistics come back before any query is counted; the last save happens once the DNS frontends have stopped
+	// the saved statistics come back before any query is counted; the last save happens once the NTP frontends have stopped
 	savedStats := startPersistence(stateDir, ctx.Done())
 
-	dotCertificate = mg.certs.GetCertificate
 	sup := NewSupervisor(ctx, dc)
 	sup.StartAll()
-	memguard.caches = sup.allCaches
-	qstats.ptrVia = sup.ptrViaPools
-	qstats.SetNames(dc.DNS.ClientNames)
+	qstats.SetNames(dc.NTP.ClientNames)
 	go applySNMP(dc.snmpSettings())
 	go memguard.Run(ctx.Done())
 	go mg.sched.Run(ctx)
@@ -529,13 +465,8 @@ func run(dc *DaemonConfig, confFile, sockPath, stateDir string) error {
 	mg.pausedFn = func() bool { return sup.config().NodePaused }
 	mg.anycastFn = sup.AllAnycastStates
 	mg.poolOf = sup.poolFor
-	mg.flushFn = sup.flushCache
-	mg.clearFn = sup.clearCache
-	mg.regNameFn = func(ctx context.Context, name, old string, addr netip.Addr) ([]string, error) {
-		return sup.registerClientName(ctx, sup.config().DNS, name, old, addr)
-	}
 	mg.tshootFn = func() map[string]any {
-		return map[string]any{"canvas": st.canvasGroups(), "dns-pools": st.dnsStatus(), "gateway-snapshot": st.snapshot()}
+		return map[string]any{"canvas": st.canvasGroups(), "ntp-pools": st.ntpStatus(), "gateway-snapshot": st.snapshot()}
 	}
 	if err := st.Start(); err != nil {
 		warnf("status socket unavailable (%s): %v — --show-* commands will not work", sockPath, err)
@@ -553,7 +484,7 @@ func run(dc *DaemonConfig, confFile, sockPath, stateDir string) error {
 		}
 		infof("Config file changed — reloading")
 		sup.Reload(nu)
-		qstats.SetNames(nu.DNS.ClientNames)
+		qstats.SetNames(nu.NTP.ClientNames)
 		go applySNMP(nu.snmpSettings())
 		mg.OnConfigLoaded(nu)
 		if web != nil {
@@ -569,15 +500,6 @@ func run(dc *DaemonConfig, confFile, sockPath, stateDir string) error {
 	mg.OnConfigLoaded(dc) // first history entry, cluster listener
 	defer mg.cl.Stop()
 	go mg.cl.Run(ctx)
-	go mg.warmCaches(ctx, func() []int {
-		var gids []int
-		for _, g := range sup.config().Groups {
-			if !g.Paused {
-				gids = append(gids, g.GroupID)
-			}
-		}
-		return gids
-	})
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -591,7 +513,7 @@ func run(dc *DaemonConfig, confFile, sockPath, stateDir string) error {
 		warnf("config watch unavailable: %v — edits need a restart", err)
 	}
 
-	infof("dnsdir running — %d group(s), watching %s", len(dc.Groups), confFile)
+	infof("ntpdir running — %d group(s), watching %s", len(dc.Groups), confFile)
 	if cpuProcs > 0 {
 		infof("CPU limit of %.2f in this cgroup: using %d scheduler threads instead of %d", cpuQuota, cpuProcs, runtime.NumCPU())
 	}
@@ -623,7 +545,7 @@ func run(dc *DaemonConfig, confFile, sockPath, stateDir string) error {
 func certExpiryWatch(ctx context.Context, mg *Mgmt) {
 	for {
 		if w := mg.certs.ExpiryWarning(); w != "" {
-			warnf("web: %s — replace it under Configure ▸ Web GUI or with dnsdir --tls-install", w)
+			warnf("web: %s — replace it under Configure ▸ Web GUI or with ntpdir --tls-install", w)
 		}
 		select {
 		case <-ctx.Done():
@@ -717,8 +639,8 @@ func showGatewayTable(sock string) {
 	fmt.Println("* = this node")
 }
 
-func showDNSTable(sock string) {
-	res := mustStatus(sock, "dns")
+func showNTPTable(sock string) {
+	res := mustStatus(sock, "ntp")
 	if ok, _ := res["ok"].(bool); !ok {
 		fmt.Println(res["error"])
 		os.Exit(1)
@@ -730,38 +652,56 @@ func showDNSTable(sock string) {
 			Groups  []int        `json:"groups"`
 			Servers []ServerStat `json:"servers"`
 			UsingFB bool         `json:"using_fallback"`
-			DownPct int          `json:"down_percent"`
-			Probes  int          `json:"probes"`
-			ECS     bool         `json:"ecs"`
-			ECSSent uint64       `json:"ecs_sent"`
-			Cache   cacheStats   `json:"cache"`
-			Spread  bool         `json:"spread"`
-			Insec   bool         `json:"tls_insecure"`
-			DoT     int          `json:"dot_port"`
-			DoH     int          `json:"doh_port"`
-			Band    int          `json:"spread_band"`
-			Allowed int          `json:"allowed_clients"`
-			Rate    int          `json:"client_rate"`
-			Burst   int          `json:"client_burst"`
-			Action  string       `json:"client_action"`
-			Denied  uint64       `json:"denied"`
-			Limited uint64       `json:"limited"`
+			FailThr int          `json:"fail_threshold"`
+			MaxStr  int          `json:"max_stratum"`
+			MaxOff  int          `json:"max_offset_ms"`
+			MaxRD   int          `json:"max_root_distance_ms"`
+			MaxRTT  int          `json:"max_rtt_ms"`
 		} `json:"pools"`
-		Listeners []string `json:"listeners"`
-		Queries   uint64   `json:"queries"`
-		Answered  uint64   `json:"answered"`
-		ServFail  uint64   `json:"servfail"`
+		Listeners []string    `json:"listeners"`
+		Chrony    ChronyState `json:"chrony"`
+		Roll      string      `json:"chrony_roll"`
+		Stats     ServerStats `json:"server_stats"`
+		Allowed   int         `json:"allowed_clients"`
+		Rate      int         `json:"client_rate"`
+		Burst     int         `json:"client_burst"`
+		Action    string      `json:"client_action"`
 	}
 	decodeData(res, &d)
-	if len(d.Listeners) == 0 {
-		fmt.Println("Listening: (not active on this node)")
-	} else {
-		fmt.Println("Listening: " + strings.Join(d.Listeners, ", "))
+	c := d.Chrony
+	fmt.Println("time: " + time.Now().UTC().Format("2006-01-02 15:04:05") + " UTC")
+	switch {
+	case !c.Running:
+		fmt.Println("chrony: not running (" + orDefault(c.Err, "no answer") + "); this node cannot serve NTP; in a container, run the installer again so chrony starts with -x")
+	case !c.Synced:
+		fmt.Println("chrony: running, not synchronised yet (" + orDefault(c.Leap, "no source") + ")")
+	default:
+		fmt.Printf("chrony: synchronised, stratum %d, to %s, system clock %+.3f ms off, root delay %.2f ms\n", c.Stratum, orDefault(c.Ref, "-"), c.OffsetMS, c.RootDelay)
 	}
-	fmt.Printf("Queries: %d  answered: %d  SERVFAIL: %d\n", d.Queries, d.Answered, d.ServFail)
-	const f = "%-4s %-16s %-28s %-6s %-10s %-10s %-8s %-8s %-8s %s\n"
+	if d.Roll != "" {
+		fmt.Println("chrony restart (port or rate limit changed): " + d.Roll)
+	}
+	if len(d.Listeners) == 0 {
+		fmt.Println("Serving: (no gateway answers on this node)")
+	} else {
+		fmt.Println("Serving: " + strings.Join(d.Listeners, ", "))
+	}
+	if d.Stats.Err == "" {
+		fmt.Printf("Requests chrony has handled: %d  dropped: %d\n", d.Stats.Received, d.Stats.Dropped)
+	}
+	if d.Allowed > 0 {
+		fmt.Printf("allowed clients: %d network(s) listed (allowed_clients)\n", d.Allowed)
+	} else {
+		fmt.Println("allowed clients: everyone (allowed_clients is empty)")
+	}
+	if d.Rate > 0 {
+		fmt.Printf("client rate limit: %d requests/s per client (burst %d), over the limit: %s\n", d.Rate, d.Burst, d.Action)
+	} else {
+		fmt.Println("client rate limit: off")
+	}
+	const f = "%-16s %-28s %-9s %-8s %-8s %-11s %-8s %-8s %-8s %s\n"
 	for _, p := range d.Pools {
-		who := "shared pool"
+		who := "shared servers"
 		if p.Key != 0 {
 			who = "gateway " + itoa(p.Key)
 			if p.Name != "" {
@@ -772,69 +712,39 @@ func showDNSTable(sock string) {
 		for _, g := range p.Groups {
 			gl = append(gl, itoa(g))
 		}
-		fmt.Printf("\n%s (used by group %s): %d probe(s) in total, a server is down when %d%% of its tests fail\n", who, strings.Join(gl, ","), p.Probes, p.DownPct)
-		if p.ECS {
-			fmt.Printf("client subnet (ECS): on, attached to %d forwarded queries\n", p.ECSSent)
-		} else {
-			fmt.Println("client subnet (ECS): off (servers see this node's address; turn it on with ecs: true)")
+		used := ""
+		if len(gl) > 0 {
+			used = " (used by group " + strings.Join(gl, ",") + ")"
 		}
-		if p.Allowed > 0 {
-			fmt.Printf("allowed clients: %d network(s) listed (allowed_clients); %d queries from other addresses were refused\n", p.Allowed, p.Denied)
-		} else {
-			fmt.Println("allowed clients: everyone (allowed_clients is empty)")
-		}
-		if p.Rate > 0 {
-			fmt.Printf("client rate limit: %d queries/s per client (burst %d), over the limit: %s; %d queries turned away\n", p.Rate, p.Burst, p.Action, p.Limited)
-		} else {
-			fmt.Println("client rate limit: off")
-		}
-		if p.DoH != 0 {
-			fmt.Printf("DNS over HTTPS: served to clients on port %d at /dns-query (the GUI certificate)\n", p.DoH)
-		}
-		if p.DoT != 0 {
-			fmt.Printf("DNS over TLS: served to clients on port %d (the GUI certificate)\n", p.DoT)
-		}
-		if p.Insec {
-			fmt.Println("tls:// and https:// servers: certificates are NOT checked (tls_insecure) — anyone on the path could answer")
-		}
-		if p.Spread {
-			fmt.Printf("spread: on, servers within %d%% of the fastest take turns (see the Served column)\n", p.Band)
-		} else {
-			fmt.Println("spread: off (the fastest server gets the queries; the others are fallbacks)")
-		}
-		if c := p.Cache; c.On {
-			total := c.Hits + c.Misses
-			rate := "–"
-			if total > 0 {
-				rate = fmt.Sprintf("%.1f%%", 100*float64(c.Hits)/float64(total))
-			}
-			fmt.Printf("answer cache: on, %d of %d entries (%s), %d hits, %d misses (hit rate %s), %d not cacheable, %d evicted; answers kept at most %ds\n",
-				c.Entries, c.Max, humanBytes(uint64(c.Bytes)), c.Hits, c.Misses, rate, c.Bypassed, c.Evicted, c.MaxTTL)
-		} else {
-			fmt.Println("answer cache: off (every query goes to an upstream server)")
-		}
+		fmt.Printf("\n%s%s: a server is out after %d failed probes in a row; usable up to stratum %d, root distance %d ms, %s, %s\n",
+			who, used, p.FailThr, p.MaxStr, p.MaxRD, rttLimit(p.MaxRTT), offLimit(p.MaxOff))
 		if p.UsingFB {
-			fmt.Println("no configured server is in service (down or paused): answering from the fallback servers")
+			fmt.Println("no configured server is in service (down or paused): chrony uses the fallback servers")
 		}
-		fmt.Printf(f, "RANK", "SERVER NAME", "SERVER IP", "STATE", "EWMA(ms)", "LAST(ms)", "OK", "FAIL", "SERVED", "LAST ERROR")
-		fmt.Println(strings.Repeat("-", 127))
+		fmt.Printf(f, "SERVER NAME", "SERVER IP", "STATE", "STRATUM", "OFFSET(ms)", "RTT(ms)", "IN CHRONY", "OK", "FAIL", "LAST ERROR")
+		fmt.Println(strings.Repeat("-", 140))
 		for _, s := range p.Servers {
-			rank, state := "-", "down"
+			state := "down"
 			if s.Healthy {
-				rank, state = "-", "up"
-				if s.Rank > 0 {
-					rank = itoa(s.Rank)
-				}
+				state = "up"
+			}
+			if s.Falseticker {
+				state = "false"
+			}
+			stratum, offset := "-", "-"
+			if t := s.Time; t != nil {
+				stratum, offset = itoa(t.Stratum), fmt.Sprintf("%+.2f", t.OffsetMS)
 			}
 			addr := s.Addr
 			if s.Fallback {
 				addr += " (fallback)"
 			}
-			fmt.Printf(f, rank, orDefault(s.Name, "-"), addr, state, fmt.Sprintf("%.2f", s.EWMAMS), fmt.Sprintf("%.2f", s.LastMS),
-				strconv.FormatUint(s.Successes, 10), strconv.FormatUint(s.Failures, 10),
-				strconv.FormatUint(s.Served, 10), s.LastError)
+			in := orDefault(s.Chrony, "no")
+			fmt.Printf(f, orDefault(s.Name, "-"), addr, state, stratum, offset, fmt.Sprintf("%.2f", s.EWMAMS), in,
+				strconv.FormatUint(s.Successes, 10), strconv.FormatUint(s.Failures, 10), s.LastError)
 		}
 	}
+	fmt.Println("\nIN CHRONY: * chrony is synchronised to it, + combined with it, - not combined, ? not reachable, x falseticker, ~ too variable, no = not a chrony source")
 }
 
 // ── Interactive configure ────────────────────────────────────────────────────
@@ -889,7 +799,7 @@ func interactiveConfigure(path string) error {
 	n := p.askInt("How many groups?", len(dc.Groups))
 	for len(dc.Groups) < n {
 		g := newGatewayGroup()
-		g.GroupID = len(dc.Groups) + 1
+		g.GroupID = firstGroupID + len(dc.Groups)
 		dc.Groups = append(dc.Groups, g)
 	}
 	if n < len(dc.Groups) && n >= 0 {
@@ -921,25 +831,11 @@ func interactiveConfigure(path string) error {
 		g.Key = p.ask("HMAC-SHA256 shared key", g.Key)
 	}
 	if len(dc.Groups) > 0 {
-		fmt.Println("\n  DNS proxy")
-		servers := p.ask("Upstream servers (comma separated)", strings.Join(dc.DNS.Servers, ","))
-		dc.DNS.Servers = splitList(servers)
-		var qs []string
-		for _, q := range dc.DNS.Queries {
-			qs = append(qs, q.Name+" "+q.Type)
-		}
-		queries := p.ask("Probe queries (comma separated, \"name[ TYPE]\")", strings.Join(qs, ","))
-		dc.DNS.Queries = nil
-		for _, q := range splitList(queries) {
-			var dq DNSQuery
-			b, _ := json.Marshal(q)
-			if err := dq.UnmarshalJSON(b); err != nil {
-				return err
-			}
-			dc.DNS.Queries = append(dc.DNS.Queries, dq)
-		}
-		dc.DNS.DownPercent = p.askInt("A server is down when this % of its probe queries fail", dc.DNS.DownPercent)
-		dc.DNS.ListenPort = p.askInt("Listen port", dc.DNS.ListenPort)
+		fmt.Println("\n  NTP")
+		servers := p.ask("Upstream NTP servers (comma separated)", strings.Join(dc.NTP.Servers, ","))
+		dc.NTP.Servers = splitList(servers)
+		dc.NTP.FailThreshold = p.askInt("A server is down after this many failed probes in a row", dc.NTP.FailThreshold)
+		dc.NTP.ListenPort = p.askInt("NTP port chrony serves on", dc.NTP.ListenPort)
 	}
 	if err := dc.Validate(); err != nil {
 		return fmt.Errorf("not saved: %w", err)
@@ -973,6 +869,21 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// offLimit words the falseticker limit for --show-ntp.
+func rttLimit(ms int) string {
+	if ms <= 0 {
+		return "round trip not checked"
+	}
+	return fmt.Sprintf("round trip up to %d ms", ms)
+}
+
+func offLimit(ms int) string {
+	if ms <= 0 {
+		return "falseticker check off"
+	}
+	return fmt.Sprintf("a falseticker beyond %d ms", ms)
 }
 
 // helloText is a peer's measured hello gaps as "average/largest" in ms, "-" before two hellos have arrived.

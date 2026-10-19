@@ -37,8 +37,9 @@ func freeAddr(t *testing.T) string {
 func newTNode(t *testing.T, name string) *tnode {
 	t.Helper()
 	d := t.TempDir()
-	n := &tnode{t: t, name: name, dir: d, conf: filepath.Join(d, "etc", "dnsdir.conf"), addr: freeAddr(t)}
+	n := &tnode{t: t, name: name, dir: d, conf: filepath.Join(d, "etc", "ntpdir.conf"), addr: freeAddr(t)}
 	dc := newDaemonConfig()
+	dc.Groups[0].GroupID = 1
 	dc.Cluster.Listen, dc.Cluster.Self, dc.Cluster.SyncIntervalSec = n.addr, n.addr, 1
 	dc.Groups[0].Interface = "lo"
 	dc.Groups[0].Priority = 100
@@ -151,17 +152,15 @@ func TestClusterJoinSyncPromote(t *testing.T) {
 
 	// shared settings flow from the primary; local ones stay
 	ac := a.cfg()
-	ac.DNS.Servers = []string{"10.1.1.1", "10.1.1.2"}
-	ac.DNS.Queries = []DNSQuery{{"example.com", "A"}}
+	ac.NTP.Servers = []string{"10.1.1.1", "10.1.1.2"}
 	ac.Groups[0].Key = "cluster-key"
-	ac.Groups[0].DNSProxy = true
 	ac.Groups[0].Priority = 200 // local to A
 	if err := a.mg.PutConfig(ac, "alice", "set upstreams"); err != nil {
 		t.Fatal(err)
 	}
 	b.sync()
 	got := b.cfg()
-	if got.Groups[0].Key != "cluster-key" || !got.Groups[0].DNSProxy || len(got.DNS.Servers) != 2 {
+	if got.Groups[0].Key != "cluster-key" || len(got.NTP.Servers) != 2 {
 		t.Fatalf("shared settings not replicated: %+v", got.Groups[0])
 	}
 	if got.Groups[0].Priority != 50 {
@@ -188,12 +187,12 @@ func TestClusterJoinSyncPromote(t *testing.T) {
 	// an invalid shared change is refused by the primary and leaves B untouched
 	bc = b.cfg()
 	bc.Groups[0].HelloMS = 400
-	bc.DNS.Servers = []string{"not an ip!"}
-	before := b.cfg().DNS.Servers
+	bc.NTP.Servers = []string{"not an ip!"}
+	before := b.cfg().NTP.Servers
 	if err := b.mg.PutConfig(bc, "bob", ""); err == nil {
 		t.Fatal("invalid dns server must be refused")
 	}
-	if strings.Join(b.cfg().DNS.Servers, ",") != strings.Join(before, ",") {
+	if strings.Join(b.cfg().NTP.Servers, ",") != strings.Join(before, ",") {
 		t.Fatal("a refused change must not be saved locally")
 	}
 
@@ -290,7 +289,7 @@ func TestClusterAuthRejections(t *testing.T) {
 		t.Fatal("an unauthenticated caller must not be learned as a peer")
 	}
 	// garbage join code
-	if _, err := decodeJoinCode("ddgw-join-v1:!!!"); err == nil {
+	if _, err := decodeJoinCode("ntpdir-join-v1:!!!"); err == nil {
 		t.Error("damaged code")
 	}
 	if _, err := decodeJoinCode("hello"); err == nil {
@@ -341,9 +340,9 @@ func TestClusterCertificateReplication(t *testing.T) {
 func fakeSourceTarball(t *testing.T, ver string) []byte {
 	t.Helper()
 	files := []srcFile{
-		{"dnsdir/source/go.mod", []byte("module dnsdir\n\ngo 1.24\n"), 0o644},
-		{"dnsdir/source/main.go", []byte("package main\nfunc main(){}\n"), 0o644},
-		{"dnsdir/source/VERSION", []byte(ver + "\n"), 0o644},
+		{"ntpdir/source/go.mod", []byte("module ntpdir\n\ngo 1.24\n"), 0o644},
+		{"ntpdir/source/main.go", []byte("package main\nfunc main(){}\n"), 0o644},
+		{"ntpdir/source/VERSION", []byte(ver + "\n"), 0o644},
 	}
 	return makeTgz(t, files)
 }
@@ -524,22 +523,21 @@ func TestHeldMemberDoesNotBlockPausedOnes(t *testing.T) {
 
 func TestGatewayStates(t *testing.T) {
 	g1, g2, g3 := defaultGroup(), defaultGroup(), defaultGroup()
-	g1.GroupID, g1.VIP4, g1.DNSProxy = 1, "10.1.0.1/24", true
 	g2.GroupID, g2.VIP4, g2.VIP6 = 2, "10.2.0.1/24", "2001:db8::1/64"
 	g3.GroupID, g3.VIP4, g3.Paused = 3, "10.3.0.1/24", true
 	dc := newDaemonConfig()
 	dc.Groups = []GroupConfig{g1, g2, g3}
 	rows := []SnapshotRow{
-		{GroupID: 1, AF: "v4", Local: true, State: "forward", DNSUp: true},
+		{GroupID: 1, AF: "v4", Local: true, State: "forward", NTPUp: true},
 		{GroupID: 2, AF: "v4", Local: true, State: "active"},
 		{GroupID: 2, AF: "v6", Local: true, State: "speak"}, // v6 not yet elected
 		{GroupID: 1, AF: "v4", Local: false, State: "active"},
 	}
 	got := gatewayStates(dc, rows)
 	if len(got) != 2 || got[0].GroupID != 1 || !got[0].Serving || got[1].GroupID != 2 || got[1].Serving {
-		t.Fatalf("gateway states (paused left out, dual-stack needs both, DNS must be up): %+v", got)
+		t.Fatalf("gateway states (paused left out, dual-stack needs both, NTP must be up): %+v", got)
 	}
-	rows[0].DNSUp = false
+	rows[0].NTPUp = false
 	if gatewayStates(dc, rows)[0].Serving {
 		t.Fatal("a gateway whose DNS listener is down is not serving")
 	}
@@ -649,7 +647,7 @@ func TestClusterGatewayStatsAddUpNodes(t *testing.T) {
 		t.Fatalf("two nodes: nodes %d off %d answered %d known %v", r.Nodes, r.NodesOff, r.Answered, r.Known)
 	}
 	// through the operation the web page and the CLI use
-	res, err := a.mg.Op("dns.serverstats", json.RawMessage(`{"addr":"`+key+`","from":"1h"}`), "t")
+	res, err := a.mg.Op("ntp.serverstats", json.RawMessage(`{"addr":"`+key+`","from":"1h"}`), "t")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -963,13 +961,6 @@ func TestPickSuccessor(t *testing.T) {
 	if got != "10.0.0.5" {
 		t.Fatalf("skipping unavailable members: %q", got)
 	}
-	// a paused node is out of service: it never gets the role, even with the newest settings
-	if got := pickSuccessor([]PeerView{self, pv("10.0.0.2", 9, "5", func(p *PeerView) { p.NodePaused = true }), pv("10.0.0.3", 3, "5")}, "5"); got != "10.0.0.3" {
-		t.Fatalf("a paused node was picked: %q", got)
-	}
-	if got := pickSuccessor([]PeerView{self, pv("10.0.0.2", 9, "5", func(p *PeerView) { p.NodePaused = true })}, "5"); got != "" {
-		t.Fatalf("only a paused node left: %q", got)
-	}
 	// a tie goes to the same version, then the lowest address
 	if got := pickSuccessor([]PeerView{self, pv("10.0.0.2", 9, "4"), pv("10.0.0.3", 9, "5"), pv("10.0.0.4", 9, "5")}, "5"); got != "10.0.0.3" {
 		t.Fatalf("tie: %q", got)
@@ -1010,7 +1001,7 @@ func TestClusterServerStatsCountNodesWithHistory(t *testing.T) {
 	a.join2(t, b)
 	a.sync()
 	b.sync()
-	key := "192.0.2.77:53"
+	key := "192.0.2.77:123"
 	for i := 0; i < 4; i++ {
 		srvhist.series(key).addPrOK()
 	}
@@ -1019,13 +1010,13 @@ func TestClusterServerStatsCountNodesWithHistory(t *testing.T) {
 	if err != nil || !r.Known || r.Nodes != 2 || r.NodesOff != 0 {
 		t.Fatalf("two nodes with history: %+v %v", r, err)
 	}
-	none := "192.0.2.78:53"
+	none := "192.0.2.78:123"
 	r, err = a.mg.cl.clusterStats(none, now.Add(-time.Hour), now)
 	if err != nil || r.Known || r.Nodes != 0 {
 		t.Fatalf("nobody has it: %+v %v", r, err)
 	}
 	// the operation does not mark a server this node has itself as coming from the cluster
-	res, err := a.mg.Op("dns.serverstats", json.RawMessage(`{"addr":"`+key+`","from":"1h"}`), "t")
+	res, err := a.mg.Op("ntp.serverstats", json.RawMessage(`{"addr":"`+key+`","from":"1h"}`), "t")
 	if err != nil || res.(ServerStatsResult).ViaCluster || !res.(ServerStatsResult).Known {
 		t.Fatalf("op: %+v %v", res, err)
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestNormalizeAnycast(t *testing.T) {
@@ -126,6 +127,9 @@ func hookLo(t *testing.T) *fakeLo {
 	og := anycastGateFn // these tests are not about BGP: the gate is open unless a test closes it
 	anycastGateFn = func(*BGPConfig, string) string { return "" }
 	t.Cleanup(func() { anycastGateFn = og })
+	oc := chronyServingFn
+	chronyServingFn = func() bool { return true }
+	t.Cleanup(func() { chronyServingFn = oc })
 	return f
 }
 
@@ -141,15 +145,15 @@ func freeUDPPort(t *testing.T) int {
 }
 
 // The address is on lo only while a DNS server answers, is renewed while it
-// does, and is taken off when the pool goes down, the gateway stops or dnsdir stops.
-func TestAnycastFollowsDNSHealth(t *testing.T) {
+// does, and is taken off when the pool goes down, the gateway stops or ntpdir stops.
+func TestAnycastFollowsNTPHealth(t *testing.T) {
 	lo := hookLo(t)
-	up := newFakeDNS(t)
-	p := NewPool(testDNSCfg(up.addr))
+	up := newFakeNTP(t)
+	p := NewPool(testNTPCfg(up.addr))
 	p.ProbeNow(context.Background())
-	port := freeUDPPort(t)
+	_ = freeUDPPort
 	const addr = "127.0.0.9" // loopback so the test can bind it; the real config refuses loopback
-	a := newAnycastSet(1, []string{addr}, func() *Pool { return p }, func() int { return port })
+	a := newAnycastSet(1, []string{addr}, func() *Pool { return p })
 	a.step()
 	if !lo.has(addr) || !a.state()[0].Up {
 		t.Fatalf("not announced while healthy: %+v", a.state())
@@ -158,21 +162,11 @@ func TestAnycastFollowsDNSHealth(t *testing.T) {
 	if lo.adds < 2 {
 		t.Fatal("the address lifetime is not renewed")
 	}
-	// the answer comes from the anycast address itself
-	q, _ := buildQuery(0x1234, "any.example", "A")
-	resp, _, err := exchange(context.Background(), net.JoinHostPort(addr, itoa(port)), q, false, 2e9)
-	if err != nil {
-		t.Skipf("cannot query the anycast listener here: %v", err)
-	}
-	if h, _ := parseHeader(resp); h.id != 0x1234 || h.ancount != 1 {
-		t.Fatalf("bad answer from the anycast address: %+v", h)
-	}
-
 	up.mode.Store(2) // stops answering
 	p.ProbeNow(context.Background())
 	a.step()
 	if lo.has(addr) || a.state()[0].Up || a.state()[0].Reason == "" {
-		t.Fatalf("still announced with no healthy DNS server: %+v", a.state())
+		t.Fatalf("still announced with no healthy NTP server: %+v", a.state())
 	}
 	adds := lo.adds
 	a.step()
@@ -206,22 +200,41 @@ func TestAnycastFollowsDNSHealth(t *testing.T) {
 	if lo.has(addr) {
 		t.Fatal("still on lo after stop")
 	}
-	c, err := net.ListenPacket("udp4", net.JoinHostPort(addr, itoa(port)))
-	if err != nil {
-		t.Fatalf("listener not closed on stop: %v", err)
+}
+
+// The address is taken off while chrony is not running or not synchronised, even with every upstream server up.
+func TestAnycastFollowsChrony(t *testing.T) {
+	lo := hookLo(t)
+	up := newFakeNTP(t)
+	p := NewPool(testNTPCfg(up.addr))
+	p.ProbeNow(context.Background())
+	const addr = "127.0.0.9"
+	a := newAnycastSet(1, []string{addr}, func() *Pool { return p })
+	a.step()
+	if !lo.has(addr) {
+		t.Fatalf("not announced while chrony serves: %+v", a.state())
 	}
-	c.Close()
+	chronyServingFn = func() bool { return false }
+	a.step()
+	if lo.has(addr) || !strings.Contains(a.state()[0].Reason, "chrony") {
+		t.Fatalf("still announced with chrony down: %+v", a.state())
+	}
+	chronyServingFn = func() bool { return true }
+	a.step()
+	if !lo.has(addr) {
+		t.Fatal("not announced again when chrony came back")
+	}
 }
 
 // The supervisor holds the addresses with the gateway and drops them when it stops.
 func TestSupervisorHoldsAnycastWithGateway(t *testing.T) {
 	lo := hookLo(t)
-	up := newFakeDNS(t)
+	up := newFakeNTP(t)
 	g := defaultGroup()
-	g.Interface = "dnsdirnone0"
-	d := testDNSCfg(up.addr)
+	g.Interface = "ntpdirnone0"
+	d := testNTPCfg(up.addr)
 	d.ListenPort = freeUDPPort(t)
-	g.DNSProxy, g.DNS, g.ExtraVIPs = true, &d, []string{"127.0.0.9"}
+	g.NTP, g.ExtraVIPs = &d, []string{"127.0.0.9"}
 	dc := newDaemonConfig()
 	dc.Groups = []GroupConfig{g}
 	s := NewSupervisor(context.Background(), dc)
@@ -253,12 +266,12 @@ func TestSupervisorHoldsAnycastWithGateway(t *testing.T) {
 // of the gateway, the new address appears, the removed one goes.
 func TestReloadChangesAnycastInPlace(t *testing.T) {
 	lo := hookLo(t)
-	up := newFakeDNS(t)
+	up := newFakeNTP(t)
 	g := defaultGroup()
-	g.Interface = "dnsdirnone0"
-	d := testDNSCfg(up.addr)
+	g.Interface = "ntpdirnone0"
+	d := testNTPCfg(up.addr)
 	d.ListenPort = freeUDPPort(t)
-	g.DNSProxy, g.DNS, g.ExtraVIPs = true, &d, []string{"127.0.0.9"}
+	g.NTP, g.ExtraVIPs = &d, []string{"127.0.0.9"}
 	dc := newDaemonConfig()
 	dc.Groups = []GroupConfig{g}
 	s := NewSupervisor(context.Background(), dc)
@@ -318,12 +331,12 @@ func TestAnycastCanvasAddDel(t *testing.T) {
 // Pausing an anycast address withdraws it (on this node, or on every node) and resuming announces it again.
 func TestAnycastPause(t *testing.T) {
 	lo := hookLo(t)
-	up := newFakeDNS(t)
-	p := NewPool(testDNSCfg(up.addr))
+	up := newFakeNTP(t)
+	p := NewPool(testNTPCfg(up.addr))
 	p.ProbeNow(context.Background())
-	port := freeUDPPort(t)
+	_ = freeUDPPort
 	const addr = "127.0.0.9"
-	a := newAnycastSet(1, []string{addr}, func() *Pool { return p }, func() int { return port })
+	a := newAnycastSet(1, []string{addr}, func() *Pool { return p })
 	scope := ""
 	a.paused = func() map[string]string {
 		if scope == "" {
@@ -429,14 +442,14 @@ func TestAnycastPauseConfig(t *testing.T) {
 // gateway that can.
 func TestAnycastSharedByTwoGateways(t *testing.T) {
 	lo := hookLo(t)
-	f1, f2 := newFakeDNS(t), newFakeDNS(t)
-	p1, p2 := NewPool(testDNSCfg(f1.addr)), NewPool(testDNSCfg(f2.addr))
+	f1, f2 := newFakeNTP(t), newFakeNTP(t)
+	p1, p2 := NewPool(testNTPCfg(f1.addr)), NewPool(testNTPCfg(f2.addr))
 	p1.ProbeNow(context.Background())
 	p2.ProbeNow(context.Background())
-	port := freeUDPPort(t)
+	_ = freeUDPPort
 	const addr = "127.0.0.9"
-	a := newAnycastSet(1, []string{addr}, func() *Pool { return p1 }, func() int { return port })
-	b := newAnycastSet(2, []string{addr}, func() *Pool { return p2 }, func() int { return port })
+	a := newAnycastSet(1, []string{addr}, func() *Pool { return p1 })
+	b := newAnycastSet(2, []string{addr}, func() *Pool { return p2 })
 	a.step()
 	b.step()
 	if !lo.has(addr) || !a.state()[0].Up || !b.state()[0].Up || a.state()[0].Carried != nil {
@@ -445,7 +458,7 @@ func TestAnycastSharedByTwoGateways(t *testing.T) {
 	if anycastPool(addr) != p1 {
 		t.Fatal("the lowest healthy gateway answers")
 	}
-	// gateway 1 loses its DNS: the address stays, gateway 2 answers, and gateway 1 says who keeps it up
+	// gateway 1 loses its NTP: the address stays, gateway 2 answers, and gateway 1 says who keeps it up
 	f1.mode.Store(2)
 	p1.ProbeNow(context.Background())
 	a.step()
@@ -481,5 +494,47 @@ func TestAnycastSharedByTwoGateways(t *testing.T) {
 	b.stop()
 	if lo.has(addr) {
 		t.Fatal("the last gateway stopped but the address is still announced")
+	}
+}
+
+// An address is held only while BGP is configured, enabled and at least one neighbor of its family is established;
+// otherwise it is off lo and nothing answers on it.
+func TestAnycastDownWithoutEstablishedBGP(t *testing.T) {
+	lo := hookLo(t)
+	anycastGateFn = anycastBGPGate
+	up := newFakeNTP(t)
+	p := NewPool(testNTPCfg(up.addr))
+	p.ProbeNow(context.Background())
+	oldDir, oldBGP := frrDir, vtyshBGP
+	frrDir = t.TempDir()
+	t.Cleanup(func() { frrDir, vtyshBGP = oldDir, oldBGP; bgpLive.at = time.Time{} })
+	state := "Established"
+	vtyshBGP = func() ([]byte, error) {
+		return []byte(`{"ipv4Unicast":{"peers":{"10.0.0.1":{"remoteAs":65001,"state":"` + state + `"}}}}`), nil
+	}
+	const addr = "127.0.0.9"
+	var cfg *BGPConfig
+	a := newAnycastSet(1, []string{addr}, func() *Pool { return p })
+	a.bgp = func() (*BGPConfig, bool) { return cfg, true }
+	step := func() { bgpLive.at = time.Time{}; a.step() }
+	step()
+	if lo.has(addr) || a.state()[0].Up || a.state()[0].Reason == "" {
+		t.Fatalf("held with BGP not configured: %+v", a.state())
+	}
+	cfg = &BGPConfig{ASN: 65000, Neighbors: []BGPNeighbor{{Peer: "10.0.0.1", RemoteAS: 65001}}}
+	step()
+	if !lo.has(addr) {
+		t.Fatalf("not held with an established neighbor: %+v", a.state())
+	}
+	state = "Active"
+	step()
+	if lo.has(addr) || a.state()[0].Up {
+		t.Fatalf("held with no neighbor established: %+v", a.state())
+	}
+	state = "Established"
+	cfg.Disabled = true
+	step()
+	if lo.has(addr) {
+		t.Fatal("held while BGP is disabled")
 	}
 }

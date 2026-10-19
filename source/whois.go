@@ -41,6 +41,11 @@ type WhoisInfo struct {
 	Expires     string   `json:"expires,omitempty"`
 	NameServers []string `json:"name_servers,omitempty"`
 	Note        string   `json:"note,omitempty"` // why there is nothing, when there is nothing
+	// Name is the name that was hovered, and IPv4 / IPv6 the first address found for it (looked up by the daemon
+	// when whois.get is answered; they are not part of the cached whois data).
+	Name string `json:"name,omitempty"`
+	IPv4 string `json:"ipv4,omitempty"`
+	IPv6 string `json:"ipv6,omitempty"`
 	// For an IP address (Kind "ip"): the address block, its name, the organisation holding it, the country and the
 	// origin AS, from the regional registry.
 	Kind    string `json:"kind,omitempty"`
@@ -364,6 +369,19 @@ func (i *WhoisInfo) Text() string {
 		add("Origin AS", i.Origin)
 		add("From", i.Server)
 		return b.String()
+	}
+	if i.Name != "" {
+		b.WriteString(i.Name)
+		if i.IPv4 == "" && i.IPv6 == "" {
+			b.WriteString("\nNo address found")
+		}
+		if i.IPv4 != "" {
+			b.WriteString("\nIPv4: " + i.IPv4)
+		}
+		if i.IPv6 != "" {
+			b.WriteString("\nIPv6: " + i.IPv6)
+		}
+		b.WriteString("\n\n")
 	}
 	if !i.Found {
 		b.WriteString(i.Domain + " — " + i.Note)

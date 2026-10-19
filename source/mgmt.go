@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/netip"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,11 +27,12 @@ type Mgmt struct {
 	capjobs capJobs      // the cluster-wide capture
 	capruns capRuns      // timed captures started on this node (by the cluster-wide one, from another node)
 
-	sched    *Scheduler // the scheduled tasks of this node (Operate ▸ Scheduler)
 	versions *VersionStore
 	certs    *CertManager
 	upd      *Updater
 	cl       *Cluster
+	croll    chronyRoll // this node's part in the rolling chrony restart
+	sched    *Scheduler // the scheduled tasks of this node (Operate ▸ Scheduler)
 
 	cfgMu     sync.Mutex // serialises writes of the config file
 	webPolicy atomic.Pointer[WebConfig]
@@ -40,19 +40,16 @@ type Mgmt struct {
 	// endSessions signs a user out of the web GUI sessions of this node (set by the web server)
 	endSessions atomic.Pointer[func(user string)]
 
-	reloadFn  func() error                                                                   // re-read the config file and apply it
-	restartFn func()                                                                         // gracefully re-exec this process
-	gwFn      func() []GwState                                                               // which gateways this node is serving right now
-	gwIPsFn   func() []string                                                                // the addresses this node uses in the gateway protocol, one per family of each group
-	pausedFn  func() bool                                                                    // whether this whole node is paused (Operate ▸ Node)
-	anycastFn func() []AnycastState                                                          // the anycast addresses and whether each is announced now
-	tshootFn  func() map[string]any                                                          // what only the status server knows, for the troubleshooting bundle (see tshoot.go)
-	regNameFn func(ctx context.Context, name, old string, addr netip.Addr) ([]string, error) // sends the dynamic update that registers a client name (regname.go)
-	othersFn  func() int                                                                     // how many other nodes are in service (tests replace it; nil asks the cluster)
-	lastFn    func() string                                                                  // names a gateway only this node serves, "" if none (tests replace it; nil asks the cluster)
-	clearFn   func() int                                                                     // empties this node's answer caches
-	flushFn   func(name string) int                                                          // drops a name from this node's answer caches
-	poolOf    func(gid int) *Pool                                                            // the DNS pool serving a gateway on this node (the cache warm start, cachewarm.go)
+	reloadFn  func() error          // re-read the config file and apply it
+	restartFn func()                // gracefully re-exec this process
+	gwFn      func() []GwState      // which gateways this node is serving right now
+	gwIPsFn   func() []string       // the addresses this node uses in the gateway protocol, one per family of each group
+	pausedFn  func() bool           // whether this whole node is paused (Operate ▸ Node)
+	anycastFn func() []AnycastState // the anycast addresses and whether each is announced now
+	tshootFn  func() map[string]any // what only the status server knows, for the troubleshooting bundle (see tshoot.go)
+	othersFn  func() int            // how many other nodes are in service (tests replace it; nil asks the cluster)
+	lastFn    func() string         // names a gateway only this node serves, "" if none (tests replace it; nil asks the cluster)
+	poolOf    func(gid int) *Pool   // the NTP pool serving a gateway on this node
 	servMu    sync.Mutex
 	servSince map[int]time.Time // when each gateway started being served continuously
 	gwUpMu    sync.Mutex
@@ -65,7 +62,7 @@ type Mgmt struct {
 
 // defaultStateDir holds history, certificates, cluster identity and update
 // files.  It is root-only.
-const defaultStateDir = "/var/lib/dnsdir"
+const defaultStateDir = "/var/lib/ntpdir"
 
 // NewMgmt builds the management layer for the given initial config.
 func NewMgmt(confPath, stateDir string, dc *DaemonConfig) (*Mgmt, error) {
@@ -82,7 +79,10 @@ func NewMgmt(confPath, stateDir string, dc *DaemonConfig) (*Mgmt, error) {
 	}
 	m := &Mgmt{confPath: confPath, stateDir: stateDir}
 	m.sched = newScheduler(m, stateDir)
-	m.sched.SetTasks(dc.DNS.Schedule)
+	m.sched.SetTasks(dc.NTP.Schedule)
+	chrony.mu.Lock()
+	chrony.keyFile = filepath.Join(stateDir, "chrony-applied.key")
+	chrony.mu.Unlock()
 	m.bgp = NewBGPManager(stateDir)
 	w := dc.Web
 	m.webPolicy.Store(&w)
@@ -91,6 +91,7 @@ func NewMgmt(confPath, stateDir string, dc *DaemonConfig) (*Mgmt, error) {
 		return nil, err
 	}
 	m.certs = NewCertManager(stateDir, confPath, func() WebConfig { return *m.webPolicy.Load() })
+	ntsCertSource = func() (string, string) { i := m.certs.Status(); return i.CertFile, i.KeyFile } // chrony serves NTS with the GUI certificate
 	if m.upd, err = NewUpdater(stateDir); err != nil {
 		return nil, err
 	}
@@ -119,7 +120,7 @@ func (m *Mgmt) OnConfigLoaded(dc *DaemonConfig) {
 	w := dc.Web
 	m.webPolicy.Store(&w)
 	m.bgp.Apply(dc)
-	m.sched.SetTasks(dc.DNS.Schedule)
+	m.sched.SetTasks(dc.NTP.Schedule)
 	m.certs.Refresh()
 	if _, raw, err := m.LiveConfig(); err == nil {
 		if _, err := os.Stat(m.confPath); err == nil { // don't version a config that doesn't exist yet
@@ -152,6 +153,9 @@ func (m *Mgmt) PutConfig(dc *DaemonConfig, actor, note string) error {
 	defer m.cfgMu.Unlock()
 	cur, _, err := m.LiveConfig()
 	if err != nil {
+		return err
+	}
+	if err := checkDNSDirAdded(cur, dc); err != nil {
 		return err
 	}
 	if err := checkVIPsNotNodes(cur, dc, m.cl); err != nil {
@@ -361,7 +365,7 @@ func (m *Mgmt) UpdateApplyLocal(by string, force bool) (string, error) {
 		return "", errors.New("an update is already in progress on this node")
 	}
 	if ok, why := m.updateSafeToApply(); !ok && !force {
-		return "", fmt.Errorf("not safe to update this node now: %s (to update anyway: dnsdir --update-apply --yes, or confirm in the GUI)", why)
+		return "", fmt.Errorf("not safe to update this node now: %s (to update anyway: ntpdir --update-apply --yes, or confirm in the GUI)", why)
 	}
 	go func() {
 		if _, err := m.upd.Apply(context.Background(), m.cl.selfAddrForEvents(), by); err != nil {
@@ -384,7 +388,7 @@ var restartRecheck = 2 * time.Second
 // failed.  force skips the wait (the operator confirmed it).
 func (m *Mgmt) scheduleRestart(force bool) {
 	if m.restartFn == nil {
-		warnf("update: installed, but this process cannot restart itself — restart dnsdir to run the new version")
+		warnf("update: installed, but this process cannot restart itself — restart ntpdir to run the new version")
 		return
 	}
 	go func() {
@@ -440,17 +444,6 @@ func (m *Mgmt) UpdateRepo(repo, by string) error {
 		return err
 	}
 	_, err = m.runOnPrimary("update-repo", by, adminNodes{Repo: norm})
-	return err
-}
-
-// UpdateFailover sets the cluster's automatic failover: auto (the default: on from three members), on or off; shared by the
-// cluster and set on the primary.
-func (m *Mgmt) UpdateFailover(mode, by string) error {
-	norm, err := normalizeFailover(mode)
-	if err != nil {
-		return err
-	}
-	_, err = m.runOnPrimary("update-failover", by, adminNodes{Failover: norm})
 	return err
 }
 
@@ -520,7 +513,7 @@ func (m *Mgmt) execAdminOp(op, by string, payload json.RawMessage) (json.RawMess
 			return nil, err
 		}
 		return ok(map[string]any{})
-	case "update-push", "update-cancel", "update-auto", "update-done", "update-repo", "update-failover":
+	case "update-push", "update-cancel", "update-auto", "update-done", "update-repo":
 		var p adminNodes
 		if err := json.Unmarshal(payload, &p); err != nil {
 			return nil, err
@@ -532,8 +525,6 @@ func (m *Mgmt) execAdminOp(op, by string, payload json.RawMessage) (json.RawMess
 			m.upd.Cancel(p.Nodes, by)
 		case "update-auto":
 			m.upd.SetAuto(p.Enabled, by, m.cl.selfAddrForEvents())
-		case "update-failover":
-			m.upd.SetFailover(p.Failover, by, m.cl.selfAddrForEvents())
 		case "update-repo":
 			norm, err := normalizeRepo(p.Repo)
 			if err != nil {

@@ -15,7 +15,7 @@ import (
 const weakKeyMin = 12
 
 var wellKnownKeys = map[string]bool{
-	"": true, "dnsdir": true, "dgw": true, "ddgw": true, "change-me": true, "changeme": true, "secret": true,
+	"": true, "dnsdir": true, "ntpdir": true, "dgw": true, "ddgw": true, "change-me": true, "changeme": true, "secret": true,
 	"password": true, "key": true, "test": true, "default": true,
 }
 

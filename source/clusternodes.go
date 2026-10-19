@@ -119,7 +119,7 @@ func (c *Cluster) canvasNodesEx(gid int, selfStatus, selfDetail string, selfPaus
 			}
 			if selfStatus == "idle" && strings.HasPrefix(selfDetail, "not running here") {
 				// held back because this node has no address in the gateway's subnet (markOffnet): the other nodes see
-				// "not serving" (amber) for it, so say the same here instead of "starting", which is for the DNS warm-up
+				// "not serving" (amber) for it, so say the same here instead of "starting", which is for the NTP warm-up
 				n.Status, n.Label = "warn", "not serving"
 			}
 			if selfStatus == "ok" && !selfPaused {
@@ -185,7 +185,7 @@ func (c *Cluster) canvasNodesEx(gid int, selfStatus, selfDetail string, selfPaus
 			default:
 				n.Status, n.Label, n.Detail = "ok", "serving", "Serving this gateway"
 			}
-			// serving, but that node's own view of the gateway is not healthy (some DNS servers down, say):
+			// serving, but that node's own view of the gateway is not healthy (some NTP servers down, say):
 			// show it the way this node's own shape shows it
 			if n.Status == "ok" && (gs.Health == "warn" || gs.Health == "bad") {
 				n.Status, n.Label = gs.Health, circleLabel[gs.Health]
@@ -377,7 +377,7 @@ func clusterGateway(nodes []CanvasNode) (status, detail string) {
 	case cnt["updating"] > 0 && cnt["bad"] == 0 && cnt["starting"]+cnt["updating"] == total:
 		return "idle", "Updating — the node is restarting into the new version"
 	case cnt["starting"] > 0 && cnt["bad"] == 0:
-		return "idle", "Starting — the nodes are waiting for their DNS servers to answer"
+		return "idle", "Starting — the nodes are waiting for their NTP servers to answer"
 	}
 	return "bad", "No node is serving this gateway"
 }

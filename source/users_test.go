@@ -38,12 +38,12 @@ func usersFixture(t *testing.T, group, passwd, shadow string) (*Mgmt, *[]usersCa
 		return "", nil
 	}
 	m := &Mgmt{}
-	m.webPolicy.Store(&WebConfig{Group: "dnsdir"})
+	m.webPolicy.Store(&WebConfig{Group: "ntpdir"})
 	return m, &calls
 }
 
 const (
-	fxGroup  = "root:x:0:\ndnsdir:x:1001:alice,bob\n"
+	fxGroup  = "root:x:0:\nntpdir:x:1001:alice,bob\n"
 	fxPasswd = "root:x:0:0::/root:/bin/bash\nalice:x:1000:1000::/home/alice:/bin/bash\nbob:x:1002:1000::/:/usr/sbin/nologin\ncarol:x:1003:1001::/:/usr/sbin/nologin\n"
 )
 
@@ -64,7 +64,7 @@ func TestUsersList(t *testing.T) {
 	// bob expires on day 20000 (2024-10-04), long past; alice never; carol has the group as primary group.
 	m, _ := usersFixture(t, fxGroup, fxPasswd, "alice:x:1::::::\nbob:x:1:::::20000:\ncarol:x:1:::::21000\n")
 	v := m.UsersList()
-	if v.Group != "dnsdir" || len(v.Users) != 3 {
+	if v.Group != "ntpdir" || len(v.Users) != 3 {
 		t.Fatalf("view: %+v", v)
 	}
 	by := map[string]UserInfo{}
@@ -95,7 +95,7 @@ func TestUserAdd(t *testing.T) {
 		t.Fatalf("calls: %+v", *calls)
 	}
 	got := strings.Join((*calls)[0].args, " ")
-	if got != "--no-create-home --home-dir /nonexistent --shell /bin/false --gid dnsdir --expiredate 2027-01-02 dave" {
+	if got != "--no-create-home --home-dir /nonexistent --shell /bin/false --gid ntpdir --expiredate 2027-01-02 dave" {
 		t.Errorf("useradd args: %s", got)
 	}
 	if (*calls)[1].stdin != "dave:s3cret pass\n" {
@@ -191,7 +191,7 @@ func TestUserDeleteGuards(t *testing.T) {
 		t.Errorf("%+v", *calls)
 	}
 	// Only one member left in a group that has just alice.
-	m2, calls2 := usersFixture(t, "dnsdir:x:1001:alice\n", "alice:x:1000:1000::/:/bin/bash\n", "")
+	m2, calls2 := usersFixture(t, "ntpdir:x:1001:alice\n", "alice:x:1000:1000::/:/bin/bash\n", "")
 	if _, _, err := m2.UserDelete("alice", "cli:root"); err == nil {
 		t.Error("the last account must not be deletable")
 	}
@@ -201,7 +201,7 @@ func TestUserDeleteGuards(t *testing.T) {
 }
 
 func TestRootIsNeverListedOrManaged(t *testing.T) {
-	m, calls := usersFixture(t, "dnsdir:x:1001:root,alice\n", "alice:x:1000:1000::/:/bin/bash\n", "")
+	m, calls := usersFixture(t, "ntpdir:x:1001:root,alice\n", "alice:x:1000:1000::/:/bin/bash\n", "")
 	for _, u := range m.UsersList().Users {
 		if u.Name == "root" {
 			t.Fatal("root must never be listed")
@@ -367,7 +367,7 @@ func TestUserGrantAddsAnExistingAccountToTheGroup(t *testing.T) {
 	if _, _, err := m.UserGrant("dave", "alice"); err != nil {
 		t.Fatal(err)
 	}
-	if len(*calls) != 1 || (*calls)[0].name != "usermod" || strings.Join((*calls)[0].args, " ") != "-aG dnsdir dave" {
+	if len(*calls) != 1 || (*calls)[0].name != "usermod" || strings.Join((*calls)[0].args, " ") != "-aG ntpdir dave" {
 		t.Fatalf("calls: %+v", *calls)
 	}
 	for _, c := range []struct{ name, why string }{{"nobody-here", "an account that does not exist"}, {"alice", "an account already in the group"}, {"root", "root"}, {"Bad Name", "an invalid name"}} {
@@ -385,7 +385,7 @@ func TestUserRevokeKeepsTheAccount(t *testing.T) {
 	if _, _, err := m.UserRevoke("bob", "alice"); err != nil {
 		t.Fatal(err)
 	}
-	if len(*calls) != 1 || (*calls)[0].name != "gpasswd" || strings.Join((*calls)[0].args, " ") != "-d bob dnsdir" {
+	if len(*calls) != 1 || (*calls)[0].name != "gpasswd" || strings.Join((*calls)[0].args, " ") != "-d bob ntpdir" {
 		t.Fatalf("calls: %+v", *calls)
 	}
 	if _, _, err := m.UserRevoke("alice", "alice"); err == nil {
@@ -397,7 +397,7 @@ func TestUserRevokeKeepsTheAccount(t *testing.T) {
 	if _, _, err := m.UserRevoke("dave", "alice"); err == nil {
 		t.Error("a non-member must be refused")
 	}
-	m2, calls2 := usersFixture(t, "dnsdir:x:1001:alice\n", "alice:x:1000:1000::/:/bin/bash\n", "")
+	m2, calls2 := usersFixture(t, "ntpdir:x:1001:alice\n", "alice:x:1000:1000::/:/bin/bash\n", "")
 	if _, _, err := m2.UserRevoke("alice", "cli:root"); err == nil || len(*calls2) != 0 {
 		t.Errorf("the last account must stay: %v %+v", err, *calls2)
 	}

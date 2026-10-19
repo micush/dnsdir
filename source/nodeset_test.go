@@ -21,6 +21,7 @@ func nodeEdit(dc *DaemonConfig, action, id string, members ...string) (string, e
 // A node removed from a gateway serves nothing of it, the others and the gateway's other nodes carry on.
 func TestExcludedNodeDoesNotServeTheGateway(t *testing.T) {
 	dc := newDaemonConfig()
+	dc.Groups[0].GroupID = 1
 	g2 := defaultGroup()
 	g2.GroupID, g2.VIP4 = 2, "10.0.1.1/24"
 	dc.Groups = append(dc.Groups, g2)
@@ -129,12 +130,12 @@ func TestCanvasEditAddsAndRemovesNodes(t *testing.T) {
 
 func TestPickNodeByAddressHostOrID(t *testing.T) {
 	peers := []PeerView{
-		{Addr: "10.0.0.1:53854", NodeID: "aa", Hostname: "lsitedns01.example.net"},
-		{Addr: "10.0.0.2:53854", NodeID: "bb", Hostname: "lsitedns02"},
-		{Addr: "10.0.1.2:53854", NodeID: "cc", Hostname: "lsitedns02.other.net"},
-		{Addr: "10.0.2.1:53854", NodeID: ""},
+		{Addr: "10.0.0.1:12381", NodeID: "aa", Hostname: "lsitedns01.example.net"},
+		{Addr: "10.0.0.2:12381", NodeID: "bb", Hostname: "lsitedns02"},
+		{Addr: "10.0.1.2:12381", NodeID: "cc", Hostname: "lsitedns02.other.net"},
+		{Addr: "10.0.2.1:12381", NodeID: ""},
 	}
-	for name, want := range map[string]string{"10.0.0.1:53854": "aa", "10.0.0.1": "aa", "lsitedns01": "aa", "LSITEDNS01.example.net": "aa", "bb": "bb", "10.0.1.2": "cc"} {
+	for name, want := range map[string]string{"10.0.0.1:12381": "aa", "10.0.0.1": "aa", "lsitedns01": "aa", "LSITEDNS01.example.net": "aa", "bb": "bb", "10.0.1.2": "cc"} {
 		if id, err := pickNode(peers, nil, name); err != nil || id != want {
 			t.Errorf("%q: %q %v, want %q", name, id, err, want)
 		}

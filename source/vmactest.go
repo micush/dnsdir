@@ -92,7 +92,7 @@ func vmacTestMAC(groupID int) [6]byte {
 	return m
 }
 
-func vmacTestName(groupID int) string { return fmt.Sprintf("dnsdirt%d", groupID) }
+func vmacTestName(groupID int) string { return fmt.Sprintf("ntpdirt%d", groupID) }
 
 // ── what to ask ──────────────────────────────────────────────────────────────
 

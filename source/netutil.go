@@ -125,7 +125,7 @@ func vmacStr(groupID, afnID int) string {
 	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", b[0], b[1], b[2], b[3], b[4], b[5])
 }
 
-func vmacName(groupID, afnID int) string { return fmt.Sprintf("dnsdir%d.%d", groupID, afnID) }
+func vmacName(groupID, afnID int) string { return fmt.Sprintf("ntpdir%d.%d", groupID, afnID) }
 
 // cmdHook lets a test see, and answer for, the commands the daemon would run (nil in production).
 var cmdHook atomic.Pointer[func(name string, args []string) bool]
@@ -206,7 +206,7 @@ func delVIP(groupID, afnID int, vip string) {
 // addVIP puts the VIP on the group's macvlan WITHOUT the automatic connected
 // route.  With the route the kernel adds, the macvlan competes with the parent
 // interface for every packet this node sends into the subnet — the node's own
-// traffic (cluster, DNS to servers, ping) then leaves from the VIP address, and
+// traffic (cluster, NTP to servers, ping) then leaves from the VIP address, and
 // a peer that holds the VIP on its loopback takes the reply for itself, so the
 // two nodes could no longer reach each other.  The route is added back at a
 // metric that only matters when the parent has no address in the subnet.

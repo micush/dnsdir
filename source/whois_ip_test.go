@@ -103,7 +103,7 @@ func TestWhoisLookupIP(t *testing.T) {
 		t.Fatal("a non-public address reached a whois server")
 	}
 	// through the op wrapper: an address gives its registry data, not a name lookup
-	if w2, err := whoisAnswer("10.1.2.3"); err != nil || w2.Kind != "ip" || !strings.Contains(w2.Text(), "private") {
+	if w2, err := whoisWithAddrs("10.1.2.3"); err != nil || w2.Kind != "ip" || !strings.Contains(w2.Text(), "private") {
 		t.Fatalf("%+v %v", w2, err)
 	}
 }

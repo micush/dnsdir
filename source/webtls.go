@@ -35,7 +35,7 @@ func fingerprint(cert tls.Certificate) string {
 // config file.
 func selfSignedPaths(confPath string) (crt, key string) {
 	dir := filepath.Dir(confPath)
-	return filepath.Join(dir, "dnsdir-web.crt"), filepath.Join(dir, "dnsdir-web.key")
+	return filepath.Join(dir, "ntpdir-web.crt"), filepath.Join(dir, "ntpdir-web.key")
 }
 
 // loadOrCreateSelfSigned returns the stored self-signed certificate, creating
@@ -106,7 +106,7 @@ func generateSelfSigned() (certPEM, keyPEM []byte, err error) {
 	now := time.Now()
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "dnsdir", Organization: []string{"dnsdir (DNS Distributed Gateway)"}},
+		Subject:               pkix.Name{CommonName: "ntpdir", Organization: []string{"ntpdir (NTP Distributed Gateway)"}},
 		NotBefore:             now.Add(-time.Hour),
 		NotAfter:              now.Add(selfSignedValidity),
 		KeyUsage:              x509.KeyUsageDigitalSignature,

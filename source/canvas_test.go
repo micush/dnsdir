@@ -3,59 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 )
-
-func TestPerServerQueriesAndHostnames(t *testing.T) {
-	var d DNSConfig
-	in := `{"servers":["8.8.8.8","dns.example.com","9.9.9.9:5353"],
-		"queries":[],
-		"server_queries":{"8.8.8.8":["google.com","microsoft.com"],"dns.example.com":["apple.com"],"9.9.9.9:5353":[{"name":"ford.com","type":"AAAA"}]}}`
-	if err := json.Unmarshal([]byte(in), &d); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	if got := d.Servers[1]; got != "dns.example.com:53" {
-		t.Fatalf("hostname normalised to %q", got)
-	}
-	if q := d.queriesFor("8.8.8.8:53"); len(q) != 2 || q[0].Name != "google.com" {
-		t.Fatalf("queriesFor(8.8.8.8) = %v", q)
-	}
-	if q := d.queriesFor("9.9.9.9:5353"); len(q) != 1 || q[0].Type != "AAAA" {
-		t.Fatalf("queriesFor(9.9.9.9) = %v", q)
-	}
-
-	// a server without any queries (own or global) is refused
-	bad := testDNSCfg("1.1.1.1", "2.2.2.2")
-	bad.ServerQueries = map[string][]DNSQuery{"2.2.2.2": {}}
-	if err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "2.2.2.2") {
-		t.Fatalf("empty per-server list must be refused: %v", err)
-	}
-	// ...but a server with no list of its own falls back to the global queries
-	ok := testDNSCfg("1.1.1.1", "2.2.2.2")
-	ok.ServerQueries = map[string][]DNSQuery{"2.2.2.2": {{Name: "x.example", Type: "A"}}}
-	if err := ok.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	if len(ok.queriesFor("1.1.1.1:53")) != 2 {
-		t.Fatal("global queries must apply to servers without their own")
-	}
-	// an entry for a server that is not in the list is a typo, not silently ignored
-	typo := testDNSCfg("1.1.1.1")
-	typo.ServerQueries = map[string][]DNSQuery{"3.3.3.3": {{Name: "x.example", Type: "A"}}}
-	if err := typo.Validate(); err == nil {
-		t.Fatal("server_queries for an unknown server must be refused")
-	}
-	for _, s := range []string{"not a host!", "a..b", "-x.com", "1.2.3.4:99999"} {
-		if _, err := normalizeServer(s); err == nil {
-			t.Errorf("normalizeServer(%q) must fail", s)
-		}
-	}
-}
 
 func TestGroupsKeyMeaning(t *testing.T) {
 	load := func(js string) *DaemonConfig {
@@ -105,74 +59,23 @@ func TestDuplicateSharedAddressRefused(t *testing.T) {
 	}
 }
 
-func TestPoolProbesEachServerWithItsOwnQueries(t *testing.T) {
-	a, b := newFakeDNS(t), newFakeDNS(t)
-	cfg := testDNSCfg(a.addr, b.addr)
-	cfg.Queries = nil
-	cfg.ServerQueries = map[string][]DNSQuery{
-		a.addr: {{Name: "one.example", Type: "A"}},
-		b.addr: {{Name: "two.example", Type: "A"}, {Name: "three.example", Type: "AAAA"}, {Name: "four.example", Type: "A"}},
-	}
-	if err := cfg.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	p := NewPool(cfg)
-	p.ProbeNow(context.Background())
-	if a.hits.Load() != 1 || b.hits.Load() != 3 {
-		t.Fatalf("probes sent: a=%d b=%d (want 1 and 3)", a.hits.Load(), b.hits.Load())
-	}
-	for _, s := range p.Snapshot() {
-		want := 1
-		if s.Addr == b.addr {
-			want = 3
-		}
-		if len(s.Tests) != want {
-			t.Fatalf("%s: %d tests, want %d", s.Addr, len(s.Tests), want)
-		}
-		for _, ts := range s.Tests {
-			if !ts.OK {
-				t.Fatalf("%s: %v failed: %s", s.Addr, ts, ts.Error)
-			}
-		}
-	}
-	// when the server stops answering, every test shows the failure
-	b.mode.Store(3)
-	p.ProbeNow(context.Background())
-	for _, s := range p.Snapshot() {
-		if s.Addr != b.addr {
-			continue
-		}
-		if s.Healthy {
-			t.Fatal("b must be down")
-		}
-		for _, ts := range s.Tests {
-			if ts.OK || ts.Error == "" {
-				t.Fatalf("test should fail with a reason: %+v", ts)
-			}
-		}
-	}
-}
-
 func TestSupervisorPerGroupPools(t *testing.T) {
-	a, b, shared := newFakeDNS(t), newFakeDNS(t), newFakeDNS(t)
-	mk := func(id int, vip string, own *DNSConfig) GroupConfig {
+	a, b, shared := newFakeNTP(t), newFakeNTP(t), newFakeNTP(t)
+	mk := func(id int, vip string, own *NTPConfig) GroupConfig {
 		g := defaultGroup()
-		g.GroupID, g.VIP4, g.DNSProxy, g.DNS = id, vip, true, own
+		g.GroupID, g.VIP4, g.NTP = id, vip, own
 		return g
 	}
-	da, db := testDNSCfg(a.addr), testDNSCfg(b.addr)
+	da, db := testNTPCfg(a.addr), testNTPCfg(b.addr)
 	dc := newDaemonConfig()
-	dc.DNS = testDNSCfg(shared.addr)
+	dc.NTP = testNTPCfg(shared.addr)
 	dc.Groups = []GroupConfig{mk(1, "10.1.0.1/24", &da), mk(2, "10.2.0.1/24", &db), mk(3, "10.3.0.1/24", nil)}
 	if err := dc.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	s := NewSupervisor(context.Background(), dc)
-	changed := s.refreshPool(dc, true)
+	s.refreshPool(dc, true)
 	t.Cleanup(func() { s.StopAll() })
-	if len(changed) != 0 {
-		t.Fatalf("nothing had a port before: %v", changed)
-	}
 	if n := len(s.poolList()); n != 3 {
 		t.Fatalf("want 3 pools (two own + shared), got %d", n)
 	}
@@ -184,34 +87,31 @@ func TestSupervisorPerGroupPools(t *testing.T) {
 	p1, p2 := s.poolFor(1), s.poolFor(2)
 	nu := *dc
 	db2 := da
-	db2.ListenPort = 5300
+	db2.ListenPort = 12300
 	nu.Groups = []GroupConfig{mk(1, "10.1.0.1/24", &da), mk(2, "10.2.0.1/24", &db2)}
-	ch := s.refreshPool(&nu, true)
+	s.refreshPool(&nu, true)
 	if s.poolFor(1) != p1 {
 		t.Fatal("unchanged pool must be kept")
 	}
 	if s.poolFor(2) == p2 {
 		t.Fatal("changed pool must be replaced")
 	}
-	if !ch[2] || ch[1] {
-		t.Fatalf("only group 2 changed its port: %v", ch)
-	}
-	if s.poolFor(3) != nil || len(s.poolList()) != 2 {
+	if s.poolFor(3) != nil || len(s.poolList()) != 2 { // only the topology feeds chrony: the shared list is not a pool of its own
 		t.Fatal("removed group's pool must be gone")
 	}
-	if s.dnsFor(2).ListenPort != 5300 {
-		t.Fatal("dnsFor must follow the new settings")
+	if s.ntpFor(2).ListenPort != 12300 {
+		t.Fatal("ntpFor must follow the new settings")
 	}
 }
 
 func TestSharedConfigCarriesGroupPools(t *testing.T) {
 	g := defaultGroup()
-	d := testDNSCfg("1.1.1.1")
-	d.ServerQueries = map[string][]DNSQuery{"1.1.1.1": {{Name: "a.example", Type: "A"}}}
-	g.DNS, g.DNSProxy = &d, true
+	d := testNTPCfg("1.1.1.1")
+	d.ServerNames = map[string]string{"1.1.1.1": "one"}
+	g.NTP = &d
 	dc := newDaemonConfig()
 	dc.Groups = []GroupConfig{g}
-	dc.DNS = testDNSCfg("9.9.9.9")
+	dc.NTP = testNTPCfg("9.9.9.9")
 	if err := dc.Validate(); err != nil { // normalises addresses, as every real save does
 		t.Fatal(err)
 	}
@@ -220,7 +120,7 @@ func TestSharedConfigCarriesGroupPools(t *testing.T) {
 
 	// the replica starts without the group's pool and adopts it
 	rep := newDaemonConfig()
-	rep.DNS = testDNSCfg("9.9.9.9")
+	rep.NTP = testNTPCfg("9.9.9.9")
 	rg := defaultGroup()
 	rg.Interface = "eth7"
 	rg.GroupID, rg.VIP4 = 1, g.VIP4
@@ -229,8 +129,8 @@ func TestSharedConfigCarriesGroupPools(t *testing.T) {
 	if err != nil || !changed {
 		t.Fatalf("merge: %v %v", changed, err)
 	}
-	if rep.Groups[0].DNS == nil || len(rep.Groups[0].DNS.ServerQueries) != 1 || !rep.Groups[0].DNSProxy {
-		t.Fatalf("the pool must replicate: %+v", rep.Groups[0].DNS)
+	if rep.Groups[0].NTP == nil || len(rep.Groups[0].NTP.ServerNames) != 1 {
+		t.Fatalf("the pool must replicate: %+v", rep.Groups[0].NTP)
 	}
 	if rep.Groups[0].Interface != "eth7" {
 		t.Fatal("the interface stays local")
@@ -239,7 +139,7 @@ func TestSharedConfigCarriesGroupPools(t *testing.T) {
 		t.Fatal("after the merge both nodes must hash the same")
 	}
 	// zero gateways replicate too
-	empty := SharedConfig{DNS: dc.DNS, Groups: []SharedGroup{}}
+	empty := SharedConfig{NTP: dc.NTP, Groups: []SharedGroup{}}
 	if err := empty.Validate(); err != nil {
 		t.Fatalf("an empty shared config is valid: %v", err)
 	}
@@ -268,125 +168,76 @@ func TestApplyCanvasEdit(t *testing.T) {
 		t.Fatalf("a bare gateway (no DNS yet) is valid: %v", err)
 	}
 	do(canvasEdit{Action: "add", Kind: "gateway", VIP: "2001:db8::1/64"})
-	if len(dc.Groups) != 2 || dc.Groups[0].GroupID != 1 || dc.Groups[1].GroupID != 2 || dc.Groups[1].VIP6 == "" || dc.Groups[1].Interface != "eth0" {
+	if len(dc.Groups) != 2 || dc.Groups[0].GroupID != 100 || dc.Groups[1].GroupID != 101 || dc.Groups[1].VIP6 == "" || dc.Groups[1].Interface != "eth0" {
 		t.Fatalf("gateways: %+v", dc.Groups)
 	}
-	fail(canvasEdit{Action: "add", Kind: "gateway", Group: 1, VIP: "10.9.9.9/24"}, "already exists")
+	fail(canvasEdit{Action: "add", Kind: "gateway", Group: 100, VIP: "10.9.9.9/24"}, "already exists")
 	fail(canvasEdit{Action: "add", Kind: "gateway"}, "--vip")
 	// a server and domains
-	do(canvasEdit{Action: "add", Kind: "server", Group: 1, Server: "5.5.5.5"})
-	fail(canvasEdit{Action: "add", Kind: "server", Group: 1, Server: "5.5.5.5:53"}, "already")
-	fail(canvasEdit{Action: "add", Kind: "server", Group: 9, Server: "5.5.5.5"}, "no gateway")
-	if err := dc.Validate(); err == nil {
-		t.Fatal("a server with no domain must not validate yet")
-	}
-	do(canvasEdit{Action: "add", Kind: "domain", Group: 1, Server: "5.5.5.5", Name: "google.com"})
-	do(canvasEdit{Action: "add", Kind: "domain", Group: 1, Server: "5.5.5.5", Name: "microsoft.com", Type: "aaaa"})
-	fail(canvasEdit{Action: "add", Kind: "domain", Group: 1, Server: "5.5.5.5", Name: "GOOGLE.com"}, "already")
-	fail(canvasEdit{Action: "add", Kind: "domain", Group: 1, Server: "7.7.7.7", Name: "x.com"}, "not on gateway")
-	do(canvasEdit{Action: "add", Kind: "server", Group: 1, Server: "5.5.4.4"})
-	do(canvasEdit{Action: "add", Kind: "domain", Group: 1, Server: "5.5.4.4", Name: "apple.com"})
-	do(canvasEdit{Action: "add", Kind: "server", Group: 2, Server: "6.6.6.6"})
-	do(canvasEdit{Action: "add", Kind: "domain", Group: 2, Server: "6.6.6.6", Name: "ford.com"})
+	do(canvasEdit{Action: "add", Kind: "server", Group: 100, Server: "8.8.8.8"})
+	fail(canvasEdit{Action: "add", Kind: "server", Group: 100, Server: "8.8.8.8:123"}, "already")
+	fail(canvasEdit{Action: "add", Kind: "server", Group: 9, Server: "8.8.8.8"}, "no gateway")
+	do(canvasEdit{Action: "add", Kind: "server", Group: 100, Server: "8.8.4.4"})
+	do(canvasEdit{Action: "add", Kind: "server", Group: 101, Server: "9.9.9.9"})
 	if err := dc.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	g1 := dc.Groups[0].DNS
-	if len(g1.Servers) != 2+len(defaultTopologyServers) || len(g1.ServerQueries["5.5.5.5:53"]) != 2 || g1.ServerQueries["5.5.5.5:53"][1].Type != "AAAA" {
+	g1 := dc.Groups[0].NTP
+	if len(g1.Servers) != 4+2 { // the four a gateway starts with, and the two added
 		t.Fatalf("group 1 pool: %+v", g1)
 	}
 	// a gateway can be drawn complete in one step
-	do(canvasEdit{Action: "add", Kind: "gateway", Group: 7, VIP: "10.7.0.1/24", Server: "4.4.4.4", Name: "example.org", Type: "mx"})
-	if g := dc.Groups[2]; g.GroupID != 7 || !g.DNSProxy || g.DNS.ServerQueries["4.4.4.4:53"][0].Type != "MX" {
+	do(canvasEdit{Action: "add", Kind: "gateway", Group: 7, VIP: "10.7.0.1/24", Server: "4.4.4.4"})
+	if g := dc.Groups[2]; g.GroupID != 7 || g.NTP == nil || g.NTP.Servers[len(g.NTP.Servers)-1] != "4.4.4.4:123" {
 		t.Fatalf("one-step gateway: %+v", g)
 	}
 	if err := dc.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	do(canvasEdit{Action: "del", Kind: "gateway", Group: 7})
-	// delete a trapezoid: only that test goes
-	do(canvasEdit{Action: "del", Kind: "domain", Group: 1, Server: "5.5.5.5", Name: "google.com"})
-	if q := dc.Groups[0].DNS.ServerQueries["5.5.5.5:53"]; len(q) != 1 || q[0].Name != "microsoft.com" {
-		t.Fatalf("after domain delete: %v", q)
-	}
-	fail(canvasEdit{Action: "del", Kind: "domain", Group: 1, Server: "5.5.5.5", Name: "nope.com"}, "not tested")
-	// delete a square: its domains go with it, siblings stay
-	do(canvasEdit{Action: "del", Kind: "server", Group: 1, Server: "5.5.5.5"})
-	g1 = dc.Groups[0].DNS
-	if len(g1.Servers) != 1+len(defaultTopologyServers) || g1.Servers[len(defaultTopologyServers)] != "5.5.4.4:53" || len(g1.ServerQueries) != 1+len(defaultTopologyServers) {
+	// delete a square: siblings stay
+	do(canvasEdit{Action: "del", Kind: "server", Group: 100, Server: "8.8.8.8"})
+	g1 = dc.Groups[0].NTP
+	if len(g1.Servers) != 4+1 || g1.Servers[len(g1.Servers)-1] != "8.8.4.4:123" || containsStr(g1.Servers, "8.8.8.8:123") {
 		t.Fatalf("after server delete: %+v", g1)
 	}
 	// delete a circle: the whole gateway goes, the other one is untouched
-	do(canvasEdit{Action: "del", Kind: "gateway", Group: 1})
-	if len(dc.Groups) != 1 || dc.Groups[0].GroupID != 2 || len(dc.Groups[0].DNS.Servers) != 1+len(defaultTopologyServers) {
+	do(canvasEdit{Action: "del", Kind: "gateway", Group: 100})
+	if len(dc.Groups) != 1 || dc.Groups[0].GroupID != 101 || len(dc.Groups[0].NTP.Servers) != 4+1 {
 		t.Fatalf("after gateway delete: %+v", dc.Groups)
 	}
-	do(canvasEdit{Action: "del", Kind: "gateway", Group: 2})
+	do(canvasEdit{Action: "del", Kind: "gateway", Group: 101})
 	if len(dc.Groups) != 0 {
 		t.Fatal("deleting the last circle leaves no configuration")
 	}
 	if err := dc.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	fail(canvasEdit{Action: "del", Kind: "gateway", Group: 2}, "no gateway")
+	fail(canvasEdit{Action: "del", Kind: "gateway", Group: 101}, "no gateway")
 	fail(canvasEdit{Action: "zap", Kind: "gateway"}, "unknown canvas edit")
-}
-
-// A new gateway starts with the public resolvers by address (named by host name), each probed, and they can be removed.
-func TestNewGatewayHasDefaultServers(t *testing.T) {
-	dc := newDaemonConfig()
-	dc.Groups = []GroupConfig{}
-	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "add", Kind: "gateway", VIP: "10.0.0.1/24", Server: "8.8.8.8", Name: "example.org"}); err != nil {
-		t.Fatal(err)
-	}
-	d := dc.Groups[0].DNS
-	want := [][2]string{{"8.8.8.8:53", "dns.google"}, {"1.1.1.1:53", "one.one.one.one"}, {"9.9.9.9:53", "dns9.quad9.net"}, {"4.2.2.2:53", "b.resolvers.level3.net"}}
-	if len(d.Servers) != len(want) {
-		t.Fatalf("servers (8.8.8.8 given explicitly must not be doubled): %v", d.Servers)
-	}
-	for i, w := range want {
-		if d.Servers[i] != w[0] {
-			t.Fatalf("server %d: %v", i, d.Servers)
-		}
-		if q := d.ServerQueries[w[0]]; i > 0 && (len(q) != 2 || q[0].Name != "google.com" || q[1].Name != "amazon.com") {
-			t.Fatalf("domains of %s: %v", w[0], q)
-		}
-		if i > 0 && d.ServerNames[w[0]] != w[1] {
-			t.Fatalf("name of %s: %q", w[0], d.ServerNames[w[0]])
-		}
-	}
-	if err := dc.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "del", Kind: "server", Group: 1, Server: "9.9.9.9"}); err != nil {
-		t.Fatal(err)
-	}
-	if len(dc.Groups[0].DNS.Servers) != 3 || dc.Groups[0].DNS.ServerNames["9.9.9.9:53"] != "" {
-		t.Fatalf("after removing one: %v %v", dc.Groups[0].DNS.Servers, dc.Groups[0].DNS.ServerNames)
-	}
 }
 
 func TestCanvasEditFromSharedPoolCopiesIt(t *testing.T) {
 	dc := newDaemonConfig() // group 1 uses the shared dns block
-	dc.DNS = testDNSCfg("1.1.1.1")
-	dc.Groups[0].DNSProxy = true
+	dc.Groups[0].GroupID = 1
+	dc.NTP = testNTPCfg("1.1.1.1")
 	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "add", Kind: "server", Group: 1, Server: "2.2.2.2"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(dc.DNS.Servers) != 1 {
-		t.Fatalf("the shared pool must not change: %v", dc.DNS.Servers)
+	if len(dc.NTP.Servers) != 1 {
+		t.Fatalf("the shared pool must not change: %v", dc.NTP.Servers)
 	}
-	if g := dc.Groups[0].DNS; g == nil || len(g.Servers) != 2 {
+	if g := dc.Groups[0].NTP; g == nil || len(g.Servers) != 2 {
 		t.Fatalf("the group gets its own copy: %+v", g)
 	}
 }
 
 func TestBuildCanvasColours(t *testing.T) {
-	good, bad := newFakeDNS(t), newFakeDNS(t)
+	good, bad := newFakeNTP(t), newFakeNTP(t)
 	bad.mode.Store(3)
-	d := testDNSCfg(good.addr, bad.addr)
+	d := testNTPCfg(good.addr, bad.addr)
 	g := defaultGroup()
-	g.DNSProxy, g.DNS = true, &d
+	g.NTP = &d
 	dc := newDaemonConfig()
 	dc.Groups = []GroupConfig{g}
 	s := NewSupervisor(context.Background(), dc)
@@ -398,7 +249,7 @@ func TestBuildCanvasColours(t *testing.T) {
 	if cv[0].Status != "idle" || cv[0].Servers[0].Status == "" {
 		t.Fatalf("not running: %+v", cv[0])
 	}
-	rows := []SnapshotRow{{GroupID: 1, AF: "v4", Local: true, State: "active", DNSUp: true}}
+	rows := []SnapshotRow{{GroupID: 1, AF: "v4", Local: true, State: "active", NTPUp: true}}
 	cv = buildCanvas(dc, rows, s.poolList())
 	gw := cv[0]
 	if gw.Status != "warn" {
@@ -411,8 +262,8 @@ func TestBuildCanvasColours(t *testing.T) {
 	if by[good.addr].Status != "ok" || by[bad.addr].Status != "bad" {
 		t.Fatalf("server colours: good=%s bad=%s", by[good.addr].Status, by[bad.addr].Status)
 	}
-	if len(by[good.addr].Tests) != 2 || by[good.addr].Tests[0].Status != "ok" || by[bad.addr].Tests[0].Status != "bad" {
-		t.Fatalf("test colours: %+v / %+v", by[good.addr].Tests, by[bad.addr].Tests)
+	if by[good.addr].Time == nil || by[good.addr].Time.Stratum != 2 {
+		t.Fatalf("a working server shows what its clock said: %+v", by[good.addr].Time)
 	}
 	// every server down => red; healthy but not serving yet => yellow
 	// the pool's own probe loop runs beside the test's probes, so a round that started before the change can
@@ -461,11 +312,8 @@ func TestWebCanvasEndpoint(t *testing.T) {
 func TestHistoryDescribesCanvasChanges(t *testing.T) {
 	mk := func(mut func(*GroupConfig)) *DaemonConfig {
 		dc := newDaemonConfig()
-		dc.Groups[0].DNSProxy = true
-		d := testDNSCfg("1.1.1.1:53")
-		d.Queries = nil
-		d.ServerQueries = map[string][]DNSQuery{"1.1.1.1:53": {{Name: "a.example", Type: "A"}}}
-		dc.Groups[0].DNS = &d
+		d := testNTPCfg("1.1.1.1:123")
+		dc.Groups[0].NTP = &d
 		if mut != nil {
 			mut(&dc.Groups[0])
 		}
@@ -473,22 +321,20 @@ func TestHistoryDescribesCanvasChanges(t *testing.T) {
 	}
 	before := mk(nil)
 	after := mk(func(g *GroupConfig) {
-		g.DNS.Servers = append(g.DNS.Servers, "2.2.2.2:53")
-		g.DNS.ServerQueries["2.2.2.2:53"] = []DNSQuery{{Name: "b.example", Type: "A"}}
-		g.DNS.ServerQueries["1.1.1.1:53"] = nil
+		g.NTP.Servers = append(g.NTP.Servers, "2.2.2.2:123")
 	})
 	var detail string
 	for _, s := range configSections(before, after) {
 		detail += s.Label + ": " + s.Detail + "\n"
 	}
-	for _, want := range []string{"servers added 2.2.2.2:53", "domains added 2.2.2.2:53 b.example/A", "domains removed 1.1.1.1:53 a.example/A"} {
+	for _, want := range []string{"servers added 2.2.2.2:123"} {
 		if !strings.Contains(detail, want) {
 			t.Fatalf("history should say %q, got:\n%s", want, detail)
 		}
 	}
 }
 
-func TestCanvasDualStackAndECSEdits(t *testing.T) {
+func TestCanvasDualStackAndStratumEdits(t *testing.T) {
 	dc := newDaemonConfig()
 	dc.Groups = []GroupConfig{}
 	do := func(e canvasEdit) {
@@ -497,68 +343,60 @@ func TestCanvasDualStackAndECSEdits(t *testing.T) {
 			t.Fatalf("%+v: %v", e, err)
 		}
 	}
-	do(canvasEdit{Action: "add", Kind: "gateway", VIP: "10.0.0.1/24", VIP6: "2001:db8::1/64", ECS: "on", ECSv4: 20,
-		Server: "2001:db8::53", Name: "example.org"})
+	do(canvasEdit{Action: "add", Kind: "gateway", VIP: "10.0.0.1/24", VIP6: "2001:db8::1/64",
+		Server: "2001:db8::123"})
 	g := dc.Groups[0]
 	if g.VIP4 != "10.0.0.1/24" || g.VIP6 != "2001:db8::1/64" {
 		t.Fatalf("both addresses: %q %q", g.VIP4, g.VIP6)
 	}
-	if !g.DNS.ECS || g.DNS.ECSPrefix4 != 20 || g.DNS.ECSPrefix6 != 56 {
-		t.Fatalf("ecs settings: %+v", g.DNS)
-	}
 	if err := dc.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if g.DNS.Servers[0] != "[2001:db8::53]:53" {
-		t.Fatalf("an IPv6 server is stored bracketed with its port: %q", g.DNS.Servers[0])
+	if last := g.NTP.Servers[len(g.NTP.Servers)-1]; last != "[2001:db8::123]:123" {
+		t.Fatalf("an IPv6 server is stored bracketed with its port: %q", last)
 	}
 	// an IPv6 address in --vip goes to the IPv6 slot
 	do(canvasEdit{Action: "add", Kind: "gateway", VIP: "2001:db8:2::1/64"})
 	if g2 := dc.Groups[1]; g2.VIP6 == "" || g2.VIP4 != "" {
 		t.Fatalf("v6-only gateway: %+v", g2)
 	}
-	// set: change address, interface and ECS; ECS off keeps the prefixes
-	do(canvasEdit{Action: "set", Kind: "gateway", Group: 1, VIP: "10.0.9.1/24", Interface: "eth5", ECS: "off", ECSv6: 48})
+	// set: change address, interface and the highest stratum
+	do(canvasEdit{Action: "set", Kind: "gateway", Group: 100, VIP: "10.0.9.1/24", Interface: "eth5", MaxStratum: 8})
 	g = dc.Groups[0]
-	if g.VIP4 != "10.0.9.1/24" || g.VIP6 != "2001:db8::1/64" || g.Interface != "eth5" || g.DNS.ECS || g.DNS.ECSPrefix6 != 48 {
-		t.Fatalf("after set: %+v %+v", g, g.DNS)
+	if g.VIP4 != "10.0.9.1/24" || g.VIP6 != "2001:db8::1/64" || g.Interface != "eth5" || g.NTP.LB == nil || g.NTP.LB.MaxStratum != 8 {
+		t.Fatalf("after set: %+v %+v", g, g.NTP)
 	}
-	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "set", Kind: "gateway", Group: 1}); err == nil {
+	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "set", Kind: "gateway", Group: 100}); err == nil {
 		t.Fatal("set without anything to change must say so")
 	}
-	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "set", Kind: "gateway", Group: 1, ECS: "maybe"}); err == nil {
-		t.Fatal("--ecs must be on or off")
-	}
-	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "set", Kind: "gateway", Group: 9, ECS: "on"}); err == nil {
+	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "set", Kind: "gateway", Group: 9, MaxStratum: 3}); err == nil {
 		t.Fatal("unknown gateway")
 	}
-	// setting ECS on a gateway that used the shared pool copies the pool first
+	// setting a value on a gateway that used the shared pool copies the pool first
 	dc2 := newDaemonConfig()
-	dc2.DNS = testDNSCfg("1.1.1.1")
-	dc2.DNS.ECS = false // it is on by default since v107; this test is about a shared pool that has it off
-	dc2.Groups[0].DNSProxy = true
-	if _, err := applyCanvasEdit(dc2, canvasEdit{Action: "set", Kind: "gateway", Group: 1, ECS: "on"}); err != nil {
+	dc2.NTP = testNTPCfg("1.1.1.1")
+	if _, err := applyCanvasEdit(dc2, canvasEdit{Action: "set", Kind: "gateway", Group: 100, MaxStratum: 3}); err != nil {
 		t.Fatal(err)
 	}
-	if dc2.DNS.ECS || dc2.Groups[0].DNS == nil || !dc2.Groups[0].DNS.ECS || len(dc2.Groups[0].DNS.Servers) != 1 {
-		t.Fatalf("shared pool must stay as it was; group gets a copy with ECS on: %+v", dc2.Groups[0].DNS)
+	if dc2.NTP.MaxStratum == 3 || dc2.Groups[0].NTP == nil || len(dc2.Groups[0].NTP.Servers) != 1 {
+		t.Fatalf("shared pool must stay as it was; group gets a copy: %+v", dc2.Groups[0].NTP)
 	}
 }
 
 func TestBuildCanvasPerFamilyStatus(t *testing.T) {
-	good := newFakeDNS(t)
-	d := testDNSCfg(good.addr)
+	good := newFakeNTP(t)
+	d := testNTPCfg(good.addr)
 	g := defaultGroup()
 	g.VIP6 = "2001:db8::1/64"
-	g.DNSProxy, g.DNS = true, &d
+	g.NTP = &d
 	dc := newDaemonConfig()
 	dc.Groups = []GroupConfig{g}
 	s := NewSupervisor(context.Background(), dc)
 	s.refreshPool(dc, true)
 	t.Cleanup(func() { s.StopAll() })
 
-	v4ok := SnapshotRow{GroupID: 1, AF: "v4", Local: true, State: "active", DNSUp: true}
-	v6ok := SnapshotRow{GroupID: 1, AF: "v6", Local: true, State: "active", DNSUp: true}
+	v4ok := SnapshotRow{GroupID: 1, AF: "v4", Local: true, State: "active", NTPUp: true}
+	v6ok := SnapshotRow{GroupID: 1, AF: "v6", Local: true, State: "active", NTPUp: true}
 	v6wait := SnapshotRow{GroupID: 1, AF: "v6", Local: true, State: "listen"}
 
 	both := buildCanvas(dc, []SnapshotRow{v4ok, v6ok}, s.poolList())[0]
@@ -591,9 +429,6 @@ func TestCanvasMembers(t *testing.T) {
 		{GroupID: 1, AF: "v4", PeerIP: "10.0.0.8", AfnID: 0, State: "active"},  // no slot, not serving
 		{GroupID: 2, AF: "v4", PeerIP: "10.0.0.9", AfnID: 1, State: "active"},  // another gateway
 	}
-	if m := membersOf(rows, 1); m[0].AGCAFs != "v4+v6" || m[1].AGCAFs != "" {
-		t.Fatalf("a node that is the controller for both families says so, one that is not says nothing: %+v", m)
-	}
 	m := membersOf(rows, 1)
 	if len(m) != 2 || m[0].IP != "10.0.0.5" || !m[0].Local || !m[0].AGC || m[0].AFs != "v4+v6" || m[1].IP != "10.0.0.6" || m[1].AGC {
 		t.Fatalf("members: %+v", m)
@@ -603,30 +438,11 @@ func TestCanvasMembers(t *testing.T) {
 	}
 }
 
-// On a dual-stack gateway a node has an IPv4 and a (link-local) IPv6 gateway address; it is still one serving node.
-func TestMergeMembersByNode(t *testing.T) {
-	g := []CanvasGateway{{Members: []CanvasMember{
-		{IP: "10.0.0.5", Local: true, AfnID: 1, AFs: "v4", AGC: true, AGCAFs: "v4"},
-		{IP: "fe80::5", Local: true, AfnID: 1, AFs: "v6"},
-		{IP: "10.0.0.6", AfnID: 2, AFs: "v4"},
-		{IP: "fe80::6", AfnID: 2, AFs: "v6", AGC: true, AGCAFs: "v6"},
-		{IP: "10.0.0.7", AfnID: 3, AFs: "v4"}, // a node the cluster cannot name yet stays as it is
-	}}}
-	mergeMembersByNode(g, map[string]string{"10.0.0.5": "ns1", "fe80::5": "ns1", "10.0.0.6": "ns2", "fe80::6": "ns2"})
-	m := g[0].Members
-	if m[0].AGCAFs != "v4" || m[1].AGCAFs != "v6" {
-		t.Fatalf("the controller of each family stays with its node after the merge: %+v", m)
-	}
-	if len(m) != 3 || !m[0].Local || m[0].AFs != "v4+v6" || m[1].AFs != "v4+v6" || !m[1].AGC || m[2].IP != "10.0.0.7" {
-		t.Fatalf("merged: %+v", m)
-	}
-}
-
 func TestPauseServerAndGateway(t *testing.T) {
-	a, b := newFakeDNS(t), newFakeDNS(t)
-	d := testDNSCfg(a.addr, b.addr)
+	a, b := newFakeNTP(t), newFakeNTP(t)
+	d := testNTPCfg(a.addr, b.addr)
 	g := defaultGroup()
-	g.DNSProxy, g.DNS = true, &d
+	g.NTP = &d
 	dc := newDaemonConfig()
 	dc.Groups = []GroupConfig{g}
 
@@ -637,7 +453,7 @@ func TestPauseServerAndGateway(t *testing.T) {
 	if err := dc.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	own := dc.Groups[0].DNS
+	own := dc.Groups[0].NTP
 	if len(own.Servers) != 2 || !own.isPaused(b.addr) || own.isPaused(a.addr) {
 		t.Fatalf("config after pause: %+v", own)
 	}
@@ -650,13 +466,13 @@ func TestPauseServerAndGateway(t *testing.T) {
 	if n := len(s.poolFor(1).servers); n != 1 {
 		t.Fatalf("a paused server must not be in the running pool, pool has %d", n)
 	}
-	rows := []SnapshotRow{{GroupID: 1, AF: "v4", Local: true, State: "active", DNSUp: true}}
+	rows := []SnapshotRow{{GroupID: 1, AF: "v4", Local: true, State: "active", NTPUp: true}}
 	cv := buildCanvas(dc, rows, s.poolList())[0]
 	by := map[string]CanvasServer{}
 	for _, sv := range cv.Servers {
 		by[sv.Addr] = sv
 	}
-	if by[b.addr].Status != "paused" || by[b.addr].Tests[0].Status != "paused" || by[a.addr].Status != "ok" {
+	if by[b.addr].Status != "paused" || by[a.addr].Status != "ok" {
 		t.Fatalf("paused colours: %+v", cv.Servers)
 	}
 	if cv.Status != "ok" {
@@ -685,7 +501,7 @@ func TestPauseServerAndGateway(t *testing.T) {
 	do(canvasEdit{Action: "resume", Kind: "server", Group: 1, Server: a.addr})
 	do(canvasEdit{Action: "del", Kind: "server", Group: 1, Server: b.addr})
 	_ = dc.Validate()
-	if p := dc.Groups[0].DNS.PausedServers; len(p) != 0 {
+	if p := dc.Groups[0].NTP.PausedServers; len(p) != 0 {
 		t.Fatalf("pause must go with the server: %v", p)
 	}
 	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "pause", Kind: "server", Group: 1, Server: "10.9.9.9"}); err == nil {
@@ -708,8 +524,8 @@ func TestPauseServerAndGateway(t *testing.T) {
 	if n := len(sup.engineList()); n != 0 {
 		t.Fatalf("a paused gateway must start no engines, got %d", n)
 	}
-	if k := sup.poolFor(1); k != nil {
-		t.Fatal("a paused gateway needs no probe pool")
+	if k := sup.poolFor(1); k == nil {
+		t.Fatal("a paused gateway keeps its pool: its servers are still the node's time sources")
 	}
 	sup.StopAll()
 	do(canvasEdit{Action: "resume", Kind: "gateway", Group: 1})
@@ -726,29 +542,20 @@ func TestPauseServerAndGateway(t *testing.T) {
 	}
 }
 
-func mustJSON(t *testing.T, v any) []byte {
-	t.Helper()
-	b, err := json.Marshal(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
-}
-
 // A gateway always serves DNS; one with no servers yet is amber, not green: it
 // is up but cannot answer clients.
 func TestBuildCanvasGatewayWithoutServers(t *testing.T) {
-	d := testDNSCfg()
+	d := testNTPCfg()
 	g := defaultGroup()
-	g.DNS = &d
+	g.NTP = &d
 	dc := newDaemonConfig()
 	dc.Groups = []GroupConfig{g}
 	s := NewSupervisor(context.Background(), dc)
 	s.refreshPool(dc, true)
 	t.Cleanup(func() { s.StopAll() })
-	rows := []SnapshotRow{{GroupID: 1, AF: "v4", Local: true, State: "active", DNSUp: true}}
+	rows := []SnapshotRow{{GroupID: 1, AF: "v4", Local: true, State: "active", NTPUp: true}}
 	cv := buildCanvas(dc, rows, s.poolList())
-	if cv[0].Status != "warn" || !strings.Contains(cv[0].Detail, "no DNS server") {
+	if cv[0].Status != "warn" || !strings.Contains(cv[0].Detail, "no NTP server") {
 		t.Fatalf("no servers: %s (%s)", cv[0].Status, cv[0].Detail)
 	}
 }
@@ -756,8 +563,8 @@ func TestBuildCanvasGatewayWithoutServers(t *testing.T) {
 // Dragging in the drawing (and --canvas-move) reorders servers, a server's domains and the anycast addresses.
 func TestCanvasMove(t *testing.T) {
 	dc := newDaemonConfig()
-	dc.DNS = testDNSCfg("1.1.1.1", "2.2.2.2", "3.3.3.3")
-	dc.Groups[0].DNSProxy = true
+	dc.Groups[0].GroupID = 1
+	dc.NTP = testNTPCfg("1.1.1.1", "2.2.2.2", "3.3.3.3")
 	dc.Groups[0].ExtraVIPs = []string{"203.0.113.1", "203.0.113.2", "203.0.113.3"}
 	must := func(e canvasEdit) {
 		t.Helper()
@@ -767,21 +574,15 @@ func TestCanvasMove(t *testing.T) {
 		}
 	}
 	must(canvasEdit{Action: "move", Kind: "server", Server: "3.3.3.3", Pos: 1})
-	if got := dc.Groups[0].DNS.Servers; got[0] != "3.3.3.3" || got[1] != "1.1.1.1" || got[2] != "2.2.2.2" {
+	if got := dc.Groups[0].NTP.Servers; got[0] != "3.3.3.3" || got[1] != "1.1.1.1" || got[2] != "2.2.2.2" {
 		t.Fatalf("servers after move: %v", got)
 	}
-	if len(dc.DNS.Servers) != 3 || dc.DNS.Servers[0] != "1.1.1.1" {
-		t.Fatalf("the shared pool must not change: %v", dc.DNS.Servers)
+	if len(dc.NTP.Servers) != 3 || dc.NTP.Servers[0] != "1.1.1.1" {
+		t.Fatalf("the shared pool must not change: %v", dc.NTP.Servers)
 	}
 	must(canvasEdit{Action: "move", Kind: "server", Server: "3.3.3.3", Pos: 99}) // past the end: last
-	if got := dc.Groups[0].DNS.Servers; got[2] != "3.3.3.3" {
+	if got := dc.Groups[0].NTP.Servers; got[2] != "3.3.3.3" {
 		t.Fatalf("clamped to the end: %v", got)
-	}
-	must(canvasEdit{Action: "add", Kind: "domain", Server: "1.1.1.1", Name: "b.example"})
-	must(canvasEdit{Action: "add", Kind: "domain", Server: "1.1.1.1", Name: "c.example"})
-	must(canvasEdit{Action: "move", Kind: "domain", Server: "1.1.1.1", Name: "c.example", Pos: 1})
-	if q := dc.Groups[0].DNS.ServerQueries["1.1.1.1:53"]; len(q) < 3 || q[0].Name != "c.example" {
-		t.Fatalf("domains after move: %v", q)
 	}
 	must(canvasEdit{Action: "move", Kind: "anycast", Address: "203.0.113.3", Pos: 1})
 	if got := dc.Groups[0].ExtraVIPs; got[0] != "203.0.113.3" || got[1] != "203.0.113.1" || got[2] != "203.0.113.2" {
@@ -790,7 +591,6 @@ func TestCanvasMove(t *testing.T) {
 	for _, e := range []canvasEdit{
 		{Action: "move", Kind: "server", Group: 1, Server: "9.9.9.9", Pos: 1},
 		{Action: "move", Kind: "server", Group: 1, Server: "1.1.1.1"},
-		{Action: "move", Kind: "domain", Group: 1, Server: "1.1.1.1", Name: "nope.example", Pos: 1},
 		{Action: "move", Kind: "anycast", Group: 1, Address: "203.0.113.99", Pos: 1},
 	} {
 		if _, err := applyCanvasEdit(dc, e); err == nil {
@@ -804,10 +604,10 @@ func TestCanvasMove(t *testing.T) {
 
 // With several servers and only one left in service, the gateway is amber: it works, but one failure from being down.
 func TestOnlyOneServerLeftIsAmber(t *testing.T) {
-	a, b, c := newFakeDNS(t), newFakeDNS(t), newFakeDNS(t)
-	d := testDNSCfg(a.addr, b.addr, c.addr)
+	a, b, c := newFakeNTP(t), newFakeNTP(t), newFakeNTP(t)
+	d := testNTPCfg(a.addr, b.addr, c.addr)
 	g := defaultGroup()
-	g.DNSProxy, g.DNS = true, &d
+	g.NTP = &d
 	dc := newDaemonConfig()
 	dc.Groups = []GroupConfig{g}
 	pause := func(addr string) {
@@ -816,7 +616,7 @@ func TestOnlyOneServerLeftIsAmber(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	rows := []SnapshotRow{{GroupID: 1, AF: "v4", Local: true, State: "active", DNSUp: true}}
+	rows := []SnapshotRow{{GroupID: 1, AF: "v4", Local: true, State: "active", NTPUp: true}}
 	status := func() CanvasGateway {
 		t.Helper()
 		_ = dc.Validate()
@@ -832,5 +632,158 @@ func TestOnlyOneServerLeftIsAmber(t *testing.T) {
 	pause(b.addr)
 	if cv := status(); cv.Status != "warn" || !strings.Contains(cv.Detail, "only one") {
 		t.Fatalf("two of three paused: %s (%s)", cv.Status, cv.Detail)
+	}
+}
+
+// A gateway created now starts with the four public servers, which are ordinary servers: any of them can be removed,
+// and a server named at creation that is one of them is not added twice.  A config read from a file is not touched.
+func TestNewGatewayStartsWithDefaultServers(t *testing.T) {
+	want := []string{"pool.ntp.org:123", "time.nist.gov:123", "time.google.com:123", "time.cloudflare.com:123"}
+	dc := newDaemonConfig()
+	dc.Groups = []GroupConfig{}
+	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "add", Kind: "gateway", VIP: "10.0.0.1/24", Interface: "eth0"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := dc.Groups[0].NTP.Servers; !reflect.DeepEqual(got, want) {
+		t.Fatalf("a new gateway's servers: %v, want %v", got, want)
+	}
+	if err := dc.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "del", Kind: "server", Group: 100, Server: "time.nist.gov"}); err != nil {
+		t.Fatalf("a starting server can be removed: %v", err)
+	}
+	if got := dc.Groups[0].NTP.Servers; len(got) != 3 || containsStr(got, "time.nist.gov:123") {
+		t.Fatalf("after removing one: %v", got)
+	}
+	// naming one of the starting servers at creation is not an error and not a duplicate
+	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "add", Kind: "gateway", VIP: "10.1.0.1/24", Server: "Time.Google.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := dc.Groups[1].NTP.Servers; !reflect.DeepEqual(got, want) {
+		t.Fatalf("with a named server that is already one: %v", got)
+	}
+	// a shared default does not change: a config with no servers still has none
+	if d := defaultNTP(); len(d.Servers) != 0 {
+		t.Fatalf("defaultNTP has servers: %v", d.Servers)
+	}
+	var back DaemonConfig
+	if err := json.Unmarshal([]byte(`{"groups":[{"group_id":1,"vip4":"10.0.0.1/24"}]}`), &back); err != nil || back.Groups[0].NTP != nil {
+		t.Fatalf("a gateway read from a file gets no servers: %v %+v", err, back.Groups)
+	}
+}
+
+// The GUI's New gateway form starts from the same list as the command line (DEFAULT_SERVERS in app.js).
+func TestDefaultServersMatchTheGUI(t *testing.T) {
+	b, err := os.ReadFile("webui/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`const DEFAULT_SERVERS = \[([^\]]*)\];`).FindSubmatch(b)
+	if m == nil {
+		t.Fatal("DEFAULT_SERVERS not found in app.js")
+	}
+	var js []string
+	for _, q := range regexp.MustCompile(`"([^"]+)"`).FindAllSubmatch(m[1], -1) {
+		js = append(js, string(q[1]))
+	}
+	if !reflect.DeepEqual(js, defaultGatewayServers) {
+		t.Fatalf("app.js has %v, config.go has %v", js, defaultGatewayServers)
+	}
+}
+
+// A dual-stack gateway has two engines per node, and each speaks from its own address, so membersOf sees a node twice.
+// The circle's tooltip counts nodes: 4 nodes with IPv4 and IPv6 running said "Serving nodes: 8".
+func TestMergeFamilyMembersCountsNodes(t *testing.T) {
+	var rows []SnapshotRow
+	names := map[string]string{}
+	for i := 1; i <= 4; i++ {
+		v4, v6 := "192.168.5."+string(rune('0'+i)), "fe80::"+string(rune('0'+i))
+		names[v4], names[v6] = "ntp"+string(rune('0'+i)), "ntp"+string(rune('0'+i))
+		rows = append(rows,
+			SnapshotRow{GroupID: 100, AF: "v6", PeerIP: v6, AfnID: i, Weight: 100, State: "active", Local: i == 1, AGCIP: "fe80::1"},
+			SnapshotRow{GroupID: 100, AF: "v4", PeerIP: v4, AfnID: i, Weight: 100, State: "active", Local: i == 1, AGCIP: "192.168.5.1"})
+	}
+	rows = append(rows, SnapshotRow{GroupID: 100, AF: "v4", PeerIP: "192.168.5.99", AfnID: 9, State: "active"}) // an address no node owns
+	gs := []CanvasGateway{{GroupID: 100, Members: membersOf(rows, 100)}}
+	if len(gs[0].Members) != 9 {
+		t.Fatalf("membersOf sees %d, want 9 (8 per-family entries and the stranger)", len(gs[0].Members))
+	}
+	mergeFamilyMembers(gs, names)
+	ms := gs[0].Members
+	if len(ms) != 5 {
+		t.Fatalf("members after merging: %d, want 4 nodes and the unknown address: %+v", len(ms), ms)
+	}
+	for _, m := range ms {
+		if m.IP == "192.168.5.99" {
+			continue
+		}
+		if m.AFs != "v4+v6" || !strings.HasPrefix(m.IP, "192.168.5.") {
+			t.Fatalf("a node is listed by its IPv4 address with both families: %+v", m)
+		}
+	}
+	for _, m := range ms {
+		if m.IP == "192.168.5.1" && (!m.Local || !m.AGC) {
+			t.Fatalf("local and controller survive the merge: %+v", m)
+		}
+	}
+}
+
+// A dual-stack gateway elects its controllers per family: each node says which families it is the controller for, and
+// the merge keeps that apart (the drawing shows the IPv6-only controller in blue).
+func TestMergeFamilyMembersKeepsControllerFamilies(t *testing.T) {
+	var rows []SnapshotRow
+	names := map[string]string{}
+	for i := 1; i <= 2; i++ {
+		v4, v6 := "192.168.5."+string(rune('0'+i)), "fe80::"+string(rune('0'+i))
+		names[v4], names[v6] = "ntp"+string(rune('0'+i)), "ntp"+string(rune('0'+i))
+		rows = append(rows,
+			SnapshotRow{GroupID: 1, AF: "v6", PeerIP: v6, AfnID: i, State: "active", Local: i == 1, AGCIP: "fe80::2"},
+			SnapshotRow{GroupID: 1, AF: "v4", PeerIP: v4, AfnID: i, State: "active", Local: i == 1, AGCIP: "192.168.5.1"})
+	}
+	gs := []CanvasGateway{{GroupID: 1, Members: membersOf(rows, 1)}}
+	mergeFamilyMembers(gs, names)
+	ms := gs[0].Members
+	if len(ms) != 2 || ms[0].IP != "192.168.5.1" || ms[0].AGCAFs != "v4" || ms[1].IP != "192.168.5.2" || ms[1].AGCAFs != "v6" || !ms[0].AGC || !ms[1].AGC {
+		t.Fatalf("IPv4 controller on ntp1, IPv6 controller on ntp2: %+v", ms)
+	}
+	// both families on one node: one entry that says both
+	for i := range rows {
+		rows[i].AGCIP = map[string]string{"v4": "192.168.5.1", "v6": "fe80::1"}[rows[i].AF]
+	}
+	gs = []CanvasGateway{{GroupID: 1, Members: membersOf(rows, 1)}}
+	mergeFamilyMembers(gs, names)
+	if ms := gs[0].Members; ms[0].AGCAFs != "v4+v6" || ms[1].AGC || ms[1].AGCAFs != "" {
+		t.Fatalf("both controllers on ntp1: %+v", ms)
+	}
+}
+
+func TestPoolsSkipExcludedGateways(t *testing.T) {
+	a, b := newFakeNTP(t), newFakeNTP(t)
+	mk := func(id int, vip string, own NTPConfig, excl ...string) GroupConfig {
+		g := defaultGroup()
+		g.GroupID, g.VIP4, g.NTP, g.ExcludedNodes = id, vip, &own, excl
+		return g
+	}
+	old := localNodeID()
+	setLocalNodeID("aaaaaaaaaaaaaaaa")
+	t.Cleanup(func() { setLocalNodeID(old) })
+	dc := newDaemonConfig()
+	dc.NTP = testNTPCfg(a.addr)
+	dc.Groups = []GroupConfig{mk(1, "10.1.0.1/24", testNTPCfg(a.addr)), mk(2, "10.2.0.1/24", testNTPCfg(b.addr), "aaaaaaaaaaaaaaaa")}
+	if err := dc.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	s := NewSupervisor(context.Background(), dc)
+	s.refreshPool(dc, true)
+	t.Cleanup(func() { s.StopAll() })
+	if s.poolFor(1) == nil || s.poolFor(2) != nil || len(s.poolList()) != 1 {
+		t.Fatalf("a gateway this node was removed from must have no pool here: %d pools", len(s.poolList()))
+	}
+	// removed from every gateway: no pool at all
+	dc.Groups[0].ExcludedNodes = []string{"aaaaaaaaaaaaaaaa"}
+	s.refreshPool(dc, true)
+	if len(s.poolList()) != 0 {
+		t.Fatalf("a node removed from every gateway has no pools, got %d", len(s.poolList()))
 	}
 }

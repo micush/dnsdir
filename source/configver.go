@@ -21,7 +21,7 @@ import (
 // a diff between any two versions (or either against the live one) and
 // restore.  One small JSON file per version, named by a unix-millisecond id.
 //
-// The versioned unit is the whole per-node config file (groups, dns, web,
+// The versioned unit is the whole per-node config file (groups, ntp, web,
 // cluster, log_level): that is what this node actually runs, including the
 // parts a cluster replicates from the primary.
 
@@ -357,8 +357,8 @@ next:
 			out = append(out, "key changed")
 			continue
 		}
-		if k == "dns" {
-			out = append(out, dnsChange(a[k], b[k]))
+		if k == "ntp" {
+			out = append(out, ntpChange(a[k], b[k]))
 			continue
 		}
 		if k == "paused" {
@@ -379,7 +379,7 @@ next:
 }
 
 // switched words a change that turns something on or off as "enabled" or "disabled": a yes/no setting that flipped, or a
-// number whose zero means off (the DoT and DoH ports, the client rate limit).
+// number whose zero means off (the client rate limit, the falseticker check).
 func switched(k string, a, b any) (string, bool) {
 	ab, aok := a.(bool)
 	bb, bok := b.(bool)
@@ -390,7 +390,7 @@ func switched(k string, a, b any) (string, bool) {
 		return k + " disabled", true
 	}
 	switch k {
-	case "dot_port", "doh_port", "client_rate":
+	case "max_offset_ms", "client_rate":
 		an, _ := a.(float64)
 		bn, _ := b.(float64)
 		if an == 0 && bn > 0 {
@@ -523,8 +523,8 @@ func configSections(a, b *DaemonConfig) []Section {
 		}
 	}
 
-	// dns
-	if sa, sb := a.DNS.Servers, b.DNS.Servers; !reflect.DeepEqual(sa, sb) {
+	// ntp
+	if sa, sb := a.NTP.Servers, b.NTP.Servers; !reflect.DeepEqual(sa, sb) {
 		add, rem := setDiff(sa, sb)
 		var parts []string
 		if len(add) > 0 {
@@ -536,36 +536,12 @@ func configSections(a, b *DaemonConfig) []Section {
 		if len(parts) == 0 {
 			parts = append(parts, "reordered")
 		}
-		out = append(out, Section{"DNS servers", strings.Join(parts, ", ")})
+		out = append(out, Section{"NTP servers", strings.Join(parts, ", ")})
 	}
-	if !reflect.DeepEqual(a.DNS.ServerQueries, b.DNS.ServerQueries) && !(len(a.DNS.ServerQueries) == 0 && len(b.DNS.ServerQueries) == 0) {
-		out = append(out, Section{"DNS per-server queries", "changed"})
+	if !reflect.DeepEqual(a.NTP.ServerNames, b.NTP.ServerNames) && !(len(a.NTP.ServerNames) == 0 && len(b.NTP.ServerNames) == 0) {
+		out = append(out, Section{"NTP server names", "changed"})
 	}
-	if !reflect.DeepEqual(a.DNS.ServerNames, b.DNS.ServerNames) && !(len(a.DNS.ServerNames) == 0 && len(b.DNS.ServerNames) == 0) {
-		out = append(out, Section{"DNS server names", "changed"})
-	}
-	qs := func(d DNSConfig) []string {
-		var l []string
-		for _, q := range d.Queries {
-			l = append(l, q.String())
-		}
-		return l
-	}
-	if qa, qb := qs(a.DNS), qs(b.DNS); !reflect.DeepEqual(qa, qb) {
-		add, rem := setDiff(qa, qb)
-		var parts []string
-		if len(add) > 0 {
-			parts = append(parts, "added "+named(add))
-		}
-		if len(rem) > 0 {
-			parts = append(parts, "removed "+named(rem))
-		}
-		if len(parts) == 0 {
-			parts = append(parts, "reordered")
-		}
-		out = append(out, Section{"DNS probe queries", strings.Join(parts, ", ")})
-	}
-	if fadd, frem := setDiff(a.DNS.FallbackServers, b.DNS.FallbackServers); len(fadd)+len(frem) > 0 {
+	if fadd, frem := setDiff(a.NTP.FallbackServers, b.NTP.FallbackServers); len(fadd)+len(frem) > 0 {
 		var parts []string
 		if len(fadd) > 0 {
 			parts = append(parts, "added "+named(fadd))
@@ -573,9 +549,9 @@ func configSections(a, b *DaemonConfig) []Section {
 		if len(frem) > 0 {
 			parts = append(parts, "removed "+named(frem))
 		}
-		out = append(out, Section{"DNS fallback servers", strings.Join(parts, "; ")})
+		out = append(out, Section{"NTP fallback servers", strings.Join(parts, "; ")})
 	}
-	if padd, prem := setDiff(a.DNS.PausedServers, b.DNS.PausedServers); len(padd)+len(prem) > 0 {
+	if padd, prem := setDiff(a.NTP.PausedServers, b.NTP.PausedServers); len(padd)+len(prem) > 0 {
 		var parts []string
 		if len(padd) > 0 {
 			parts = append(parts, "paused "+named(padd))
@@ -583,20 +559,13 @@ func configSections(a, b *DaemonConfig) []Section {
 		if len(prem) > 0 {
 			parts = append(parts, "resumed "+named(prem))
 		}
-		out = append(out, Section{"DNS servers", strings.Join(parts, ", ")})
+		out = append(out, Section{"NTP servers", strings.Join(parts, ", ")})
 	}
-	if qadd, qrem := setDiff(a.DNS.PausedQueries, b.DNS.PausedQueries); len(qadd)+len(qrem) > 0 {
-		var parts []string
-		if len(qadd) > 0 {
-			parts = append(parts, "paused "+named(qadd))
-		}
-		if len(qrem) > 0 {
-			parts = append(parts, "resumed "+named(qrem))
-		}
-		out = append(out, Section{"DNS probe domains", strings.Join(parts, ", ")})
+	if !reflect.DeepEqual(a.NTP.Keys, b.NTP.Keys) && !(len(a.NTP.Keys) == 0 && len(b.NTP.Keys) == 0) { // secrets: only their number
+		out = append(out, Section{"NTP keys", fmt.Sprintf("changed (%d now)", len(b.NTP.Keys))})
 	}
-	if f := changedFields(toMap(a.DNS), toMap(b.DNS), "servers", "queries", "paused_servers", "paused_queries", "snmp_communities", "snmp_contact"); len(f) > 0 {
-		out = append(out, Section{"DNS settings", named(f)})
+	if f := changedFields(toMap(a.NTP), toMap(b.NTP), "servers", "paused_servers", "snmp_communities", "snmp_contact", "keys"); len(f) > 0 {
+		out = append(out, Section{"NTP settings", named(f)})
 	}
 	if f := changedFields(toMap(a.Web), toMap(b.Web)); len(f) > 0 {
 		out = append(out, Section{"Web GUI", named(f)})
@@ -687,10 +656,10 @@ func lineDiff(a, b []string, ctx int) []DiffLine {
 	return out
 }
 
-// dnsChange describes a change of a group's own DNS pool in words.
-func dnsChange(a, b any) string {
-	parse := func(v any) DNSConfig {
-		var d DNSConfig
+// ntpChange describes a change of a group's own NTP pool in words.
+func ntpChange(a, b any) string {
+	parse := func(v any) NTPConfig {
+		var d NTPConfig
 		if v != nil {
 			raw, _ := json.Marshal(v)
 			_ = json.Unmarshal(raw, &d)
@@ -699,10 +668,10 @@ func dnsChange(a, b any) string {
 	}
 	da, db := parse(a), parse(b)
 	if a == nil {
-		return fmt.Sprintf("own DNS pool created (%d server(s))", len(db.Servers))
+		return fmt.Sprintf("own NTP pool created (%d server(s))", len(db.Servers))
 	}
 	if b == nil {
-		return "own DNS pool removed (back to the shared one)"
+		return "own NTP pool removed (back to the shared one)"
 	}
 	var parts []string
 	add, rem := setDiff(da.Servers, db.Servers)
@@ -727,24 +696,8 @@ func dnsChange(a, b any) string {
 	if len(prem) > 0 {
 		parts = append(parts, "servers resumed "+named(prem))
 	}
-	tests := func(d DNSConfig) []string {
-		var l []string
-		for _, sv := range d.Servers {
-			for _, q := range d.queriesFor(sv) {
-				l = append(l, sv+" "+q.String())
-			}
-		}
-		return l
-	}
-	tadd, trem := setDiff(tests(da), tests(db))
-	if len(tadd) > 0 {
-		parts = append(parts, "domains added "+named(tadd))
-	}
-	if len(trem) > 0 {
-		parts = append(parts, "domains removed "+named(trem))
-	}
 	if len(parts) == 0 {
 		parts = append(parts, "settings changed")
 	}
-	return "DNS pool: " + strings.Join(parts, ", ")
+	return "NTP pool: " + strings.Join(parts, ", ")
 }

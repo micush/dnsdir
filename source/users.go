@@ -17,7 +17,7 @@ import (
 )
 
 // Users: the local accounts that may sign in to the web GUI, which are the
-// members of the GUI group (web.group, "dnsdir" by default).  They are managed
+// members of the GUI group (web.group, "ntpdir" by default).  They are managed
 // with the standard shadow-utils tools (useradd, usermod, userdel, chpasswd),
 // so PAM and the operating system stay the one source of truth.  New accounts
 // have no shell and no home directory: they exist only to sign in here.
@@ -105,12 +105,12 @@ var usersLookup = func(name string) bool {
 // guiGroup is the local group the Users page manages: the first of the login groups (a comma-separated list; the
 // later ones may be directory groups, which are managed in the directory) that is in /etc/group, else the first one.
 func (m *Mgmt) guiGroup() string {
-	list := splitGroups("dnsdir")
+	list := splitGroups("ntpdir")
 	if p := m.webPolicy.Load(); p != nil && p.Group != "" {
 		list = splitGroups(p.Group)
 	}
 	if len(list) == 0 {
-		return "dnsdir"
+		return "ntpdir"
 	}
 	if b, err := os.ReadFile(usersGroupFile); err == nil {
 		for _, g := range list { // keep the order of the setting when several are local

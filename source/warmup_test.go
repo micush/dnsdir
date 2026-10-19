@@ -14,12 +14,12 @@ func TestGatewayWaitsForDNSBeforeServing(t *testing.T) {
 	warmEvery, warmFloor, warmMax = 20*time.Millisecond, 10*time.Second, 10*time.Second
 	defer func() { warmEvery, warmFloor, warmMax = oldE, oldF, oldM }()
 
-	up := newFakeDNS(t)
+	up := newFakeNTP(t)
 	up.mode.Store(3) // SERVFAIL: not answering yet
 	g := defaultGroup()
-	g.Interface = "dnsdirnone0" // no such interface: the engine starts and idles, nothing on the host changes
-	d := testDNSCfg(up.addr)
-	g.DNSProxy, g.DNS = true, &d
+	g.Interface = "ntpdirnone0" // no such interface: the engine starts and idles, nothing on the host changes
+	d := testNTPCfg(up.addr)
+	g.NTP = &d
 	dc := newDaemonConfig()
 	dc.Groups = []GroupConfig{g}
 	if err := dc.Validate(); err != nil {
@@ -64,12 +64,12 @@ func TestWarmupCancelAndFloor(t *testing.T) {
 	warmEvery, warmFloor, warmMax = 20*time.Millisecond, 200*time.Millisecond, 10*time.Second
 	defer func() { warmEvery, warmFloor, warmMax = oldE, oldF, oldM }()
 
-	good, bad := newFakeDNS(t), newFakeDNS(t)
+	good, bad := newFakeNTP(t), newFakeNTP(t)
 	bad.mode.Store(2)
 	g := defaultGroup()
-	g.Interface = "dnsdirnone0"
-	d := testDNSCfg(good.addr, bad.addr)
-	g.DNSProxy, g.DNS = true, &d
+	g.Interface = "ntpdirnone0"
+	d := testNTPCfg(good.addr, bad.addr)
+	g.NTP = &d
 	dc := newDaemonConfig()
 	dc.Groups = []GroupConfig{g}
 	if err := dc.Validate(); err != nil {
@@ -117,9 +117,9 @@ func TestWarmupCancelAndFloor(t *testing.T) {
 
 	// nothing to wait for (no DNS servers configured yet): starts at once
 	g2 := defaultGroup()
-	g2.Interface = "dnsdirnone0"
-	d2 := testDNSCfg()
-	g2.DNS = &d2
+	g2.Interface = "ntpdirnone0"
+	d2 := testNTPCfg()
+	g2.NTP = &d2
 	dc2 := newDaemonConfig()
 	dc2.Groups = []GroupConfig{g2}
 	if err := dc2.Validate(); err != nil {

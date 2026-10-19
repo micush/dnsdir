@@ -23,10 +23,10 @@ func newTestUpdater(t *testing.T) *Updater {
 
 func good(ver string) []srcFile {
 	return []srcFile{
-		{"dnsdir/source/go.mod", []byte("module dnsdir\n\ngo 1.24\n"), 0o644},
-		{"dnsdir/source/main.go", []byte("package main\nfunc main(){}\n"), 0o644},
-		{"dnsdir/source/VERSION", []byte(ver + "\n"), 0o644},
-		{"dnsdir/source/webui/app.js", []byte("//"), 0o644},
+		{"ntpdir/source/go.mod", []byte("module ntpdir\n\ngo 1.24\n"), 0o644},
+		{"ntpdir/source/main.go", []byte("package main\nfunc main(){}\n"), 0o644},
+		{"ntpdir/source/VERSION", []byte(ver + "\n"), 0o644},
+		{"ntpdir/source/webui/app.js", []byte("//"), 0o644},
 	}
 }
 
@@ -85,19 +85,19 @@ func TestUpdateArchiveSafety(t *testing.T) {
 		}
 	}
 	base := good("5")
-	bad("path traversal", append(append([]srcFile{}, base...), srcFile{"dnsdir/../../etc/evil", []byte("x"), 0o644}), "escapes")
+	bad("path traversal", append(append([]srcFile{}, base...), srcFile{"ntpdir/../../etc/evil", []byte("x"), 0o644}), "escapes")
 	bad("absolute path", append(append([]srcFile{}, base...), srcFile{"/etc/evil", []byte("x"), 0o644}), "absolute")
-	bad("backslash", append(append([]srcFile{}, base...), srcFile{"dnsdir\\evil", []byte("x"), 0o644}), "unsafe")
-	bad("no go.mod", base[1:], "not a dnsdir source tree")
-	bad("wrong module", []srcFile{{"go.mod", []byte("module other\n"), 0o644}, base[1], base[2]}, "not a dnsdir source tree")
+	bad("backslash", append(append([]srcFile{}, base...), srcFile{"ntpdir\\evil", []byte("x"), 0o644}), "unsafe")
+	bad("no go.mod", base[1:], "not a ntpdir source tree")
+	bad("wrong module", []srcFile{{"go.mod", []byte("module other\n"), 0o644}, base[1], base[2]}, "not a ntpdir source tree")
 	bad("no main", []srcFile{base[0], base[2]}, "main.go missing")
-	bad("bad version", []srcFile{base[0], base[1], {"dnsdir/source/VERSION", []byte("v5"), 0o644}}, "VERSION")
-	bad("semver", []srcFile{base[0], base[1], {"dnsdir/source/VERSION", []byte("1.2.3"), 0o644}}, "VERSION")
+	bad("bad version", []srcFile{base[0], base[1], {"ntpdir/source/VERSION", []byte("v5"), 0o644}}, "VERSION")
+	bad("semver", []srcFile{base[0], base[1], {"ntpdir/source/VERSION", []byte("1.2.3"), 0o644}}, "VERSION")
 	// symlink entries are refused
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
-	tw.WriteHeader(&tar.Header{Name: "dnsdir/link", Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd"})
+	tw.WriteHeader(&tar.Header{Name: "ntpdir/link", Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd"})
 	tw.Close()
 	gz.Close()
 	if _, err := u.ExtractSource(buf.Bytes()); err == nil || !strings.Contains(err.Error(), "not a regular file") {
@@ -107,7 +107,7 @@ func TestUpdateArchiveSafety(t *testing.T) {
 		t.Error("garbage upload")
 	}
 	// size caps
-	huge := append(append([]srcFile{}, base...), srcFile{"dnsdir/big", bytes.Repeat([]byte("a"), maxSourceFile+1), 0o644})
+	huge := append(append([]srcFile{}, base...), srcFile{"ntpdir/big", bytes.Repeat([]byte("a"), maxSourceFile+1), 0o644})
 	bad("huge file", huge, "too large")
 	if u.SourceVersion() != "" {
 		t.Error("a rejected upload must not leave a staged tree behind")
@@ -156,7 +156,7 @@ func realTree(t *testing.T, ver string) []srcFile {
 			}
 			return nil
 		}
-		if d.Name() == "dnsdir" || strings.HasSuffix(p, ".tgz") || strings.HasSuffix(p, ".tmp") {
+		if d.Name() == "ntpdir" || strings.HasSuffix(p, ".tgz") || strings.HasSuffix(p, ".tmp") {
 			return nil
 		}
 		b, err := os.ReadFile(p)
@@ -168,7 +168,7 @@ func realTree(t *testing.T, ver string) []srcFile {
 		if rel == "source/VERSION" {
 			b = []byte(ver + "\n")
 		}
-		files = append(files, srcFile{"dnsdir/" + rel, b, 0o644})
+		files = append(files, srcFile{"ntpdir/" + rel, b, 0o644})
 		return nil
 	})
 	if err != nil {
@@ -193,7 +193,7 @@ func TestUpdateBuildApplyAndRollbackGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	// stand in for the running executable
-	exe := filepath.Join(t.TempDir(), "dnsdir")
+	exe := filepath.Join(t.TempDir(), "ntpdir")
 	os.WriteFile(exe, []byte("#!/bin/sh\necho old\n"), 0o755)
 	u.exePath = func() (string, error) { return exe, nil }
 
@@ -202,10 +202,10 @@ func TestUpdateBuildApplyAndRollbackGuard(t *testing.T) {
 		t.Fatalf("apply: %v %q", err, got)
 	}
 	out, err := exec.Command(exe, "--version").Output()
-	if err != nil || strings.TrimSpace(string(out)) != "dnsdir v"+next {
+	if err != nil || strings.TrimSpace(string(out)) != "ntpdir v"+next {
 		t.Fatalf("the executable must now be the new build: %q %v", out, err)
 	}
-	prev, _ := os.ReadFile(filepath.Join(u.dir, "dnsdir.prev"))
+	prev, _ := os.ReadFile(filepath.Join(u.dir, "ntpdir.prev"))
 	if !strings.Contains(string(prev), "echo old") {
 		t.Fatal("the previous binary must be kept for rollback")
 	}
@@ -273,7 +273,7 @@ func TestNewMgmtMakesPathsAbsolute(t *testing.T) {
 	}
 	defer os.Chdir(wd)
 	dc := newDaemonConfig()
-	mg, err := NewMgmt("dnsdir.conf", "state", dc)
+	mg, err := NewMgmt("ntpdir.conf", "state", dc)
 	if err != nil {
 		t.Fatal(err)
 	}

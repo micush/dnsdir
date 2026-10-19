@@ -131,7 +131,7 @@ func TestAllAnycastStatesSharedAddress(t *testing.T) {
 		{GroupID: 1, Paused: true, ExtraVIPs: []string{"10.250.250.250"}},
 		{GroupID: 2, ExtraVIPs: []string{"10.250.250.250", "10.250.250.251"}},
 	}}}
-	a := newAnycastSet(2, []string{"10.250.250.250"}, func() *Pool { return nil }, func() int { return 0 })
+	a := newAnycastSet(2, []string{"10.250.250.250"}, func() *Pool { return nil })
 	s.anycast[2] = a
 	anycastReg.Lock()
 	anycastReg.claims["10.250.250.250"] = map[int]*anycastClaim{2: {want: true}}

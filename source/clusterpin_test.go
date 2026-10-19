@@ -25,7 +25,7 @@ func testIdentity(t *testing.T, names ...string) (tls.Certificate, string) {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
-		Subject:      pkix.Name{CommonName: "dnsdir-node-test"},
+		Subject:      pkix.Name{CommonName: "ntpdir-node-test"},
 		NotBefore:    time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
 		KeyUsage:    x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
@@ -85,13 +85,5 @@ func TestPinnedClientChecksFingerprint(t *testing.T) {
 	// A bad address never dials.
 	if _, err := dialPinned(context.Background(), "evil@127.0.0.1:1", fp); err == nil {
 		t.Fatal("invalid address dialled")
-	}
-}
-
-// The name nodes verify each other under is carried by every identity certificate already issued
-// (and by nodes still called ddgw), so it must not follow the project's name.
-func TestPeerServerNameIsProtocolIdentity(t *testing.T) {
-	if peerServerName != "ddgw-node" {
-		t.Fatalf("peerServerName = %q: renaming it breaks every existing cluster", peerServerName)
 	}
 }

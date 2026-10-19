@@ -4,7 +4,7 @@
 
 (() => {
   const POLL_MS = 2000;
-  const state = { topo: { list: [], gid: null, action: null }, session: null, tab: "topology", timer: null, cfg: null, cfgMode: "form", cfgInfo: null,
+  const state = { prefill: {}, topo: { list: [], gid: null, action: null }, session: null, tab: "topology", timer: null, cfg: null, cfgMode: "form", cfgInfo: null,
     target: null, nodes: [], clustered: false }; // target: address of the node being driven, null = this one
   const root = document.getElementById("app");
 
@@ -1365,7 +1365,30 @@
     const gwItems = (g) => [["Statistics", () => gatewayStats(g)], "-", ["Edit", () => gatewayForm(g)], ["Add DNS server", () => serverForm(g)], ["Add anycast address", () => anycastForm(g)],
       ...(g.real_macs ? [] : [["Test virtual MACs", () => vmacTest(g)]]), ...addNodeItems(g),
       ...pauseItems("", (sc) => !!g[sc === "all" ? "paused_all" : "paused"], (sc, p) => pauseGateway(g, sc, p)), "-", ["Delete", delSel, "danger"]];
-    const srvItems = (g, addr) => [["Statistics", () => serverStats(g, addr)], "-", ["Edit", () => serverForm(g, addr)], ["Add domain", () => domainForm(g, addr, null)],
+    // a server's address as the packet filter and the log search want it: the host, and the port its queries go to
+    const srvTarget = (addr) => {
+      let a = String(addr).trim(), port = 53;
+      const m = /^(tls|https):\/\//i.exec(a);
+      if (m) { port = m[1].toLowerCase() === "tls" ? 853 : 443; a = a.slice(m[0].length); }
+      a = a.replace(/\/.*$/, "");
+      let host = a;
+      const b = /^\[([^\]]+)\](?::(\d+))?$/.exec(a);
+      if (b) { host = b[1]; if (b[2]) port = Number(b[2]); }
+      else if ((a.match(/:/g) || []).length === 1) { const i = a.indexOf(":"); host = a.slice(0, i); port = Number(a.slice(i + 1)) || port; }
+      return { host, port, ip: /^[0-9.]+$/.test(host) || host.includes(":") };
+    };
+    // Monitor ▸ Capture with the filter for this server filled in, ready for Start.  The packet filter works on addresses, so a server
+    // given by host name is looked up first (the node does it; IPv4 preferred); if that fails, only the port is filtered on
+    const goCapture = async (addr) => {
+      const t = srvTarget(addr);
+      let ip = t.ip ? t.host : "";
+      if (!ip) { try { const r = (await api("GET", "/api/dnslookup?lookup=" + encodeURIComponent(t.host))).data; if (r && r.found && r.addr) ip = r.addr; } catch (_) { /* no address: filter on the port */ } }
+      state.prefill.capture = (ip ? "host " + ip + " and " : "") + "port " + t.port;
+      selectTab("capture");
+    };
+    // Monitor ▸ Log searched for this server
+    const goLog = (addr) => { state.prefill.log = srvTarget(addr).host; selectTab("log"); };
+    const srvItems = (g, addr) => [["Statistics", () => serverStats(g, addr)], ["Capture", () => goCapture(addr)], ["Logs", () => goLog(addr)], "-", ["Edit", () => serverForm(g, addr)], ["Add domain", () => domainForm(g, addr, null)],
       ...pauseItems("", (sc) => ((sc === "all" ? (g.dns || cv.cfg.dns || {}).paused_servers : cv.cfg.paused_servers_here) || []).includes(addr), (sc, p) => pauseServer(g, addr, sc, p), lastServerWhy(g, addr)), "-", ["Delete", delSel, "danger"]];
     // Pause / resume announcing one anycast address: on this node only (kept in this node's own settings) or on every node (shared)
     const anyPauseList = (g, scope) => (scope === "all" ? "paused_vips" : "paused_vips_here");
@@ -2184,7 +2207,7 @@
     const empty = h("div", { class: "policy-empty" }, "");
     const wrap = h("div", { class: "policy-wrap" }, tbl, empty);
 
-    const filter = h("input", { type: "text", class: "policy-filter", placeholder: "Filter rows…  or  test:www.example.com [client address]", title: "Type text to keep the rows with it in any cell. test:NAME keeps the rows that match that name (any client); test:NAME 10.1.1.1 only those that also match that client. The first of them answers the query.", "aria-label": "Filter policy rows", autocomplete: "off", spellcheck: "false" });
+    const filter = h("input", { type: "text", class: "policy-filter", placeholder: "Filter or test rows", title: "Type text to keep the rows with it in any cell. test:NAME keeps the rows that match that name (any client); test:NAME 10.1.1.1 only those that also match that client. The first of them answers the query.", "aria-label": "Filter policy rows", autocomplete: "off", spellcheck: "false" });
     const count = h("span", { class: "policy-count muted" }, "");
     const sizeSel = h("select", { "aria-label": "Rows per page" }, [25, 50, 100, 250, 500].map((n) => h("option", { value: String(n) }, n + " per page")));
     sizeSel.value = String(size);
@@ -4225,6 +4248,7 @@
         count = sel("Lines", [["200", "200 lines"], ["1000", "1000 lines"], ["5000", "5000 lines"]], kept.count, () => { kept.count = count.value; load(); });
         search = h("input", { type: "search", placeholder: "Filter words…", "aria-label": "Filter text", spellcheck: "false", class: "grow",
           oninput: () => { kept.q = search.value; clearTimeout(timer); timer = setTimeout(load, 300); } });
+        if (state.prefill.log != null) { kept.q = state.prefill.log; state.prefill.log = null; }   // sent here from a server's menu
         search.value = kept.q;
         live = h("input", { type: "checkbox", checked: kept.live, onchange: () => { kept.live = live.checked; } });
         tsBtn = h("button", { class: "btn", type: "button", onclick: tshoot }, "tshoot");
@@ -4350,6 +4374,7 @@
         iface = ifaceSelect();
         filter = h("input", { type: "text", class: "grow", placeholder: "Filter, e.g. host 10.20.0.205 and port 53", "aria-label": "Capture filter", spellcheck: "false", autocomplete: "off", maxlength: "300",
           onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); (cluster() ? goAll : start)(); } } });
+        if (state.prefill.capture) { filter.value = state.prefill.capture; state.prefill.capture = null; }   // sent here from a server's menu: only Start is left
         if (cluster()) {
           durSel = h("select", { "aria-label": "How long" }, [["5", "5 seconds"], ["10", "10 seconds"], ["30", "30 seconds"], ["60", "60 seconds"]].map(([v, t]) => h("option", { value: v }, t)));
           durSel.value = "10";

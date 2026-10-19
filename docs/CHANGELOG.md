@@ -1,5 +1,20 @@
 # Changelog
 
+## [v484] - 2026-10-19 — Capture from a server given by name
+
+### Changed
+- **Right-click a server ▸ Capture** for a server written as a host name now looks the name up (the node does it, IPv4 preferred) and fills in `host ADDRESS and port N`; only when the name cannot be resolved is the filter just `port N`.
+
+## [v483] - 2026-10-19 — Capture and Logs from a server's menu
+
+### Added
+- **Right-click a server on the Topology page ▸ Capture** opens Monitor ▸ Capture with the filter `host SERVERIP and port 53` filled in (the server's own port when it has one; 853 for `tls://`, 443 for `https://`; a server given by host name gets just `port N`, since the packet filter works on addresses). Press Start.
+- **Right-click a server ▸ Logs** opens Monitor ▸ Log with the server's address already in the search box.
+## [v482] - 2026-10-19 — Shorter hint in the policy filter box
+
+### Changed
+- The hint in the policy filter box reads "Filter or test rows" (the long one was cut off). The tooltip of the box still explains `test:NAME [client]`.
+
 ## [v481] - 2026-10-19 — Test a name against the policy table
 
 ### Added

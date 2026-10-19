@@ -1,5 +1,10 @@
 # Changelog
 
+## [v486] - 2026-10-19 — Capture keeps its filter when the node changes
+
+### Fixed
+- **Monitor ▸ Capture**: choosing another node in the Node menu cleared the filter box. It is kept now, like the search of Monitor ▸ Log (which already kept it, with the level, time range and line count).
+
 ## [v485] - 2026-10-19 — One Start/Stop button in Capture
 
 ### Changed

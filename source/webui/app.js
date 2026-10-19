@@ -4274,6 +4274,7 @@
   // One node: a tcpdump-like capture on the node picked in the Node menu, shown live and downloadable as a .tgz (one .pcap in it).
   // Cluster: the same capture on every node at once for a chosen time, one .pcap per node in a .tgz.
   VIEWS.capture = (() => {
+    let keptFilter = "";   // the filter text survives a change of node (the page is built again for each)
     let status, iface, filter, info, box, startBtn, dlBtn, ifs = null, cursor = 0, shown = 0, last = null, running = false;
     let job = null, jobBox, durSel, goBtn, dlJob;
     const ROWS = 1500;
@@ -4375,7 +4376,10 @@
         iface = ifaceSelect();
         filter = h("input", { type: "text", class: "grow", placeholder: "Filter, e.g. host 10.20.0.205 and port 53", "aria-label": "Capture filter", spellcheck: "false", autocomplete: "off", maxlength: "300",
           onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); (cluster() ? goAll : start)(); } } });
+        filter.value = keptFilter;
         if (state.prefill.capture) { filter.value = state.prefill.capture; state.prefill.capture = null; }   // sent here from a server's menu: only Start is left
+        keptFilter = filter.value;
+        filter.addEventListener("input", () => { keptFilter = filter.value; });
         if (cluster()) {
           durSel = h("select", { "aria-label": "How long" }, [["5", "5 seconds"], ["10", "10 seconds"], ["30", "30 seconds"], ["60", "60 seconds"]].map(([v, t]) => h("option", { value: v }, t)));
           durSel.value = "10";

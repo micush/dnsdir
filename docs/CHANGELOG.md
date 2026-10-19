@@ -1,5 +1,10 @@
 # Changelog
 
+## [v476] - 2026-10-18 — Gateways are listed alphabetically
+
+### Changed
+- **The gateways under Topology are listed in alphabetical order** (by the name shown, numbers in natural order so 10.0.0.2 comes before 10.0.0.10), instead of in the order they were created. The first one in the list is the one opened when none was chosen.
+
 ## [v475] - 2026-10-18 — Failures are remembered for a minute
 
 ### Added

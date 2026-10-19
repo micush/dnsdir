@@ -10,7 +10,8 @@ import (
 
 // A gateway's graph is drawn from every node's history: which node a client's queries land on is up to the clients and the
 // network, so one node alone shows holes whenever the traffic went elsewhere. The node asked sums its own buckets with
-// every reachable peer's. Servers and domains stay per node (each node probes them itself).
+// every reachable peer's. A server's or a domain's is kept by each node that probes it, which is the nodes that serve the
+// gateway it is on: when the node asked has none, it asks the others (see the stats operation).
 
 type histAsk struct {
 	Key  string `json:"key"`
@@ -18,10 +19,10 @@ type histAsk struct {
 	To   int64  `json:"to"`
 }
 
-// handleHist answers a peer: this node's own buckets for a gateway (never forwarded on, so nodes cannot ask each other in circles).
+// handleHist answers a peer: this node's own buckets for a gateway, a server or a domain (never forwarded on, so nodes cannot ask each other in circles).
 func (c *Cluster) handleHist(rw http.ResponseWriter, r *http.Request, caller ClusterPeer, body []byte) {
 	var a histAsk
-	if json.Unmarshal(body, &a) != nil || kindOf(a.Key) != "gateway" {
+	if json.Unmarshal(body, &a) != nil || a.Key == "" {
 		jsonError(rw, http.StatusBadRequest, "bad request")
 		return
 	}
@@ -57,7 +58,11 @@ func (c *Cluster) clusterStats(key string, from, to time.Time) (ServerStatsResul
 	}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	nodes := 1
+	gw := kindOf(key) == "gateway"
+	nodes := 1 // a server's or a domain's history is counted only on the nodes that have one
+	if !gw && !mine.Known {
+		nodes = 0
+	}
 	ask := histAsk{Key: key, From: mine.From, To: mine.To}
 	for _, p := range peers {
 		wg.Add(1)
@@ -73,7 +78,9 @@ func (c *Cluster) clusterStats(key string, from, to time.Time) (ServerStatsResul
 				off++ // an older version without this call, or no answer: shown as a node missing, not as an error
 				return
 			}
-			nodes++
+			if gw || raw.Known {
+				nodes++
+			}
 		}(p)
 	}
 	wg.Wait()

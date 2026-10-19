@@ -378,7 +378,7 @@ func TestGatewayHistoryMergesNodes(t *testing.T) {
 	}
 }
 
-// The peer call answers only for gateways, with this node's own buckets.
+// The peer call answers with this node's own buckets, for a gateway, a server or a domain.
 func TestClusterHistHandler(t *testing.T) {
 	c := &Cluster{}
 	srvhist.series(gwKey(9991)).addOK()
@@ -394,9 +394,11 @@ func TestClusterHistHandler(t *testing.T) {
 	if code, r := ask(gwKey(9991)); code != 200 || !r.Known || len(r.B) == 0 || r.Key != gwKey(9991) {
 		t.Fatalf("gateway: %d %+v", code, r)
 	}
-	for _, k := range []string{"192.0.2.1:53", "dom:192.0.2.1:53|x|A", ""} {
-		if code, _ := ask(k); code != http.StatusBadRequest {
-			t.Errorf("%q answered (%d)", k, code)
-		}
+	srvhist.series("192.0.2.1:53").addPrOK()
+	if code, r := ask("192.0.2.1:53"); code != 200 || !r.Known {
+		t.Errorf("a server's history is answered too: %d %+v", code, r)
+	}
+	if code, _ := ask(""); code != http.StatusBadRequest {
+		t.Errorf("an empty key answered (%d)", code)
 	}
 }

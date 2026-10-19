@@ -455,7 +455,16 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		if kindOf(addr) == "gateway" && m.cl != nil {
 			return m.cl.clusterStats(addr, from, to) // every node's history of the gateway, not just this one's
 		}
-		return srvhist.Query(addr, from, to)
+		res, err := srvhist.Query(addr, from, to)
+		if err == nil && !res.Known && m.cl != nil && m.cl.Enabled() {
+			// this node has nothing for it: a node probes only the servers of the gateways it serves, so the history of a
+			// server of another gateway is on the nodes that serve that one
+			if cr, cerr := m.cl.clusterStats(addr, from, to); cerr == nil && cr.Known {
+				cr.ViaCluster = true
+				return cr, nil
+			}
+		}
+		return res, err
 	// the recent dynamic DNS updates, newest first
 	case "dnsupdates.get":
 		return struct {

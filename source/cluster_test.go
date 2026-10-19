@@ -1001,3 +1001,32 @@ func TestHandOverPrimary(t *testing.T) {
 		t.Fatalf("a replica handed something over: %q", to)
 	}
 }
+
+// A server's statistics count the nodes that have a history of it (in one process the two nodes share the one history, so
+// both count), and a node with none of its own is not counted.
+func TestClusterServerStatsCountNodesWithHistory(t *testing.T) {
+	failDelay = 0
+	a, b := newTNode(t, "A"), newTNode(t, "B")
+	a.join2(t, b)
+	a.sync()
+	b.sync()
+	key := "192.0.2.77:53"
+	for i := 0; i < 4; i++ {
+		srvhist.series(key).addPrOK()
+	}
+	now := time.Now()
+	r, err := a.mg.cl.clusterStats(key, now.Add(-time.Hour), now)
+	if err != nil || !r.Known || r.Nodes != 2 || r.NodesOff != 0 {
+		t.Fatalf("two nodes with history: %+v %v", r, err)
+	}
+	none := "192.0.2.78:53"
+	r, err = a.mg.cl.clusterStats(none, now.Add(-time.Hour), now)
+	if err != nil || r.Known || r.Nodes != 0 {
+		t.Fatalf("nobody has it: %+v %v", r, err)
+	}
+	// the operation does not mark a server this node has itself as coming from the cluster
+	res, err := a.mg.Op("dns.serverstats", json.RawMessage(`{"addr":"`+key+`","from":"1h"}`), "t")
+	if err != nil || res.(ServerStatsResult).ViaCluster || !res.(ServerStatsResult).Known {
+		t.Fatalf("op: %+v %v", res, err)
+	}
+}

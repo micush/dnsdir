@@ -1317,7 +1317,7 @@
         const r = (await api("GET", "/api/serverstats?addr=" + encodeURIComponent(spec.key) + "&from=" + rng)).data;
         if (dlg !== d || d.rng !== rng) return;   // closed, or another range was chosen meanwhile
         if (!r.known) { clear(body); sum.hidden = false; sum.textContent = "Nothing recorded for this " + spec.kind + " yet (the daemon keeps 7 days, and only once it has something to count)."; return; }
-        d.nodes.textContent = r.kind !== "gateway" ? "" : r.nodes_off > 0 ? "Nodes counted: " + r.nodes + " of " + (r.nodes + r.nodes_off) + " (" + r.nodes_off + " not answering)" : r.nodes > 1 ? "All " + r.nodes + " nodes counted together" : "";
+        d.nodes.textContent = r.kind !== "gateway" ? (r.via_cluster ? "Counted on " + r.nodes + (r.nodes === 1 ? " other node" : " other nodes") + " (this node does not probe it)" : "") : r.nodes_off > 0 ? "Nodes counted: " + r.nodes + " of " + (r.nodes + r.nodes_off) + " (" + r.nodes_off + " not answering)" : r.nodes > 1 ? "All " + r.nodes + " nodes counted together" : "";
         const f1 = (v) => (v < 0 ? "no data" : v.toFixed(2));
         const dd = { start: r.start, step: r.step, from: r.from, to: r.to };
         const lat = (name) => tsChart(name, dd, [

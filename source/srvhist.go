@@ -292,6 +292,7 @@ type ServerStatsResult struct {
 	Kind         string  `json:"kind"`                     // server | gateway | domain
 	Nodes        int     `json:"nodes"`                    // how many nodes' history this is (a gateway's is every reachable node's)
 	NodesOff     int     `json:"nodes_off"`                // cluster nodes that could not be asked
+	ViaCluster   bool    `json:"via_cluster,omitempty"`    // a server's or domain's: this node has no history of it, these are the other nodes' (Nodes of them)
 }
 
 // srvAcc is the sum of what one history key recorded over a bucket (or a whole range).

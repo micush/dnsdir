@@ -1,5 +1,10 @@
 # Changelog
 
+## [v474] - 2026-10-18 — Server statistics of a gateway this node does not serve
+
+### Fixed
+- **Statistics for a server on a gateway this node is not part of said "Nothing recorded for this server yet"**: a node probes only the servers of the gateways it serves, so it has no history of the others. When the node you are looking at has none, it now asks the other nodes that do and shows their history added together, with the line "Counted on N other node(s) (this node does not probe it)" above the graphs (`--server-stats` too). The history a node has itself is shown as before. The cluster call that fetches the buckets now answers for a server or a domain as well as a gateway; a node on an older version does not answer it and is counted as not answering.
+
 ## [v473] - 2026-10-18 — The sign-in lockout and minimum password length are replicated
 
 ### Changed

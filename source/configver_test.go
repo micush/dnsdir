@@ -37,7 +37,7 @@ func TestVersionRecordDedupeAndSummary(t *testing.T) {
 	m2, _ := vs.Record(cfgBytes(t, func(d *DaemonConfig) {
 		d.Groups[0].Priority = 200
 		d.Groups[0].Key = "secret-new"
-		d.NTP.Servers = []string{"10.0.0.1"}
+		d.DNS.Servers = []string{"10.0.0.1"}
 	}), "alice", "bump", false)
 	if m2 == nil {
 		t.Fatal("changed config must be recorded")

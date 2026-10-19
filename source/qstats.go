@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"net/netip"
@@ -13,15 +14,15 @@ import (
 	"time"
 )
 
-// Request statistics for the Monitor → Statistics page.  Everything is kept in memory for
+// Query statistics for the Monitor → Statistics page.  Everything is kept in memory for
 // the last qsRetain (30 days) and saved to disk by persist.go, so a restart does not lose it.
 //
-//   - Totals by outcome, one slot per minute (the line chart and the tiles).
-//   - NTP versions, address families, clients and upstream servers (the donuts and the top lists) in two
+//   - Totals by response code, one slot per minute (the line chart and the tiles).
+//   - Query types, transports, clients and domains (the donuts and the top lists) in two
 //     tiers: 10-minute slots for the last day, so a short range is exact, and hour slots for
 //     the whole 30 days.  A range inside the last day reads the fine tier, a longer one the
-//     coarse tier.  The distinct clients and servers per slot are capped, so a flood of
-//     requests from forged addresses cannot grow memory without bound; the rest count as "(others)".
+//     coarse tier.  The distinct clients and domains per slot are capped, so a flood of
+//     random names cannot grow memory without bound; the rest count as "(others)".
 
 const (
 	qsRetain      = 30 * 24 * time.Hour
@@ -32,9 +33,9 @@ const (
 	qsCoarseSpan  = 60 // minutes per coarse top-list slot (older data, and longer ranges)
 	qsCoarseSlots = 30 * 24
 	qsCapClients  = 300
-	qsCapServers  = 100
+	qsCapDomains  = 600
 	qsKeepResult  = 500  // entries per top list in a reply
-	qsKeepPicked  = 5000 // entries in the list of what a picked client asked for, or of who asked for a picked server
+	qsKeepPicked  = 5000 // entries in the list of what a picked client asked for, or of who asked for a picked domain
 	qsMaxPoints   = 800
 	qsOthers      = "(others)"
 	qsRDNSTTL     = 10 * time.Minute
@@ -43,37 +44,84 @@ const (
 )
 
 type qsMin struct {
-	stamp                              int64 // minutes since the epoch; a slot with another stamp is stale
-	total, answered, failed, kod, refd uint32
+	stamp                                      int64 // minutes since the epoch; a slot with another stamp is stale
+	total, noerror, servfail, nxdomain, refuse uint32
+	other                                      uint32
+	updates, updfail                           uint32 // dynamic DNS updates (also counted in total) and those the primary did not accept
+	chit, cmiss                                uint32 // lookups of the answer cache: answered from it / not found (so asked upstream)
 }
 
-// The outcomes the top lists are kept apart by, so a tile can show who asked and was, say, turned away.  The
-// order is the index into qsTop.c.
+// The kinds of answer the top lists are kept apart by, so a tile can show who asked for
+// what and got, say, NXDOMAIN.  The order is the index into qsTop.c.
 const (
-	outAnswered = iota // chrony answered
-	outFailed          // (not used with chrony)
-	outKoD             // (not used with chrony)
-	outRefused         // chrony dropped the request: not allowed, or over the rate limit
+	qcNoError = iota
+	qcServFail
+	qcNXDomain
+	qcRefused
+	qcOther
+	qcUpdate // dynamic DNS updates are a kind of their own, whatever the primary answered
 	qcCount
 )
 
-var qcNames = [qcCount]string{"answered", "failed", "kod", "refused"}
+var qcNames = [qcCount]string{"noerror", "servfail", "nxdomain", "refused", "other", "update"}
 
-// qsCaps are the most distinct clients and servers one slot keeps per outcome; anything beyond counts as
-// "(others)".  Failures are the rare kind, so they get less room.
-var qsCaps = [qcCount][2]int{
-	outAnswered: {qsCapClients, qsCapServers},
-	outFailed:   {100, 50},
-	outKoD:      {100, 50},
-	outRefused:  {200, 10},
+// qcOf maps a response code to its kind.
+func qcOf(rcode int) int {
+	switch rcode {
+	case 0:
+		return qcNoError
+	case 2:
+		return qcServFail
+	case 3:
+		return qcNXDomain
+	case 5:
+		return qcRefused
+	}
+	return qcOther
 }
 
-// qsKind is the top lists of one outcome in one slot.
+// qsCaps are the most distinct clients and domains one slot keeps per kind of answer;
+// anything beyond counts as "(others)".  Failures are the rare kind, so they get less
+// room — but a flood of random names is mostly NXDOMAIN, so that one keeps a good share.
+var qsCaps = [qcCount][2]int{
+	qcNoError:  {qsCapClients, qsCapDomains},
+	qcServFail: {100, 200},
+	qcNXDomain: {150, 300},
+	qcRefused:  {100, 200},
+	qcOther:    {50, 100},
+	qcUpdate:   {100, 100},
+}
+
+// qsKind is the top lists of one kind of answer in one slot.
 type qsKind struct {
 	clients  map[string]uint32
-	servers  map[string]uint32
-	versions map[string]uint32
-	v4, v6   uint32
+	domains  map[string]uint32
+	types    map[string]uint32
+	udp, tcp uint32
+	// proto splits those by the IP version of the client: index 0 UDP over IPv4, 1 UDP over IPv6, 2 TCP over IPv4,
+	// 3 TCP over IPv6 (see protoIdx).  Counts saved by an older version have no split: what udp and tcp hold beyond
+	// the split is shown as plain UDP and TCP.
+	proto [4]uint32
+}
+
+// protoNames are the names of the proto counters, in index order.
+var protoNames = [4]string{"UDP · IPv4", "UDP · IPv6", "TCP · IPv4", "TCP · IPv6"}
+
+// protoOrder is every name a transport slice can have, in the order they are listed: the split ones and, from counts made
+// before the split existed (or a node on an older version), plain UDP and TCP.
+var protoOrder = []string{"UDP · IPv4", "UDP · IPv6", "UDP", "TCP · IPv4", "TCP · IPv6", "TCP"}
+
+// protoIdx is the index into qsKind.proto of a query: its transport and whether the client address is IPv6 (an unknown
+// address counts as IPv4).
+func protoIdx(tcp bool, client netip.Addr) int {
+	i := 0
+	if tcp {
+		i = 2
+	}
+	if client.IsValid() && client.Unmap().Is6() {
+		i++
+	}
+	return i
 }
 
 type qsTop struct {
@@ -99,6 +147,8 @@ type QStats struct {
 	names map[string]string // names given by hand (Settings), under rmu
 	rdns  map[string]rdnsEntry
 	rwork map[string]bool
+	// ptrVia asks the DNS servers dnsdir forwards to for the names of an address (rdns.go); set by the daemon.
+	ptrVia func(ctx context.Context, ip string) []string
 }
 
 type rdnsEntry struct {
@@ -110,28 +160,128 @@ func NewQStats() *QStats {
 	return &QStats{pairs: newPairStore(), start: time.Now(), now: time.Now, rdns: map[string]rdnsEntry{}, rwork: map[string]bool{}}
 }
 
-// qstats is the daemon-wide collector, fed by every NTP frontend.
+// qstats is the daemon-wide collector, fed by every DNS frontend.
 var qstats = NewQStats()
 
-// Record counts one client request: who asked, which upstream server answered it (empty when none did), the NTP
-// version of the request and how it ended (an out* constant).
-func (s *QStats) Record(client netip.Addr, server string, version int, outcome int) {
-	s.enqueue(qEvent{t: s.now().Unix(), client: client, server: server, version: uint8(version), outcome: uint8(outcome)})
+// qtUpdate stands for a dynamic DNS update in the statistics (its own "type"; the wire has none).
+const qtUpdate = 65535
+
+var qtypeNames = map[uint16]string{65535: "UPDATE", 1: "A", 2: "NS", 5: "CNAME", 6: "SOA", 12: "PTR", 15: "MX", 16: "TXT", 28: "AAAA", 33: "SRV",
+	35: "NAPTR", 43: "DS", 46: "RRSIG", 48: "DNSKEY", 64: "SVCB", 65: "HTTPS", 99: "SPF", 255: "ANY", 257: "CAA"}
+
+func qtypeName(t uint16) string {
+	if n, ok := qtypeNames[t]; ok {
+		return n
+	}
+	return "TYPE" + strconv.Itoa(int(t))
 }
 
-// RecordN counts n requests of one client that ended the same way (chrony reports totals, not single requests).
-func (s *QStats) RecordN(client netip.Addr, server string, version int, outcome int, n uint32) {
-	if n == 0 {
+// questionOf reads the first question of a DNS message: its name (lower-case, no
+// trailing dot, "." for the root) and type.  ok is false for a message without one.
+func questionOf(q []byte) (name string, qtype uint16, ok bool) {
+	var qi qinfo
+	parseQuestion(q, &qi)
+	if !qi.ok {
+		return "", 0, false
+	}
+	return qi.name(), qi.qtype, true
+}
+
+// qinfo is the first question of a query, read once for everything that needs it (the cache key, the statistics).
+// The name is lower-cased in a buffer inside the struct, so reading it allocates nothing; name() makes the string
+// when one is wanted.
+type qinfo struct {
+	buf     [256]byte
+	n       int    // length of the name in buf; 0 is the root
+	qtype   uint16 //
+	nameEnd int    // offset just after the name in the message
+	ok      bool
+}
+
+func (qi *qinfo) name() string {
+	if qi.n == 0 {
+		return "."
+	}
+	return string(qi.buf[:qi.n])
+}
+
+// parseQuestion fills qi from the first question of q; qi.ok is false for a message without one.
+func parseQuestion(q []byte, qi *qinfo) {
+	qi.ok = false
+	if len(q) < 12 || binary.BigEndian.Uint16(q[4:]) < 1 {
 		return
 	}
-	s.enqueue(qEvent{t: s.now().Unix(), client: client, server: server, version: uint8(version), outcome: uint8(outcome), n: n})
+	n := 0
+	i := 12
+	for {
+		if i >= len(q) {
+			return
+		}
+		l := int(q[i])
+		if l == 0 {
+			i++
+			break
+		}
+		if l&0xC0 != 0 || i+1+l > len(q) {
+			return
+		}
+		if n > 0 {
+			if n >= len(qi.buf) {
+				return
+			}
+			qi.buf[n] = '.'
+			n++
+		}
+		if n+l > 255 {
+			return
+		}
+		for _, c := range q[i+1 : i+1+l] {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			qi.buf[n] = c
+			n++
+		}
+		i += l + 1
+	}
+	if i+2 > len(q) {
+		return
+	}
+	qi.n, qi.qtype, qi.nameEnd, qi.ok = n, binary.BigEndian.Uint16(q[i:]), i, true
+}
+
+// RecordCache counts one lookup of the answer cache (a query that can be cached): hit = answered from it.
+func (s *QStats) RecordCache(hit bool) {
+	var k uint8 = qeCacheMiss
+	if hit {
+		k = qeCacheHit
+	}
+	s.enqueue(qEvent{t: s.now().Unix(), kind: k})
+}
+
+func (s *QStats) applyCache(e qEvent) {
+	m := e.t / 60
+	ms := &s.mins[m%qsMinSlots]
+	if ms.stamp != m {
+		*ms = qsMin{stamp: m}
+	}
+	if e.kind == qeCacheHit {
+		ms.chit++
+	} else {
+		ms.cmiss++
+	}
+}
+
+// Record counts one answered client query.
+func (s *QStats) Record(client netip.Addr, name string, qtype uint16, tcp bool, rcode int) {
+	s.enqueue(qEvent{t: s.now().Unix(), kind: qeQuery, client: client, name: name, qtype: qtype, tcp: tcp, rcode: int32(rcode)})
 }
 
 // qsWhoMax is how many client address strings are kept for reuse (see whoString).
 const qsWhoMax = 4096
 
 // whoString is the text of a client address: made once and reused, since String() allocates every time and the
-// same few clients account for most requests.  The table is emptied when it is full, so a flood of distinct
+// same few clients account for most queries.  The table is emptied when it is full, so a flood of distinct
 // addresses cannot grow it past qsWhoMax.  s.mu is held.
 func (s *QStats) whoString(client netip.Addr) string {
 	if !client.IsValid() {
@@ -149,47 +299,39 @@ func (s *QStats) whoString(client netip.Addr) string {
 	return w
 }
 
-// versionName is how an NTP version shows in the statistics.
-func versionName(v uint8) string {
-	if v >= 1 && v <= 4 {
-		return "NTPv" + strconv.Itoa(int(v))
-	}
-	return "other"
-}
-
-// apply counts one request; s.mu is held.
+// apply counts one query; s.mu is held.
 func (s *QStats) apply(e qEvent) {
-	client, server, kind := e.client, e.server, int(e.outcome)
-	if kind >= qcCount {
-		kind = outFailed
-	}
-	if server == "" {
-		server = "(none)"
-	}
-	n := e.n
-	if n == 0 {
-		n = 1
-	}
+	client, name, qtype, tcp, rcode := e.client, e.name, e.qtype, e.tcp, int(e.rcode)
 	m := e.t / 60
 	who := s.whoString(client)
 	ms := &s.mins[m%qsMinSlots]
 	if ms.stamp != m {
 		*ms = qsMin{stamp: m}
 	}
-	ms.total += n
-	switch kind {
-	case outAnswered:
-		ms.answered += n
-	case outFailed:
-		ms.failed += n
-	case outKoD:
-		ms.kod += n
-	case outRefused:
-		ms.refd += n
+	ms.total++
+	kind := qcOf(rcode)
+	if qtype == qtUpdate { // counted as an update (and in the total), not under the answer the primary gave
+		kind = qcUpdate
+		ms.updates++
+		if rcode != 0 {
+			ms.updfail++
+		}
 	}
-	vn := versionName(e.version)
-	s.pairs.add(e.t, kind, who, server, n)
-	v6 := client.IsValid() && !client.Unmap().Is4()
+	switch kind {
+	case qcUpdate:
+	case qcNoError:
+		ms.noerror++
+	case qcServFail:
+		ms.servfail++
+	case qcNXDomain:
+		ms.nxdomain++
+	case qcRefused:
+		ms.refuse++
+	default:
+		ms.other++
+	}
+	tn := qtypeName(qtype)
+	s.pairs.add(e.t, kind, who, name, 1)
 	for _, tier := range []struct {
 		slots []qsTop
 		span  int64
@@ -201,37 +343,45 @@ func (s *QStats) apply(e qEvent) {
 		}
 		k := &tp.c[kind]
 		if k.clients == nil {
-			k.clients, k.servers, k.versions = map[string]uint32{}, map[string]uint32{}, map[string]uint32{}
+			k.clients, k.domains, k.types = map[string]uint32{}, map[string]uint32{}, map[string]uint32{}
 		}
-		bump(k.clients, who, qsCaps[kind][0], n)
-		bump(k.servers, server, qsCaps[kind][1], n)
-		k.versions[vn] += n
-		if v6 {
-			k.v6 += n
+		bump(k.clients, who, qsCaps[kind][0])
+		bump(k.domains, name, qsCaps[kind][1])
+		k.types[tn]++
+		if tcp {
+			k.tcp++
 		} else {
-			k.v4 += n
+			k.udp++
 		}
+		k.proto[protoIdx(tcp, client)]++
 	}
 }
 
-// Counting a request takes the collector's one lock, and with every worker doing it for every request the lock
-// itself was about 6% of the CPU on a busy node and made the workers wait on each other.  So the workers only
-// append an event to one of a few small buffers, each behind its own lock, and the events are counted in one
-// batch a moment later (or at once, when something reads the statistics).  The count is the same; it just
-// reaches the tables up to qsFlushEvery late.
+// Counting a query takes the collector's one lock, and with every worker doing it for every query (and a second
+// time for the cache) the lock itself was about 6% of the CPU on a busy node and made the workers wait on each
+// other.  So the workers only append an event to one of a few small buffers, each behind its own lock, and the
+// events are counted in one batch a moment later (or at once, when something reads the statistics).  The count is
+// the same; it just reaches the tables up to qsFlushEvery late.
 const (
 	qsShards     = 16
 	qsFlushEvery = 200 * time.Millisecond
 	qsShardMax   = 1 << 15 // events held per shard; a full shard is counted by the caller instead
 )
 
+const (
+	qeQuery = iota
+	qeCacheHit
+	qeCacheMiss
+)
+
 type qEvent struct {
-	t       int64 // unix seconds when it happened
-	client  netip.Addr
-	server  string
-	version uint8
-	outcome uint8
-	n       uint32 // how many requests this event stands for; 0 is one
+	t      int64 // unix seconds when it happened
+	client netip.Addr
+	name   string
+	qtype  uint16
+	rcode  int32
+	kind   uint8
+	tcp    bool
 }
 
 type qsPending struct {
@@ -275,16 +425,20 @@ func (s *QStats) flush() {
 	defer s.mu.Unlock()
 	for _, evs := range batch {
 		for _, e := range evs {
-			s.apply(e)
+			if e.kind == qeQuery {
+				s.apply(e)
+			} else {
+				s.applyCache(e)
+			}
 		}
 	}
 }
 
-func bump(m map[string]uint32, k string, limit int, n uint32) {
+func bump(m map[string]uint32, k string, limit int) {
 	if _, ok := m[k]; !ok && len(m) >= limit {
 		k = qsOthers
 	}
-	m[k] += n
+	m[k]++
 }
 
 // NameCount is one row of a top list.
@@ -299,35 +453,42 @@ type NameCount struct {
 // QStatsResult is the answer to a query: parallel series, one point per Step seconds
 // from Start, plus the totals and top lists over the whole range.
 type QStatsResult struct {
-	Client   string       `json:"client,omitempty"` // when set, Servers lists the servers that answered this client
-	Server   string       `json:"server,omitempty"` // when set, Clients lists whom this server answered
-	Outcome  string       `json:"outcome"`          // the outcome the versions, families and top lists are limited to; empty is all
+	Client   string       `json:"client,omitempty"` // when set, Domains lists what this client asked for
+	Domain   string       `json:"domain,omitempty"` // when set, Clients lists who asked for this domain
+	Rcode    string       `json:"rcode"`            // the answer kind the types, transports and top lists are limited to; empty is all
 	Start    int64        `json:"start"`
 	Step     int          `json:"step"`
 	From     int64        `json:"from"`
 	To       int64        `json:"to"`
 	Since    int64        `json:"since"` // when the daemon started counting
 	Total    []uint64     `json:"total"`
-	Answered []uint64     `json:"answered"`
-	Failed   []uint64     `json:"failed"`
-	KoD      []uint64     `json:"kod"`
+	NoError  []uint64     `json:"no_error"`
+	ServFail []uint64     `json:"server_failure"`
+	NXDomain []uint64     `json:"nx_domain"`
 	Refused  []uint64     `json:"refused"`
+	Other    []uint64     `json:"other"`
+	Updates  []uint64     `json:"updates"` // dynamic DNS updates (a part of Total)
 	Sums     QStatsSums   `json:"sums"`
 	Guard    MemGuardInfo `json:"guard"` // what the memory guard has dropped
-	Versions []NameCount  `json:"versions"`
-	Families []NameCount  `json:"families"`
+	Types    []NameCount  `json:"types"`
+	Protos   []NameCount  `json:"protos"`
 	Clients  []NameCount  `json:"clients"`
-	Servers  []NameCount  `json:"servers"`
+	Domains  []NameCount  `json:"domains"`
 	Cluster  *ClusterInfo `json:"cluster,omitempty"` // set when the numbers are those of several nodes added together
 }
 
 type QStatsSums struct {
 	Total    uint64 `json:"total"`
-	Answered uint64 `json:"answered"`
-	Failed   uint64 `json:"failed"`
-	KoD      uint64 `json:"kod"`
+	NoError  uint64 `json:"no_error"`
+	ServFail uint64 `json:"server_failure"`
+	NXDomain uint64 `json:"nx_domain"`
 	Refused  uint64 `json:"refused"`
-	Clients  int    `json:"clients"` // distinct clients (a lower bound once a slot hit its cap)
+	Other    uint64 `json:"other"`
+	Updates  uint64 `json:"updates"`        // dynamic DNS updates forwarded (a part of Total)
+	UpdFail  uint64 `json:"updates_failed"` // those answered with anything but NOERROR
+	CacheHit uint64 `json:"cache_hits"`     // lookups answered from the answer cache
+	CacheMis uint64 `json:"cache_misses"`   // cacheable lookups it could not answer (hit rate = hits / (hits + misses))
+	Clients  int    `json:"clients"`        // distinct clients (a lower bound once a slot hit its cap)
 }
 
 // stepFor picks the point spacing for a span: a minute up to 2 hours, ten minutes up to
@@ -347,12 +508,12 @@ func stepFor(span time.Duration) int64 {
 // Query returns the statistics for [from, to).  The range is cut to what is retained,
 // and aligned to the step so every node answers with the same points.
 //
-// f.Outcome limits the versions, families, clients and servers to one outcome ("answered", "failed", "kod" or
-// "refused"); empty means every request.  f.Client replaces the server list by the servers that answered that
-// client, f.Server the client list by whom that server answered (both within the outcome).  The time series and
-// the sums always cover everything.
+// f.Rcode limits the types, transports, clients and domains to one kind of answer ("noerror",
+// "servfail", "nxdomain", "refused" or "other"); empty means every query.  f.Client replaces
+// the domain list by what that client asked for, f.Domain the client list by who asked for
+// that domain (both within the answer kind).  The time series and the sums always cover everything.
 func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
-	outcome := f.Outcome
+	rcode := f.Rcode
 	now := s.now()
 	if to.IsZero() || to.After(now) {
 		to = now
@@ -370,12 +531,14 @@ func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
 	if n > qsMaxPoints {
 		n = qsMaxPoints
 	}
-	r := &QStatsResult{Outcome: outcome, Client: f.Client, Server: f.Server, Start: start, Step: int(step), From: from.Unix(), To: to.Unix(), Since: s.start.Unix(),
-		Total: make([]uint64, n), Answered: make([]uint64, n), Failed: make([]uint64, n), KoD: make([]uint64, n), Refused: make([]uint64, n),
-		Versions: []NameCount{}, Families: []NameCount{}, Clients: []NameCount{}, Servers: []NameCount{}}
-	versions, clients, servers := map[string]uint64{}, map[string]uint64{}, map[string]uint64{}
-	var v4, v6 uint64
-	pairServers, pairClients := map[string]uint64{}, map[string]uint64{}
+	r := &QStatsResult{Rcode: rcode, Client: f.Client, Domain: f.Domain, Start: start, Step: int(step), From: from.Unix(), To: to.Unix(), Since: s.start.Unix(),
+		Total: make([]uint64, n), NoError: make([]uint64, n), ServFail: make([]uint64, n), NXDomain: make([]uint64, n),
+		Refused: make([]uint64, n), Other: make([]uint64, n), Updates: make([]uint64, n),
+		Types: []NameCount{}, Protos: []NameCount{}, Clients: []NameCount{}, Domains: []NameCount{}}
+	types, clients, domains := map[string]uint64{}, map[string]uint64{}, map[string]uint64{}
+	var protos [4]uint64
+	var udp, tcp uint64
+	pairDomains, pairClients := map[string]uint64{}, map[string]uint64{}
 
 	s.flush()
 	s.mu.Lock()
@@ -386,10 +549,15 @@ func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
 				continue
 			}
 			r.Total[i] += uint64(ms.total)
-			r.Answered[i] += uint64(ms.answered)
-			r.Failed[i] += uint64(ms.failed)
-			r.KoD[i] += uint64(ms.kod)
-			r.Refused[i] += uint64(ms.refd)
+			r.NoError[i] += uint64(ms.noerror)
+			r.ServFail[i] += uint64(ms.servfail)
+			r.NXDomain[i] += uint64(ms.nxdomain)
+			r.Refused[i] += uint64(ms.refuse)
+			r.Other[i] += uint64(ms.other)
+			r.Updates[i] += uint64(ms.updates)
+			r.Sums.UpdFail += uint64(ms.updfail)
+			r.Sums.CacheHit += uint64(ms.chit)
+			r.Sums.CacheMis += uint64(ms.cmiss)
 		}
 	}
 	slots, span := s.coarse[:], int64(qsCoarseSpan)
@@ -402,32 +570,35 @@ func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
 			continue
 		}
 		for ci := range tp.c {
-			if outcome != "" && qcNames[ci] != outcome {
+			if rcode != "" && qcNames[ci] != rcode {
 				continue
 			}
 			k := &tp.c[ci]
 			for n, v := range k.clients {
 				clients[n] += uint64(v)
 			}
-			for n, v := range k.servers {
-				servers[n] += uint64(v)
+			for n, v := range k.domains {
+				domains[n] += uint64(v)
 			}
-			for n, v := range k.versions {
-				versions[n] += uint64(v)
+			for n, v := range k.types {
+				types[n] += uint64(v)
 			}
-			v4 += uint64(k.v4)
-			v6 += uint64(k.v6)
+			udp += uint64(k.udp)
+			tcp += uint64(k.tcp)
+			for i, n := range k.proto {
+				protos[i] += uint64(n)
+			}
 		}
 	}
 	s.mu.Unlock()
-	cset, dset := pickSet(f.Client), pickSet(f.Server)
+	cset, dset := pickSet(f.Client), pickSet(f.Domain)
 	if cset != nil || dset != nil { // the pairs are on disk: read the units the slots above cover
 		s.pairs.scan(from.Unix()/60/span*span/pairUnitMin, (to.Unix()/60/span+1)*span/pairUnitMin-1, func(kind int, c, name string, v uint32) {
-			if outcome != "" && qcNames[kind] != outcome {
+			if rcode != "" && qcNames[kind] != rcode {
 				return
 			}
 			if cset[c] {
-				pairServers[name] += uint64(v)
+				pairDomains[name] += uint64(v)
 			}
 			if dset[name] {
 				pairClients[c] += uint64(v)
@@ -437,38 +608,45 @@ func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
 
 	for i := 0; i < n; i++ {
 		r.Sums.Total += r.Total[i]
-		r.Sums.Answered += r.Answered[i]
-		r.Sums.Failed += r.Failed[i]
-		r.Sums.KoD += r.KoD[i]
+		r.Sums.NoError += r.NoError[i]
+		r.Sums.ServFail += r.ServFail[i]
+		r.Sums.NXDomain += r.NXDomain[i]
 		r.Sums.Refused += r.Refused[i]
+		r.Sums.Other += r.Other[i]
+		r.Sums.Updates += r.Updates[i]
 	}
 	r.Guard = memguard.Info()
 	r.Sums.Clients = len(clients)
 	if _, ok := clients[qsOthers]; ok {
 		r.Sums.Clients--
 	}
-	r.Versions = topList(versions, 0)
-	if v4 > 0 {
-		r.Families = append(r.Families, NameCount{Name: "IPv4", Count: v4})
+	r.Types = topList(types, 0)
+	add := func(name string, n uint64) {
+		if n > 0 {
+			r.Protos = append(r.Protos, NameCount{Name: name, Count: n})
+		}
 	}
-	if v6 > 0 {
-		r.Families = append(r.Families, NameCount{Name: "IPv6", Count: v6})
-	}
+	add(protoNames[0], protos[0])
+	add(protoNames[1], protos[1])
+	add("UDP", udp-min(udp, protos[0]+protos[1])) // counted before the split existed
+	add(protoNames[2], protos[2])
+	add(protoNames[3], protos[3])
+	add("TCP", tcp-min(tcp, protos[2]+protos[3]))
 	if f.Client != "" {
-		servers = withRest(pairServers, sumSet(clients, cset))
+		domains = withRest(pairDomains, sumSet(clients, cset))
 	}
-	if f.Server != "" {
-		clients = withRest(pairClients, sumSet(servers, dset))
+	if f.Domain != "" {
+		clients = withRest(pairClients, sumSet(domains, dset))
 	}
 	nc, nd := qsKeepResult, qsKeepResult
-	if f.Server != "" {
+	if f.Domain != "" {
 		nc = qsKeepPicked
 	}
 	if f.Client != "" {
 		nd = qsKeepPicked
 	}
 	r.Clients = topList(s.keepMatchingClients(clients, f.CMatch), nc)
-	r.Servers = topList(keepMatching(servers, f.SMatch), nd)
+	r.Domains = topList(keepMatching(domains, f.DMatch), nd)
 	s.fillHosts(r.Clients)
 	return r
 }
@@ -573,12 +751,18 @@ func (s *QStats) lookup(ip string) {
 			}
 		}
 	}
-	// whatever this machine's own resolver knows (hosts file, resolv.conf)
-	ctx, cancel := context.WithTimeout(context.Background(), qsRDNSTimeout)
-	if names, err := net.DefaultResolver.LookupAddr(ctx, ip); err == nil {
-		add(names)
+	if s.ptrVia != nil { // the servers dnsdir forwards to first
+		ctx, cancel := context.WithTimeout(context.Background(), qsRDNSTimeout)
+		add(s.ptrVia(ctx, ip))
+		cancel()
 	}
-	cancel()
+	if len(out) == 0 { // then whatever this machine's own resolver knows (hosts file, resolv.conf)
+		ctx, cancel := context.WithTimeout(context.Background(), qsRDNSTimeout)
+		if names, err := net.DefaultResolver.LookupAddr(ctx, ip); err == nil {
+			add(names)
+		}
+		cancel()
+	}
 	s.rmu.Lock()
 	s.rdns[ip] = rdnsEntry{names: out, at: time.Now()}
 	delete(s.rwork, ip)
@@ -620,8 +804,8 @@ func qstatsRange(from, to string) (time.Time, time.Time, error) {
 	return end.Add(-d), end, nil
 }
 
-// qstatsOutcome checks the outcome argument of the API and CLI.
-func qstatsOutcome(s string) (string, error) {
+// qstatsRcode checks the rcode argument of the API and CLI.
+func qstatsRcode(s string) (string, error) {
 	s = strings.ToLower(strings.TrimSpace(s))
 	if s == "" || s == "all" {
 		return "", nil
@@ -631,22 +815,22 @@ func qstatsOutcome(s string) (string, error) {
 			return s, nil
 		}
 	}
-	return "", fmt.Errorf("%q is not an outcome: use %s", s, strings.Join(qcNames[:], ", "))
+	return "", fmt.Errorf("%q is not an answer kind: use %s", s, strings.Join(qcNames[:], ", "))
 }
 
 // QFilter narrows a Query; zero values mean "no filter".
 type QFilter struct {
-	Outcome string // an outcome, see qcNames
-	Client  string // an address as listed in Top clients
-	Server  string // an address as listed in Top servers
-	// CMatch and SMatch keep only the clients / servers whose name contains the text (any case): the filter boxes of the
+	Rcode  string // an answer kind, see qcNames
+	Client string // an address as listed in Top clients
+	Domain string // a name as listed in Top domains
+	// CMatch and DMatch keep only the clients / domains whose name contains the text (any case): the filter boxes of the
 	// two top lists.  They look through everything the counters kept, not only the entries the reply lists.
 	CMatch string
-	SMatch string
+	DMatch string
 }
 
 // withMatch adds the two filter-box texts (trimmed, lower case, at most 100 characters) to a filter.
-func (f QFilter) withMatch(client, server string) QFilter {
+func (f QFilter) withMatch(client, domain string) QFilter {
 	clean := func(s string) string {
 		s = strings.ToLower(strings.TrimSpace(s))
 		if len(s) > 200 {
@@ -654,7 +838,7 @@ func (f QFilter) withMatch(client, server string) QFilter {
 		}
 		return s
 	}
-	f.CMatch, f.SMatch = clean(client), clean(server)
+	f.CMatch, f.DMatch = clean(client), clean(domain)
 	return f
 }
 
@@ -795,8 +979,8 @@ func (e matchExpr) hostLike() bool {
 	return false
 }
 
-// qstatsFilter checks and normalises the outcome, client and server arguments of the API and CLI.
-// qsMaxPicked is the most clients (or servers) a filter may name: the page sends several when rows are Ctrl-clicked.
+// qstatsFilter checks and normalises the rcode, client and domain arguments of the API and CLI.
+// qsMaxPicked is the most clients (or domains) a filter may name: the page sends several when rows are Ctrl-clicked.
 const qsMaxPicked = 100
 
 // pickSet is the set of names in a filter's comma-separated list (nil for none).
@@ -846,10 +1030,10 @@ func cleanPicks(s string, one func(string) (string, error)) (string, error) {
 	return strings.Join(out, ","), nil
 }
 
-func qstatsFilter(outcome, client, server string) (QFilter, error) {
+func qstatsFilter(rcode, client, domain string) (QFilter, error) {
 	var f QFilter
 	var err error
-	if f.Outcome, err = qstatsOutcome(outcome); err != nil {
+	if f.Rcode, err = qstatsRcode(rcode); err != nil {
 		return f, err
 	}
 	client, err = cleanPicks(client, func(c string) (string, error) {
@@ -863,19 +1047,20 @@ func qstatsFilter(outcome, client, server string) (QFilter, error) {
 	if err != nil {
 		return f, err
 	}
-	server, err = cleanPicks(server, func(n string) (string, error) {
+	domain, err = cleanPicks(domain, func(n string) (string, error) {
+		n = strings.ToLower(strings.TrimSuffix(n, "."))
 		if len(n) > 255 || strings.ContainsAny(n, " \t\r\n") {
-			return "", fmt.Errorf("%q is not a server address", n)
+			return "", fmt.Errorf("%q is not a domain name", n)
 		}
 		return n, nil
 	})
 	if err != nil {
 		return f, err
 	}
-	if client != "" && server != "" {
-		return f, fmt.Errorf("pick a client or a server, not both")
+	if client != "" && domain != "" {
+		return f, fmt.Errorf("pick a client or a domain, not both")
 	}
-	f.Client, f.Server = client, server
+	f.Client, f.Domain = client, domain
 	return f, nil
 }
 

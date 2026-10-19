@@ -9,7 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -32,14 +35,14 @@ func TestMinimumPasswordLength(t *testing.T) {
 		t.Fatalf("a 5 character password with the default policy: %v", err)
 	}
 	// configured
-	m.webPolicy.Store(&WebConfig{Group: "ntpdir", MinPasswordLength: 12})
+	m.webPolicy.Store(&WebConfig{Group: "dnsdir", MinPasswordLength: 12})
 	if err := m.checkPassword("eleven-char"); err == nil {
 		t.Error("11 characters accepted with a minimum of 12")
 	}
 	if err := m.checkPassword("twelve-chars"); err != nil {
 		t.Errorf("12 characters refused with a minimum of 12: %v", err)
 	}
-	m.webPolicy.Store(&WebConfig{Group: "ntpdir", MinPasswordLength: 1})
+	m.webPolicy.Store(&WebConfig{Group: "dnsdir", MinPasswordLength: 1})
 	if err := m.checkPassword("x"); err != nil {
 		t.Errorf("a minimum of 1 refused one character: %v", err)
 	}
@@ -164,9 +167,127 @@ func TestSessionCookieHasHostPrefix(t *testing.T) {
 
 // ── TCP and DoT ──────────────────────────────────────────────────────────────
 
+func TestStreamConnectionLimits(t *testing.T) {
+	f := NewDNSFrontend(netip.MustParseAddr("127.0.0.1"), 0, nil)
+	a := netip.MustParseAddr("192.0.2.1")
+	var keys []netip.Addr
+	for i := 0; i < maxStreamPerClient; i++ {
+		k, ok := f.streamAcquire(a)
+		if !ok {
+			t.Fatalf("connection %d refused below the per-client limit", i)
+		}
+		keys = append(keys, k)
+	}
+	if _, ok := f.streamAcquire(a); ok {
+		t.Fatal("a client went over the per-client limit")
+	}
+	if _, ok := f.streamAcquire(netip.MustParseAddr("192.0.2.2")); !ok {
+		t.Fatal("another client was refused")
+	}
+	f.streamRelease(keys[0])
+	if _, ok := f.streamAcquire(a); !ok {
+		t.Fatal("a released slot was not free again")
+	}
+	// an IPv6 client is one /64
+	for i := 0; i < maxStreamPerClient; i++ {
+		if _, ok := f.streamAcquire(netip.MustParseAddr("2001:db8:1:2::" + strconv.Itoa(i+1))); !ok {
+			t.Fatalf("v6 connection %d refused", i)
+		}
+	}
+	if _, ok := f.streamAcquire(netip.MustParseAddr("2001:db8:1:2:ffff::9")); ok {
+		t.Fatal("a /64 went over the per-client limit using other addresses of it")
+	}
+	// the node itself is not limited per client
+	for i := 0; i < maxStreamPerClient+10; i++ {
+		if _, ok := f.streamAcquire(netip.MustParseAddr("127.0.0.1")); !ok {
+			t.Fatal("loopback was limited")
+		}
+	}
+}
+
+func TestStreamTotalLimit(t *testing.T) {
+	f := NewDNSFrontend(netip.MustParseAddr("127.0.0.1"), 0, nil)
+	n := 0
+	for i := 0; ; i++ {
+		a := netip.AddrFrom4([4]byte{10, byte(i >> 16), byte(i >> 8), byte(i)})
+		if _, ok := f.streamAcquire(a); !ok {
+			break
+		}
+		if n++; n > maxStreamConns+1 {
+			t.Fatal("no total limit")
+		}
+	}
+	if n != maxStreamConns {
+		t.Fatalf("stopped at %d connections, want %d", n, maxStreamConns)
+	}
+}
+
+// A client that announces a large message and sends none of it must not cost the whole announced size.
+func TestStreamMessageIsReadIncrementally(t *testing.T) {
+	cs, cc := net.Pipe()
+	defer cs.Close()
+	defer cc.Close()
+	done := make(chan error, 1)
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	go func() {
+		_, _, err := readStreamMessage(cs, 65000)
+		done <- err
+	}()
+	cc.Write(make([]byte, 100)) // 100 of the 65000 bytes announced
+	time.Sleep(50 * time.Millisecond)
+	runtime.ReadMemStats(&after)
+	if grown := after.TotalAlloc - before.TotalAlloc; grown > 32<<10 {
+		t.Fatalf("%d bytes allocated for a message of which 100 bytes arrived", grown)
+	}
+	cc.Close()
+	if err := <-done; err == nil {
+		t.Fatal("a cut-off message was accepted")
+	}
+
+	// whole messages come out intact, small ones in a pooled buffer
+	for _, n := range []int{12, queryBufSize, queryBufSize + 1, 5 * readChunk, 65535} {
+		cs, cc := net.Pipe()
+		want := make([]byte, n)
+		for i := range want {
+			want[i] = byte(i * 7)
+		}
+		go func() { cc.Write(want); cc.Close() }()
+		got, bp, err := readStreamMessage(cs, n)
+		cs.Close()
+		if err != nil || !bytes.Equal(got, want) {
+			t.Fatalf("n=%d: err=%v equal=%v", n, err, bytes.Equal(got, want))
+		}
+		if (n <= queryBufSize) != (bp != nil) {
+			t.Fatalf("n=%d: pooled=%v", n, bp != nil)
+		}
+		if bp != nil {
+			queryBufs.Put(bp)
+		}
+	}
+}
+
+func TestStreamShorterThanAHeaderClosesTheConnection(t *testing.T) {
+	st := newUDPStub(t, func(q []byte, reply func([]byte)) { reply(answerTo(q)) })
+	_, srv := startFrontend(t, st)
+	c, err := net.Dial("tcp", srv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Write([]byte{0, 5, 1, 2, 3, 4, 5})
+	c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	// closed by the server: an end of stream, or a reset when it still held bytes of ours; not a timeout
+	_, err = c.Read(make([]byte, 1))
+	if ne, ok := err.(net.Error); err == nil || ok && ne.Timeout() {
+		t.Fatalf("expected the connection to be closed, got %v", err)
+	}
+}
+
 // ── cluster: the signature is checked before the body is read ────────────────
 
-// rawPeerReq sends a request to a node's cluster listener signed with secret.  withHash adds X-Ntpdir-Body (the
+// rawPeerReq sends a request to a node's cluster listener signed with secret.  withHash adds X-Ddgw-Body (the
 // form v194 sends); without it the request is the legacy form.  signedBody is the body the signature is made
 // over, body what is really sent (they differ in the mismatch test).
 func rawPeerReq(t *testing.T, secret []byte, to *tnode, claim ClusterPeer, me *tls.Certificate, method, path string, signedBody, body []byte, withHash bool) (int, string) {
@@ -179,16 +300,16 @@ func rawPeerReq(t *testing.T, secret []byte, to *tnode, claim ClusterPeer, me *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("X-Ntpdir-Peer", peerHdr)
-	req.Header.Set("X-Ntpdir-Ts", ts)
-	req.Header.Set("X-Ntpdir-Nonce", nonce)
+	req.Header.Set("X-Ddgw-Peer", peerHdr)
+	req.Header.Set("X-Ddgw-Ts", ts)
+	req.Header.Set("X-Ddgw-Nonce", nonce)
 	if withHash {
 		sum := sha256.Sum256(signedBody)
 		h := hex.EncodeToString(sum[:])
-		req.Header.Set("X-Ntpdir-Body", h)
-		req.Header.Set("X-Ntpdir-Sig", signMessageHash(secret, peerHdr, ts, nonce, method, path, h))
+		req.Header.Set("X-Ddgw-Body", h)
+		req.Header.Set("X-Ddgw-Sig", signMessageHash(secret, peerHdr, ts, nonce, method, path, h))
 	} else {
-		req.Header.Set("X-Ntpdir-Sig", signMessage(secret, peerHdr, ts, nonce, method, path, signedBody))
+		req.Header.Set("X-Ddgw-Sig", signMessage(secret, peerHdr, ts, nonce, method, path, signedBody))
 	}
 	res, err := pinnedClientAs(to.addr, to.mg.cl.node.Fingerprint(), 5*time.Second, me).Do(req)
 	if err != nil {

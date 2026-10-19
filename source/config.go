@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,21 +19,24 @@ import (
 )
 
 const (
-	// Everything ntpdir keeps lives in /var/lib/ntpdir: the config, the GUI
+	// Everything dnsdir keeps lives in /var/lib/dnsdir: the config, the GUI
 	// certificate, config history, cluster identity and update data.
-	confPath     = "/var/lib/ntpdir/ntpdir.conf"
-	statusSocket = "/run/ntpdir/ntpdir.sock"
+	confPath     = "/var/lib/dnsdir/dnsdir.conf"
+	statusSocket = "/run/dnsdir/dnsdir.sock"
 
 	// Releases before v15 kept the config under /etc/liras.
-	legacyConfPath = "/etc/liras/ntpdir.conf"
+	legacyConfPath = "/etc/liras/ddgw.conf"
+
+	// Releases before v367 were called ddgw and kept everything under /var/lib/ddgw.
+	oldConfPath = "/var/lib/ddgw/ddgw.conf"
 )
 
 // canonicalConf turns the pre-v15 path into the real one.  A service unit that was
 // never rewritten (an in-place update does not touch it) still starts the daemon
-// with `--config /etc/liras/ntpdir.conf`; nothing may be read from or written to
-// /etc/liras any more, so that path means the config in /var/lib/ntpdir.
+// with `--config /etc/liras/ddgw.conf` (or, before v367, /var/lib/ddgw/ddgw.conf); nothing may be
+// read from or written to those places any more, so both mean the config in /var/lib/dnsdir.
 func canonicalConf(path string) string {
-	if filepath.Clean(path) == legacyConfPath {
+	if c := filepath.Clean(path); c == legacyConfPath || c == oldConfPath {
 		return confPath
 	}
 	return path
@@ -62,8 +66,8 @@ func migrateLegacyConfig(dst, legacy string) (moved bool, err error) {
 	if err := os.WriteFile(dst, b, mode); err != nil {
 		return false, err
 	}
-	for _, f := range []string{"ntpdir-web.crt", "ntpdir-web.key"} {
-		src, to := filepath.Join(filepath.Dir(legacy), f), filepath.Join(filepath.Dir(dst), f)
+	for _, f := range []string{"web.crt", "web.key"} {
+		src, to := filepath.Join(filepath.Dir(legacy), "ddgw-"+f), filepath.Join(filepath.Dir(dst), "dnsdir-"+f)
 		if _, err := os.Stat(to); err == nil {
 			continue
 		}
@@ -94,7 +98,7 @@ type GroupConfig struct {
 	VIP4      string `json:"vip4"`
 	VIP6      string `json:"vip6"`
 	// MoreVIP4 and MoreVIP6 are further shared addresses inside the subnet of VIP4 / VIP6 (bare addresses, no prefix length:
-	// they take the primary's).  They move with the gateway like the primary does and answer NTP the same way; the
+	// they take the primary's).  They move with the gateway like the primary does and answer DNS the same way; the
 	// primary stays the one in the hello packets.  Omitted when none, so older versions read the same file.
 	MoreVIP4 []string `json:"more_vip4,omitempty"`
 	MoreVIP6 []string `json:"more_vip6,omitempty"`
@@ -113,17 +117,19 @@ type GroupConfig struct {
 	MaxAFNs   int      `json:"max_afns"`
 	Key       string   `json:"key"`
 	Neighbors []string `json:"neighbors"`
-	// NTP is this group's own upstream pool (what the canvas writes).  When
-	// absent the group uses the top-level "ntp" block, which several groups may
+	// DNSProxy is no longer a setting: every gateway serves DNS on its VIP.  The key
+	// stays in the file, always true, so versions before v45 (where it was a switch
+	// and a missing key meant off) keep serving DNS from the same file.  Validate
+	// forces it on, and nothing reads it.
+	DNSProxy bool `json:"dns_proxy"`
+	// DNS is this group's own upstream pool (what the canvas writes).  When
+	// absent the group uses the top-level "dns" block, which several groups may
 	// share.
-	NTP *NTPConfig `json:"ntp,omitempty"`
+	DNS *DNSConfig `json:"dns,omitempty"`
 	// ExtraVIPs are anycast addresses: extra addresses of any subnet (no check
-	// against the interface) that every running node holds on lo and answers NTP
-	// on, while this gateway's NTP pool is healthy.  Shared across the cluster.
+	// against the interface) that every running node holds on lo and answers DNS
+	// on, while this gateway's DNS pool is healthy.  Shared across the cluster.
 	ExtraVIPs []string `json:"extra_vips,omitempty"`
-	// DNSDirVIPs are anycast addresses of the Anyname DNS Director (dnsdir) on the same host that this gateway also
-	// answers NTP on (dnsdir.go).  ntpdir only listens on them: dnsdir holds and announces them.  Shared.
-	DNSDirVIPs []string `json:"dnsdir_vips,omitempty"`
 	// PausedVIPs are anycast addresses whose announcing is paused on every node (shared); PausedVIPsHere the ones
 	// paused on this node only (never replicated).  A paused address stays in ExtraVIPs but is taken off lo, so the
 	// route is withdrawn until it is resumed.
@@ -148,12 +154,8 @@ type GroupConfig struct {
 // --configure): the same as defaultGroup but with real MAC addresses on, which is what most networks need (a VMware
 // port group, a cloud, a switch with port security).  defaultGroup itself stays off: a group read from a file that does
 // not say real_macs is off, as it always was, so an upgrade changes no running gateway.
-// firstGroupID is the group number a new gateway gets first (the next free one counts up from here).
-const firstGroupID = 100
-
 func newGatewayGroup() GroupConfig {
 	g := defaultGroup()
-	g.GroupID = firstGroupID
 	g.Key = newGroupKey() // a gateway someone adds does not start with a key everybody knows
 	g.RealMACs = true
 	return g
@@ -170,7 +172,8 @@ func defaultGroup() GroupConfig {
 		HelloMS:   150,
 		HoldMS:    750,
 		MaxAFNs:   defaultMaxAFNs,
-		Key:       "ntpdir",
+		Key:       defaultGroupKey,
+		DNSProxy:  true, // always (see GroupConfig.DNSProxy)
 		Neighbors: []string{},
 	}
 }
@@ -218,9 +221,16 @@ func (g *GroupConfig) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// defaultGroupKey is the HMAC key a new gateway starts with.  A gateway whose key is empty (a config from before this was
+// written into the file) still signs with legacyGroupKey, so nothing that works today stops working.
+const (
+	defaultGroupKey = "dnsdir"
+	legacyGroupKey  = "dgw"
+)
+
 func (g *GroupConfig) keyBytes() []byte {
 	if g.Key == "" {
-		return []byte("ntpdir")
+		return []byte(legacyGroupKey)
 	}
 	return []byte(g.Key)
 }
@@ -355,13 +365,6 @@ func (g *GroupConfig) Validate() error {
 		}
 		g.ExtraVIPs[i] = n
 	}
-	for i, a := range g.DNSDirVIPs {
-		n, err := normalizeAnycast(a)
-		if err != nil {
-			return fmt.Errorf("%s: dnsdir_vips: %v", pre, err)
-		}
-		g.DNSDirVIPs[i] = n
-	}
 	g.PausedVIPs = keepAnycast(g.PausedVIPs, g.ExtraVIPs)
 	g.PausedVIPsHere = keepAnycast(g.PausedVIPsHere, g.ExtraVIPs)
 	if l, err := cleanNodeOrder(g.NodeOrder); err != nil {
@@ -446,131 +449,200 @@ func normalizeAnycast(s string) (string, error) {
 	return a.String(), nil
 }
 
-// ── NTP config ─────────────────────────────────────────────────────────
+// ── DNS proxy config ─────────────────────────────────────────────────────────
 
-// NTPConfig describes the upstream pool and how it is probed.
-type NTPConfig struct {
-	// Servers are upstream NTP servers: "10.0.0.123", "10.0.0.123:1123", "[2001:db8::123]:123", "ntp.example.com".
+// DNSQuery is one probe query.  In JSON it may be written as an object
+// {"name": "example.com", "type": "A"} or a string "example.com" /
+// "example.com AAAA".
+type DNSQuery struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+func (q *DNSQuery) UnmarshalJSON(b []byte) error {
+	var s string
+	if json.Unmarshal(b, &s) == nil {
+		f := strings.Fields(s)
+		switch len(f) {
+		case 1:
+			*q = DNSQuery{Name: f[0], Type: "A"}
+		case 2:
+			*q = DNSQuery{Name: f[0], Type: strings.ToUpper(f[1])}
+		default:
+			return fmt.Errorf("bad query %q (want \"name\" or \"name TYPE\")", s)
+		}
+		return nil
+	}
+	type alias DNSQuery
+	a := alias{Type: "A"}
+	if err := strictUnmarshal(b, &a); err != nil {
+		return err
+	}
+	a.Type = strings.ToUpper(a.Type)
+	*q = DNSQuery(a)
+	return nil
+}
+
+func (q DNSQuery) String() string { return q.Name + "/" + q.Type }
+
+// DNSConfig describes the upstream pool and how it is probed.
+type DNSConfig struct {
+	// Servers are upstream resolvers: "10.0.0.53", "10.0.0.53:5353", "[2001:db8::53]:53".
 	Servers []string `json:"servers"`
+	// Queries are resolved against every server on each probe round, except
+	// servers that have their own list in ServerQueries.
+	Queries []DNSQuery `json:"queries"`
+	// ServerQueries gives individual servers their own probe queries, keyed by
+	// the server as written in Servers.
+	ServerQueries map[string][]DNSQuery `json:"server_queries,omitempty"`
 	// ServerNames gives servers an optional name shown on the Topology page instead of the address,
 	// keyed by the server as written in Servers (the same rules as a gateway's name).  It only labels:
 	// it is left out of the pool's own configuration, so renaming never restarts a pool.
 	ServerNames map[string]string `json:"server_names,omitempty"`
 	// FallbackServers are a last resort, used only while no server in Servers is in service (all down or paused,
 	// or none listed): the pool then answers from them, and goes back to Servers as soon as one of those answers
-	// again.  Same address forms as Servers.  They are never probed and always count as up.
+	// again.  Same address forms as Servers.  They are never probed (the domains the normal servers are tested with
+	// may be ones only those know) and always count as up.
 	FallbackServers []string `json:"fallback_servers,omitempty"`
 	// PausedServers are listed servers that are taken out of service (no
-	// requests, no probes) until resumed, e.g. during maintenance.  Replicated
-	// with the rest of the NTP block.
+	// queries, no probes) until resumed, e.g. during maintenance.  Replicated
+	// with the rest of the DNS block.
 	PausedServers []string `json:"paused_servers,omitempty"`
-	// PausedServersHere is this node's own pause of the same thing (DaemonConfig keeps it, effective() hands it to
-	// the pools).  Never replicated and never written from here.
+	// PausedQueries are probe domains taken out of testing on every node (shared), written "server|name|TYPE"
+	// (see queryKey).  A paused domain is not asked, so it neither counts against its server nor shows red.
+	PausedQueries []string `json:"paused_queries,omitempty"`
+	// PausedServersHere / PausedQueriesHere are this node's own pauses of the same things (DaemonConfig keeps them,
+	// effective() hands them to the pools).  Never replicated and never written from here.
 	PausedServersHere []string `json:"-"`
-	// ListenPort is the UDP port chrony serves on.
+	PausedQueriesHere []string `json:"-"`
+	// DownPercent is the share of a server's probe queries that may fail before the server counts as
+	// down: it is down when at least this percent of them fail (default 100, so only when every query fails; 50 would be 1 of 2 or 2 of 4); with
+	// fewer failing it stays in use and shows as degraded.  A file that already has the key keeps its value.
+	DownPercent int `json:"down_percent"`
+	// Require is the old "all"/"any" switch, replaced by DownPercent.  It is still read (an old file has
+	// it) but ignored, and never written back.
+	Require string `json:"require,omitempty"`
+	// ListenPort is the port the proxy serves on the VIP (UDP and TCP).
 	ListenPort int `json:"listen_port"`
-	// AllowedClients are the networks (10.0.0.0/8, 192.168.1.5, 2001:db8::/32) that may use this node (chrony `allow`);
-	// empty means everyone. The node itself always may.
+	// DoTPort serves DNS over TLS (RFC 7858) to clients on the VIP on this TCP port; 0 (the default) is off. The
+	// certificate is the one the web GUI uses (Configure ▸ Web GUI).
+	DoTPort int `json:"dot_port,omitempty"`
+	// DoHPort serves DNS over HTTPS (RFC 8484) to clients on the VIP on this TCP port, at /dns-query; 0 (the
+	// default) is off. The certificate is the web GUI's.
+	DoHPort int `json:"doh_port,omitempty"`
+	// ECS passes the client's network to the servers (EDNS Client Subnet,
+	// RFC 7871) so they do not see every query coming from the dnsdir node.  Only
+	// a prefix is sent: ecs_prefix4 bits of an IPv4 client (default 24),
+	// ecs_prefix6 bits of an IPv6 client (default 56).  On by default: a server that answers FORMERR or REFUSED to
+	// it is asked again without it and then left alone (dns.go forward).
+	ECS bool `json:"ecs"`
+	// AllowedClients are the networks (10.0.0.0/8, 192.168.1.5, 2001:db8::/32) that may use the proxy; empty means
+	// everyone. Any other client is answered REFUSED, dynamic updates included. The node itself always may.
 	AllowedClients []string `json:"allowed_clients,omitempty"`
-	// BlockedClients are clients or networks that get no answers (chrony `deny`), whatever AllowedClients says: a block is
-	// the more specific rule even when it names a network inside an allowed one.  Statistics ▸ Top Clients ▸ right-click ▸
-	// Block adds an address here.  This node itself (loopback) cannot be blocked.
-	BlockedClients []string `json:"blocked_clients,omitempty"`
 	// SNMPCommunities and SNMPContact are the cluster-wide part of the SNMP settings (Configure ▸ SNMP), replicated like
 	// AllowedClients: every node answers the same communities and reports the same contact.  The location is per node and
 	// lives in DaemonConfig.SNMP.  See snmp.go.
 	SNMPCommunities []string `json:"snmp_communities,omitempty"`
-	// Keys, ServerAuth, NTSServer, LeapTZ, LeapMode and LeapSmear: authentication and leap seconds for chrony (see auth.go).
-	Keys        []string `json:"keys,omitempty"`
-	ServerAuth  []string `json:"server_auth,omitempty"`
-	NTSServer   bool     `json:"nts_server,omitempty"`
-	LeapTZ      string   `json:"leap_tz,omitempty"`
-	LeapMode    string   `json:"leap_mode,omitempty"`
-	LeapSmear   bool     `json:"leap_smear,omitempty"`
-	SNMPContact string   `json:"snmp_contact,omitempty"`
+	SNMPContact     string   `json:"snmp_contact,omitempty"`
 	// Schedule is the scheduler's task list (Operate ▸ Scheduler), replicated with the rest; see scheduler.go.
 	Schedule []SchedTask `json:"schedule,omitempty"`
-	// ClientRate limits each client (an IPv4 address or an IPv6 /64) to this many requests a second; 0 (the default)
+	// SortList orders the A and AAAA records of an answer per client network: "10.1.0.0/16: 10.1.0.0/16, 10.0.0.0/8"
+	// (see sortlist.go). Empty means answers keep the order the servers gave.
+	SortList []string `json:"sortlist,omitempty"`
+	// SortListOn switches the sort list on (the default) or off without deleting it.
+	SortListOn bool `json:"sortlist_on"`
+	// Policy is Policy-Based Resolution: rows of client, name and servers; the first row that matches a query sends
+	// it to its own servers instead of the pool's (see policy.go).
+	Policy []PolicyRule `json:"policy,omitempty"`
+	// PolicyOn switches the policy rows on (the default) or off without deleting them.
+	PolicyOn bool `json:"policy_on"`
+	// PolicyLog writes a log line for each query a policy row applies to (default true; at most 100 a second).
+	PolicyLog bool `json:"policy_log"`
+	// PolicyBlockTTL is how many seconds a client may remember a blocked answer (a row's nodata, nxdomain, or null for a
+	// type that has no null address): the answer carries a made-up SOA whose TTL and MINIMUM are this (RFC 2308), so a
+	// client that caches negative answers stops asking.  0 means the default, 14400 (4 hours).
+	PolicyBlockTTL int `json:"policy_block_ttl,omitempty"`
+	// ClientRate limits each client (an IPv4 address or an IPv6 /64) to this many queries a second; 0 (the default)
 	// is no limit. ClientBurst is how many it may send at once (0 = twice the rate, at least 10). ClientAction is what
-	// a client over its rate gets: "drop" (the default, kept as empty in the file) or "kod" (a kiss-o'-death RATE,
-	// which tells a well-behaved client to slow down). ClientExempt are networks never limited.
+	// a client over its rate gets: "drop" (the default, kept as empty in the file), "truncate" (UDP: a short answer
+	// with the TC bit, so a real client retries over TCP) or "refused". ClientExempt are networks never limited.
 	ClientRate   int      `json:"client_rate,omitempty"`
 	ClientBurst  int      `json:"client_burst,omitempty"`
 	ClientAction string   `json:"client_action,omitempty"`
 	ClientExempt []string `json:"client_exempt,omitempty"`
-	// ClientLimits give single clients or networks a rate of their own: "192.168.1.5 50" (requests per second).  They apply
-	// even when ClientRate is 0 and before ClientExempt (see clientlimit.go).
+	// ClientLimits give single clients or networks a rate of their own: "192.168.1.5 50" (queries per second).  They apply
+	// even when ClientRate is 0 and before ClientExempt; the most specific line that matches a client is its rate (see
+	// clientlimit.go).
 	ClientLimits []string `json:"client_limits,omitempty"`
 	// ClientNames are names given to clients by hand (Statistics ▸ Top clients ▸ right-click ▸ Name…): address -> name.  They are
 	// shown instead of the reverse-DNS name and can be filtered on.  Only the shared Settings' copy is used.
 	ClientNames map[string]string `json:"client_names,omitempty"`
-	// Spread shares the requests out: the servers within SpreadBand percent of the fastest one's latency
+	// RegisterKeyName and RegisterKey (base64) are the hmac-sha256 TSIG key that signs the update sent when a client is named, and
+	// RegisterTTL the TTL of the records it writes (default 300).  Without a key the update is sent unsigned.
+	RegisterKeyName string `json:"register_key_name,omitempty"`
+	RegisterKey     string `json:"register_key,omitempty"`
+	RegisterTTL     int    `json:"register_ttl,omitempty"`
+	// ForwardUpdates relays dynamic DNS updates (RFC 2136, opcode UPDATE) to the primary
+	// server named in the zone's SOA record, unchanged, and hands the answer back.  With it
+	// off an update is answered REFUSED.  On by default.
+	ForwardUpdates bool `json:"forward_updates"`
+	// Cache answers repeated queries from memory for as long as their TTLs allow (cache.go); on by default.
+	// CacheEntries is the most answers kept (the least recently used go first), CacheMaxTTL the most
+	// seconds one is kept and shown to clients, however long its records say.
+	// Spread shares the queries out: the servers within SpreadBand percent of the fastest one's latency
 	// (default 20) take turns instead of the fastest getting everything; slower ones are still only fallbacks.
-	Spread     bool `json:"spread"`
-	SpreadBand int  `json:"spread_band"`
-	// MaxStratum is the highest stratum a server may report and still be used (default 15; 16 is a clock that is
-	// not synchronised).  MaxRootDistanceMS is the largest error its time may have (root delay / 2 + root dispersion
-	// + delay / 2; default 1500).  MaxOffsetMS is how far a server's time may be from the median of the servers' (needs
-	// at least three servers; default 128, 0 = off): one that is further away is a falseticker and is taken out.
-	MaxStratum        int `json:"max_stratum"`
-	MaxRootDistanceMS int `json:"max_root_distance_ms"`
-	MaxOffsetMS       int `json:"max_offset_ms"`
-	// MaxRTTMS is the longest round trip a server may have and still be used (default 500, 0 = off): a server that
-	// is further away than that is too slow and is taken out as a source.
-	MaxRTTMS int `json:"max_rtt_ms"`
-	// ServeOffsetMS is how far this node's clock may be from what chrony measures against the servers (default 50, 0 = off) and
-	// the node still serves: beyond it chrony answers nobody and the node leaves the gateway and its anycast addresses, so
-	// every serving node is within this of the same servers.
-	ServeOffsetMS   int `json:"serve_offset_ms"`
-	ProbeIntervalMS int `json:"probe_interval_ms"`
-	ProbeTimeoutMS  int `json:"probe_timeout_ms"`
-	QueryTimeoutMS  int `json:"query_timeout_ms"`
-	MaxAttempts     int `json:"max_attempts"`
-	FailThreshold   int `json:"fail_threshold"`
-	// LatencyAlpha is the EWMA smoothing of a server's round-trip time.
-	LatencyAlpha float64 `json:"latency_alpha"`
+	Spread bool `json:"spread"`
+	// TLSInsecure makes a tls:// server be accepted whatever certificate it presents (expired, self-signed, the
+	// wrong name): the traffic is still encrypted but the server is not authenticated. Off by default.
+	TLSInsecure  bool `json:"tls_insecure,omitempty"`
+	SpreadBand   int  `json:"spread_band"`
+	Cache        bool `json:"cache"`
+	CacheEntries int  `json:"cache_entries"`
+	CacheMaxTTL  int  `json:"cache_max_ttl"`
+	// FailureCacheSeconds is how long a failure (SERVFAIL, REFUSED, or every server timing out) is remembered, so a client that
+	// asks again and again for a name that fails does not send each question upstream (RFC 9520; cache.go).  0 turns it
+	// off; at most cacheFailTTLMax (5 minutes).  Shared like the rest of the cache settings.
+	FailureCacheSeconds int     `json:"failure_cache_seconds"`
+	ECSPrefix4          int     `json:"ecs_prefix4"`
+	ECSPrefix6          int     `json:"ecs_prefix6"`
+	ProbeIntervalMS     int     `json:"probe_interval_ms"`
+	ProbeTimeoutMS      int     `json:"probe_timeout_ms"`
+	QueryTimeoutMS      int     `json:"query_timeout_ms"`
+	MaxAttempts         int     `json:"max_attempts"`
+	FailThreshold       int     `json:"fail_threshold"`
+	LatencyAlpha        float64 `json:"latency_alpha"`
 	// LB is a gateway's own load-balancing settings (see LBConfig).  Only meaningful in a gateway's own pool; nil
 	// means the gateway follows Settings.  A pointer with omitempty so a config that never used it stays readable
 	// by older versions.
 	LB *LBConfig `json:"lb,omitempty"`
 }
 
-// LBConfig is the set of health-check settings (Configure ▸ NTP ▸ Health): when a server counts as down.  The spread and
-// attempts fields are kept so older files load; they have no effect.  A gateway that has its own pool follows the shared values unless its own
+// LBConfig is the set of load-balancing settings (Configure ▸ DNS proxy ▸ Load Balancing): how servers share the
+// queries and when one counts as down.  A gateway that has its own pool follows the shared values unless its own
 // pool carries an LBConfig.
 type LBConfig struct {
-	Spread            bool    `json:"spread"`
-	SpreadBand        int     `json:"spread_band"`
-	MaxStratum        int     `json:"max_stratum"`
-	MaxRootDistanceMS int     `json:"max_root_distance_ms"`
-	MaxOffsetMS       int     `json:"max_offset_ms"`
-	FailThreshold     int     `json:"fail_threshold"`
-	MaxAttempts       int     `json:"max_attempts"`
-	LatencyAlpha      float64 `json:"latency_alpha"`
+	Spread        bool    `json:"spread"`
+	SpreadBand    int     `json:"spread_band"`
+	DownPercent   int     `json:"down_percent"`
+	FailThreshold int     `json:"fail_threshold"`
+	MaxAttempts   int     `json:"max_attempts"`
+	LatencyAlpha  float64 `json:"latency_alpha"`
 }
 
-func (d NTPConfig) lbValues() LBConfig {
-	return LBConfig{Spread: d.Spread, SpreadBand: d.SpreadBand, MaxStratum: d.MaxStratum, MaxRootDistanceMS: d.MaxRootDistanceMS,
-		MaxOffsetMS: d.MaxOffsetMS, FailThreshold: d.FailThreshold, MaxAttempts: d.MaxAttempts, LatencyAlpha: d.LatencyAlpha}
+func (d DNSConfig) lbValues() LBConfig {
+	return LBConfig{Spread: d.Spread, SpreadBand: d.SpreadBand, DownPercent: d.DownPercent, FailThreshold: d.FailThreshold, MaxAttempts: d.MaxAttempts, LatencyAlpha: d.LatencyAlpha}
 }
 
-func (d *NTPConfig) setLBValues(l LBConfig) {
-	d.Spread, d.SpreadBand, d.MaxStratum, d.MaxRootDistanceMS, d.MaxOffsetMS = l.Spread, l.SpreadBand, l.MaxStratum, l.MaxRootDistanceMS, l.MaxOffsetMS
-	d.FailThreshold, d.MaxAttempts, d.LatencyAlpha = l.FailThreshold, l.MaxAttempts, l.LatencyAlpha
+func (d *DNSConfig) setLBValues(l LBConfig) {
+	d.Spread, d.SpreadBand, d.DownPercent, d.FailThreshold, d.MaxAttempts, d.LatencyAlpha = l.Spread, l.SpreadBand, l.DownPercent, l.FailThreshold, l.MaxAttempts, l.LatencyAlpha
 }
 
 func (l LBConfig) validate() error {
 	if l.SpreadBand < 1 || l.SpreadBand > 1000 {
 		return errors.New("spread_band must be 1-1000 percent")
 	}
-	if l.MaxStratum < 1 || l.MaxStratum > 15 {
-		return errors.New("max_stratum must be 1-15")
-	}
-	if l.MaxRootDistanceMS < 0 || l.MaxRootDistanceMS > 60000 {
-		return errors.New("max_root_distance_ms must be 0 (off) to 60000")
-	}
-	if l.MaxOffsetMS < 0 || l.MaxOffsetMS > 3600000 {
-		return errors.New("max_offset_ms must be 0 (off) to 3600000")
+	if l.DownPercent < 1 || l.DownPercent > 100 {
+		return errors.New("down_percent must be 1-100")
 	}
 	if l.FailThreshold < 1 {
 		return errors.New("fail_threshold must be >= 1")
@@ -585,87 +657,94 @@ func (l LBConfig) validate() error {
 }
 
 // ownLB says whether a gateway's own pool has load-balancing settings of its own, and what they are.  An explicit LB
-// does.  So does a pool whose load-balancing values differ from the defaults: those were set on purpose (or copied
-// from Settings when the pool was made), and the gateway keeps them.  A pool that sits at the defaults follows
-// Settings, which is what its owner expects.
-func (d *NTPConfig) ownLB() (LBConfig, bool) {
+// does.  So does a pool written before LB existed whose six values differ from the defaults: those were set on
+// purpose (or copied from Settings when the pool was made), and the gateway keeps them.  A pool that sits at the
+// defaults follows Settings, which is what its owner expects.
+func (d *DNSConfig) ownLB() (LBConfig, bool) {
 	if d.LB != nil {
 		return *d.LB, true
 	}
-	def := defaultNTP()
+	def := defaultDNS()
 	if l := d.lbValues(); l != def.lbValues() {
 		return l, true
 	}
 	return LBConfig{}, false
 }
 
-// defaultGatewayServers are the NTP servers a gateway starts with when it is created now (the GUI's New gateway and
-// --canvas-add gateway).  They are ordinary servers of the gateway: remove the ones you do not want.  webui/app.js has
-// the same list (DEFAULT_SERVERS), and a test keeps the two equal.  defaultNTP itself stays empty: a config read from a
-// file that lists no servers has none, as it always did.
-var defaultGatewayServers = []string{"pool.ntp.org", "time.nist.gov", "time.google.com", "time.cloudflare.com"}
-
-// newGatewayServers is defaultGatewayServers in the form the config stores (host:port).
-func newGatewayServers() []string {
-	out := make([]string, 0, len(defaultGatewayServers))
-	for _, s := range defaultGatewayServers {
-		n, err := normalizeServer(s)
-		if err != nil {
-			continue
-		}
-		out = append(out, n)
-	}
-	return out
-}
-
-func defaultNTP() NTPConfig {
-	return NTPConfig{
-		Servers:           []string{},
-		ListenPort:        123,
-		Spread:            true,
-		SpreadBand:        20,
-		MaxStratum:        15,
-		MaxRootDistanceMS: 1500,
-		MaxOffsetMS:       128,
-		MaxRTTMS:          500,
-		ServeOffsetMS:     50,
-		ProbeIntervalMS:   16000,
-		ProbeTimeoutMS:    1000,
-		QueryTimeoutMS:    800,
-		MaxAttempts:       2,
-		FailThreshold:     2,
-		LatencyAlpha:      0.3,
+func defaultDNS() DNSConfig {
+	return DNSConfig{
+		Servers:             []string{},
+		Queries:             []DNSQuery{},
+		DownPercent:         100,
+		ListenPort:          53,
+		ForwardUpdates:      true,
+		SortListOn:          true,
+		PolicyOn:            true,
+		PolicyLog:           true,
+		Spread:              true,
+		SpreadBand:          20,
+		Cache:               true,
+		CacheEntries:        cacheDefaultEntries,
+		CacheMaxTTL:         cacheDefaultMaxTTL,
+		FailureCacheSeconds: cacheDefaultFailTTL,
+		ECS:                 true,
+		ECSPrefix4:          24,
+		ECSPrefix6:          56,
+		ProbeIntervalMS:     5000,
+		ProbeTimeoutMS:      1000,
+		QueryTimeoutMS:      1500,
+		MaxAttempts:         3,
+		FailThreshold:       2,
+		LatencyAlpha:        0.3,
 	}
 }
 
-func (d *NTPConfig) UnmarshalJSON(b []byte) error {
-	type alias NTPConfig
-	a := alias(defaultNTP())
+func (d *DNSConfig) UnmarshalJSON(b []byte) error {
+	type alias DNSConfig
+	a := alias(defaultDNS())
 	if err := strictUnmarshal(b, &a); err != nil {
 		return err
 	}
-	*d = NTPConfig(a)
+	a.Require = "" // superseded by down_percent
+	*d = DNSConfig(a)
 	return nil
 }
 
-func (d NTPConfig) probeInterval() time.Duration {
+func (d DNSConfig) probeInterval() time.Duration {
 	return time.Duration(d.ProbeIntervalMS) * time.Millisecond
 }
-func (d NTPConfig) probeTimeout() time.Duration {
+func (d DNSConfig) probeTimeout() time.Duration {
 	return time.Duration(d.ProbeTimeoutMS) * time.Millisecond
 }
-func (d NTPConfig) queryTimeout() time.Duration {
+func (d DNSConfig) queryTimeout() time.Duration {
 	return time.Duration(d.QueryTimeoutMS) * time.Millisecond
 }
 
-// defaultServerPort is the port an NTP server is spoken to on when the address names none.
-const defaultServerPort = "123"
-
 // normalizeServer turns a server string into a canonical "host:port".  The
-// host is an IP address or a host name (resolved each time it is probed).
+// host is an IP address or a DNS name (resolved each time it is probed).
 func normalizeServer(s string) (string, error) {
-	return normalizePlain(strings.TrimSpace(s), defaultServerPort)
+	s = strings.TrimSpace(s)
+	if rest, ok := strings.CutPrefix(s, dotScheme); ok {
+		// DNS over TLS: "tls://host[:port]", port 853 by default; the key keeps the scheme.
+		hp, err := normalizePlain(rest, "853")
+		if err != nil {
+			return "", fmt.Errorf("invalid dns server %q (need tls://host or tls://host:port)", s)
+		}
+		return dotScheme + hp, nil
+	}
+	if rest, ok := strings.CutPrefix(s, dohScheme); ok {
+		// DNS over HTTPS: "https://host[:port][/path]", port 443 and path /dns-query by default.
+		n, err := normalizeDoH(rest)
+		if err != nil {
+			return "", fmt.Errorf("invalid dns server %q (need https://host, https://host:port or https://host/path)", s)
+		}
+		return n, nil
+	}
+	return normalizePlain(s, "53")
 }
+
+// dotScheme marks a server that is spoken to over TLS (RFC 7858).
+const dotScheme = "tls://"
 
 func normalizePlain(s, defPort string) (string, error) {
 	if ap, err := netip.ParseAddrPort(s); err == nil {
@@ -679,13 +758,13 @@ func normalizePlain(s, defPort string) (string, error) {
 	if h, p, err := net.SplitHostPort(s); err == nil {
 		host, port = h, p
 		if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
-			return "", fmt.Errorf("invalid ntp server %q (bad port)", s)
+			return "", fmt.Errorf("invalid dns server %q (bad port)", s)
 		}
 	}
 	if validHostname(host) {
 		return net.JoinHostPort(strings.ToLower(host), port), nil
 	}
-	return "", fmt.Errorf("invalid ntp server %q (need an IP address or host name, optionally with :port)", s)
+	return "", fmt.Errorf("invalid dns server %q (need an IP address or host name, optionally with :port)", s)
 }
 
 func validHostname(h string) bool {
@@ -706,17 +785,25 @@ func validHostname(h string) bool {
 	return true
 }
 
-func (d *NTPConfig) Validate() error {
+// queriesFor returns the probe queries that apply to a (normalised) server.
+func (d DNSConfig) queriesFor(addr string) []DNSQuery {
+	if q, ok := d.ServerQueries[addr]; ok {
+		return q
+	}
+	return d.Queries
+}
+
+func (d *DNSConfig) Validate() error {
 	// No servers is valid: a gateway just drawn has none yet, and its proxy answers
-	// as an unsynchronised server until the first one is added.
+	// SERVFAIL until the first one is added.
 	seen := map[string]bool{}
 	for i, s := range d.Servers {
 		n, err := normalizeServer(s)
 		if err != nil {
-			return fmt.Errorf("ntp: %w", err)
+			return fmt.Errorf("dns: %w", err)
 		}
 		if seen[n] {
-			return fmt.Errorf("ntp: duplicate server %q", s)
+			return fmt.Errorf("dns: duplicate server %q", s)
 		}
 		seen[n] = true
 		d.Servers[i] = n
@@ -726,10 +813,10 @@ func (d *NTPConfig) Validate() error {
 		for _, s := range d.FallbackServers {
 			n, err := normalizeServer(s)
 			if err != nil {
-				return fmt.Errorf("ntp: fallback server: %w", err)
+				return fmt.Errorf("dns: fallback server: %w", err)
 			}
 			if seen[n] {
-				return fmt.Errorf("ntp: fallback server %q is also a normal server", s)
+				return fmt.Errorf("dns: fallback server %q is also a normal server", s)
 			}
 			seen[n] = true // for the duplicate check only; the maps below look at Servers
 			fb = append(fb, n)
@@ -755,15 +842,26 @@ func (d *NTPConfig) Validate() error {
 			d.PausedServers = nil
 		}
 	}
+	d.PausedQueries = keepQueries(d.PausedQueries, d.validQueryKeys())
+	for k, qs := range d.ServerQueries {
+		n, err := normalizeServer(k)
+		if err != nil || !seen[n] {
+			return fmt.Errorf("dns: server_queries entry %q is not one of the servers", k)
+		}
+		if n != k {
+			delete(d.ServerQueries, k)
+			d.ServerQueries[n] = qs
+		}
+	}
 	names := map[string]string{}
 	for k, name := range d.ServerNames {
 		n, err := normalizeServer(k)
 		if err != nil || !seen[n] {
-			return fmt.Errorf("ntp: server_names entry %q is not one of the servers", k)
+			return fmt.Errorf("dns: server_names entry %q is not one of the servers", k)
 		}
 		name = strings.TrimSpace(name)
-		if err := validGatewayName(name); err != nil {
-			return fmt.Errorf("ntp: name of server %s: %w", k, err)
+		if err := validServerName(name); err != nil {
+			return fmt.Errorf("dns: name of server %s: %w", k, err)
 		}
 		if name != "" {
 			names[n] = name
@@ -773,14 +871,34 @@ func (d *NTPConfig) Validate() error {
 	if len(names) == 0 {
 		d.ServerNames = nil
 	}
+	for _, sv := range d.Servers {
+		qs := d.queriesFor(sv)
+		if len(qs) == 0 {
+			return fmt.Errorf("dns: server %s has no probe queries (a server can only be verified by a query)", sv)
+		}
+		for _, q := range qs {
+			if _, err := buildQuery(0, q.Name, q.Type); err != nil {
+				return fmt.Errorf("dns: query %s: %w", q, err)
+			}
+		}
+	}
+	if d.DownPercent < 1 || d.DownPercent > 100 {
+		return errors.New("dns: down_percent must be 1-100")
+	}
 	if d.ListenPort < 1 || d.ListenPort > 65535 {
-		return errors.New("ntp: listen_port must be 1-65535")
+		return errors.New("dns: listen_port must be 1-65535")
 	}
-	if d.ServeOffsetMS < 0 || d.ServeOffsetMS > 3600000 {
-		return errors.New("ntp: serve_offset_ms must be 0-3600000 (0 = off)")
+	if d.DoTPort < 0 || d.DoTPort > 65535 {
+		return errors.New("dns: dot_port must be 0 (off) or 1-65535")
 	}
-	if d.MaxRTTMS < 0 || d.MaxRTTMS > 60000 {
-		return errors.New("ntp: max_rtt_ms must be 0-60000 (0 = off)")
+	if d.DoHPort < 0 || d.DoHPort > 65535 {
+		return errors.New("dns: doh_port must be 0 (off) or 1-65535")
+	}
+	if d.DoHPort != 0 && (d.DoHPort == d.ListenPort || d.DoHPort == d.DoTPort) {
+		return errors.New("dns: doh_port must differ from listen_port and dot_port (all use TCP)")
+	}
+	if d.DoTPort != 0 && d.DoTPort == d.ListenPort {
+		return errors.New("dns: dot_port must differ from listen_port (both use TCP)")
 	}
 	for _, f := range []struct {
 		name string
@@ -791,11 +909,20 @@ func (d *NTPConfig) Validate() error {
 		{"fail_threshold", d.FailThreshold},
 	} {
 		if f.v < 1 {
-			return fmt.Errorf("ntp: %s must be >= 1", f.name)
+			return fmt.Errorf("dns: %s must be >= 1", f.name)
 		}
 	}
-	if err := d.validateAuth(); err != nil {
-		return err
+	if d.CacheEntries < cacheMinEntries || d.CacheEntries > cacheMaxEntries {
+		return fmt.Errorf("dns: cache_entries must be %d-%d", cacheMinEntries, cacheMaxEntries)
+	}
+	if d.FailureCacheSeconds < 0 || d.FailureCacheSeconds > cacheFailTTLMax {
+		return fmt.Errorf("dns: failure_cache_seconds must be 0-%d seconds (0 = off)", cacheFailTTLMax)
+	}
+	if d.CacheMaxTTL < 1 || d.CacheMaxTTL > cacheMaxTTLLimit {
+		return fmt.Errorf("dns: cache_max_ttl must be 1-%d seconds", cacheMaxTTLLimit)
+	}
+	if d.SpreadBand < 1 || d.SpreadBand > 1000 {
+		return errors.New("dns: spread_band must be 1-1000 percent")
 	}
 	if err := d.validateClientNames(); err != nil {
 		return err
@@ -803,12 +930,28 @@ func (d *NTPConfig) Validate() error {
 	if err := d.validateClients(); err != nil {
 		return err
 	}
-	if err := d.lbValues().validate(); err != nil {
-		return fmt.Errorf("ntp: %w", err)
+	sl, err := normalizeSortList(d.SortList)
+	if err != nil {
+		return err
+	}
+	d.SortList = sl
+	pol, err := normalizePolicy(d.Policy)
+	if err != nil {
+		return err
+	}
+	d.Policy = pol
+	if d.ECSPrefix4 < 1 || d.ECSPrefix4 > 32 {
+		return errors.New("dns: ecs_prefix4 must be 1-32")
+	}
+	if d.ECSPrefix6 < 1 || d.ECSPrefix6 > 128 {
+		return errors.New("dns: ecs_prefix6 must be 1-128")
+	}
+	if d.LatencyAlpha <= 0 || d.LatencyAlpha > 1 {
+		return errors.New("dns: latency_alpha must be in (0, 1]")
 	}
 	if d.LB != nil {
 		if err := d.LB.validate(); err != nil {
-			return fmt.Errorf("ntp: lb: %w", err)
+			return fmt.Errorf("dns: lb: %w", err)
 		}
 	}
 	return nil
@@ -819,14 +962,14 @@ func (d *NTPConfig) Validate() error {
 type DaemonConfig struct {
 	LogLevel string        `json:"log_level"`
 	Groups   []GroupConfig `json:"groups"`
-	NTP      NTPConfig     `json:"ntp"`
+	DNS      DNSConfig     `json:"dns"`
 	Web      WebConfig     `json:"web"`
 	Cluster  ClusterConfig `json:"cluster"`
 	// BGP is this node's FRR/BGP settings (see bgp.go).  A pointer with omitempty so
 	// a config that never used BGP has no "bgp" key and older versions still read it.
 	BGP *BGPConfig `json:"bgp,omitempty"`
-	// SNMP is this node's snmpd settings (see snmp.go).  A pointer with omitempty so a config that never used SNMP has no
-	// "snmp" key and older versions still read it.  Local to the node, never replicated.
+	// SNMP is this node's own snmpd setting, the location (see snmp.go).  The community strings and the contact are
+	// shared and live in DNS.  A pointer with omitempty so a config that never used SNMP has no "snmp" key.
 	SNMP *SNMPConfig `json:"snmp,omitempty"`
 	// NodePaused takes the whole node out of service for maintenance, the same as
 	// pausing every gateway on it (present and future): it resigns, stops answering
@@ -834,9 +977,10 @@ type DaemonConfig struct {
 	// replicated; omitempty so a config that never used it stays readable by older
 	// versions.
 	NodePaused bool `json:"node_paused,omitempty"`
-	// PausedServersHere are the NTP servers paused on this node only (the shared list lives in the NTP block).
-	// Local, never replicated.
+	// PausedServersHere / PausedQueriesHere are the DNS servers and probe domains paused on this node only (the
+	// shared lists live in the DNS block).  Local, never replicated.
 	PausedServersHere []string `json:"paused_servers_here,omitempty"`
+	PausedQueriesHere []string `json:"paused_queries_here,omitempty"`
 }
 
 // effective is the configuration the supervisor runs: with the node paused every
@@ -848,11 +992,11 @@ func (dc *DaemonConfig) effective() *DaemonConfig {
 	}
 	c := *dc
 	c.Groups = append([]GroupConfig(nil), dc.Groups...)
-	here := func(d NTPConfig) NTPConfig {
-		d.PausedServersHere = dc.PausedServersHere
+	here := func(d DNSConfig) DNSConfig {
+		d.PausedServersHere, d.PausedQueriesHere = dc.PausedServersHere, dc.PausedQueriesHere
 		return d
 	}
-	c.NTP = here(c.NTP)
+	c.DNS = here(c.DNS)
 	for i := range c.Groups {
 		if dc.NodePaused || c.Groups[i].PausedAll { // paused on every node, or this whole node is
 			c.Groups[i].Paused = true
@@ -860,9 +1004,9 @@ func (dc *DaemonConfig) effective() *DaemonConfig {
 		if id := localNodeID(); id != "" && containsStr(c.Groups[i].ExcludedNodes, id) { // removed from this gateway: it serves nothing here
 			c.Groups[i].Paused, c.Groups[i].ExcludedHere = true, true
 		}
-		if c.Groups[i].NTP != nil {
-			d := here(*c.Groups[i].NTP)
-			c.Groups[i].NTP = &d
+		if c.Groups[i].DNS != nil {
+			d := here(*c.Groups[i].DNS)
+			c.Groups[i].DNS = &d
 		}
 	}
 	return &c
@@ -870,7 +1014,7 @@ func (dc *DaemonConfig) effective() *DaemonConfig {
 
 func newDaemonConfig() *DaemonConfig {
 	return &DaemonConfig{LogLevel: "info", Groups: []GroupConfig{newGatewayGroup()},
-		NTP: defaultNTP(), Web: defaultWeb(), Cluster: defaultCluster()}
+		DNS: defaultDNS(), Web: defaultWeb(), Cluster: defaultCluster()}
 }
 
 func (dc *DaemonConfig) UnmarshalJSON(b []byte) error {
@@ -896,34 +1040,32 @@ func (dc *DaemonConfig) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// poolFor returns the pool key and NTP settings for a group: its own pool
+// poolFor returns the pool key and DNS settings for a group: its own pool
 // (keyed by group id) or the shared one (key 0).
-func (dc *DaemonConfig) poolFor(g *GroupConfig) (int, NTPConfig) {
-	if g.NTP != nil {
-		c := *g.NTP
-		lb, own := g.NTP.ownLB()
+func (dc *DaemonConfig) poolFor(g *GroupConfig) (int, DNSConfig) {
+	if g.DNS != nil {
+		c := *g.DNS
+		lb, own := g.DNS.ownLB()
 		if !own {
-			lb = dc.NTP.lbValues() // follows Settings
+			lb = dc.DNS.lbValues() // follows Settings
 		}
 		c.setLBValues(lb)
 		c.LB = nil
-		c.followSettings(dc.NTP)
+		c.followSettings(dc.DNS)
 		return g.GroupID, c
 	}
-	return 0, dc.NTP
+	return 0, dc.DNS
 }
 
-// followSettings makes c use the client rules (allowed clients, rate, burst, action, exemptions) of the shared
-// Settings.  They are edited only on the Settings page, so a gateway's own pool must not keep the copy it was made
-// with: it would go on limiting after Settings said otherwise.
-func (c *NTPConfig) followSettings(shared NTPConfig) {
+// followSettings makes c use the answer cache and client rules (allowed clients, rate, burst, action, exemptions)
+// of the shared Settings.  They are edited only on the Settings page, so a gateway's own pool must not keep the copy
+// it was made with: it would go on caching, or limiting, after Settings said otherwise.
+func (c *DNSConfig) followSettings(shared DNSConfig) {
+	c.Cache, c.CacheEntries, c.CacheMaxTTL = shared.Cache, shared.CacheEntries, shared.CacheMaxTTL
+	c.FailureCacheSeconds = shared.FailureCacheSeconds
 	c.AllowedClients = append([]string(nil), shared.AllowedClients...)
 	if len(c.AllowedClients) == 0 {
 		c.AllowedClients = nil
-	}
-	c.BlockedClients = append([]string(nil), shared.BlockedClients...)
-	if len(c.BlockedClients) == 0 {
-		c.BlockedClients = nil
 	}
 	c.ClientExempt = append([]string(nil), shared.ClientExempt...)
 	if len(c.ClientExempt) == 0 {
@@ -932,6 +1074,13 @@ func (c *NTPConfig) followSettings(shared NTPConfig) {
 	c.ClientLimits = append([]string(nil), shared.ClientLimits...)
 	if len(c.ClientLimits) == 0 {
 		c.ClientLimits = nil
+	}
+	c.PolicyOn, c.PolicyLog, c.PolicyBlockTTL = shared.PolicyOn, shared.PolicyLog, shared.PolicyBlockTTL
+	c.Policy = clonePolicy(shared.Policy)
+	c.SortListOn = shared.SortListOn
+	c.SortList = append([]string(nil), shared.SortList...)
+	if len(c.SortList) == 0 {
+		c.SortList = nil
 	}
 	c.ClientRate, c.ClientBurst, c.ClientAction = shared.ClientRate, shared.ClientBurst, shared.ClientAction
 }
@@ -969,31 +1118,6 @@ func (dc *DaemonConfig) Validate() error {
 			vips[a] = g.GroupID
 		}
 	}
-	dnsdirOwner := map[string]int{}
-	for _, g := range dc.Groups {
-		seen := map[string]bool{}
-		for _, v := range g.DNSDirVIPs {
-			a := norm(v)
-			if other, dup := vips[a]; dup {
-				return fmt.Errorf("group %d: dnsdir address %s is the shared address of group %d", g.GroupID, a, other)
-			}
-			if seen[a] {
-				return fmt.Errorf("group %d lists the dnsdir address %s twice", g.GroupID, a)
-			}
-			if other, dup := dnsdirOwner[a]; dup {
-				return fmt.Errorf("groups %d and %d both answer on the dnsdir address %s", other, g.GroupID, a)
-			}
-			for _, o := range dc.Groups {
-				for _, x := range o.ExtraVIPs {
-					if norm(x) == a {
-						return fmt.Errorf("group %d: %s is also an anycast address of group %d: an address is either ntpdir's own or dnsdir's", g.GroupID, a, o.GroupID)
-					}
-				}
-			}
-			seen[a] = true
-			dnsdirOwner[a] = g.GroupID
-		}
-	}
 	for _, g := range dc.Groups {
 		seen := map[string]bool{}
 		for _, v := range g.ExtraVIPs {
@@ -1007,65 +1131,66 @@ func (dc *DaemonConfig) Validate() error {
 			seen[a] = true
 		}
 	}
-	// this node's own pauses must still name a server that exists somewhere
-	hereServers := map[string]bool{}
-	blocks := []*NTPConfig{&dc.NTP}
+	// this node's own pauses must still name a server / probe domain that exists somewhere
+	hereServers, hereQueries := map[string]bool{}, map[string]bool{}
+	blocks := []*DNSConfig{&dc.DNS}
 	for i := range dc.Groups {
-		if dc.Groups[i].NTP != nil {
-			blocks = append(blocks, dc.Groups[i].NTP)
+		if dc.Groups[i].DNS != nil {
+			blocks = append(blocks, dc.Groups[i].DNS)
 		}
 	}
 	for _, b := range blocks {
 		for _, sv := range b.Servers {
 			hereServers[sv] = true
 		}
+		for k := range b.validQueryKeys() {
+			hereQueries[k] = true
+		}
 	}
-	dc.PausedServersHere = keepStrings(dc.PausedServersHere, hereServers)
+	dc.PausedServersHere = keepQueries(dc.PausedServersHere, hereServers)
+	dc.PausedQueriesHere = keepQueries(dc.PausedQueriesHere, hereQueries)
 	switch strings.ToLower(dc.LogLevel) {
 	case "debug", "info", "warning", "error":
 	default:
 		return fmt.Errorf("log_level %q must be debug|info|warning|error", dc.LogLevel)
 	}
-	if dc.NTP.LB != nil {
-		return errors.New("ntp: lb belongs to a gateway's own pool (the shared settings are the load-balancing settings themselves)")
+	if dc.DNS.LB != nil {
+		return errors.New("dns: lb belongs to a gateway's own pool (the shared settings are the load-balancing settings themselves)")
 	}
 	needGlobal := false
 	for i := range dc.Groups {
 		g := &dc.Groups[i]
-		if g.NTP == nil {
+		g.DNSProxy = true // always on, see GroupConfig.DNSProxy
+		if g.DNS == nil {
 			needGlobal = true
 			continue
 		}
-		if err := g.NTP.Validate(); err != nil {
+		if err := g.DNS.Validate(); err != nil {
 			return fmt.Errorf("group %d: %w", g.GroupID, err)
 		}
 	}
 	if needGlobal {
-		if err := dc.NTP.Validate(); err != nil {
+		if err := dc.DNS.Validate(); err != nil {
 			return err
 		}
 	}
 	if err := dc.Web.Validate(); err != nil {
 		return err
 	}
-	if err := validateSchedule(dc.NTP.Schedule); err != nil {
+	if err := validateSchedule(dc.DNS.Schedule); err != nil {
 		return err
 	}
-	if len(dc.NTP.Schedule) == 0 {
-		dc.NTP.Schedule = nil
+	if len(dc.DNS.Schedule) == 0 {
+		dc.DNS.Schedule = nil
 	}
 	{
-		sc := SNMPConfig{Communities: dc.NTP.SNMPCommunities, Contact: dc.NTP.SNMPContact}
+		sc := SNMPConfig{Communities: dc.DNS.SNMPCommunities, Contact: dc.DNS.SNMPContact}
 		if err := sc.Validate(); err != nil {
 			return err
 		}
-		dc.NTP.SNMPCommunities, dc.NTP.SNMPContact = sc.Communities, sc.Contact
+		dc.DNS.SNMPCommunities, dc.DNS.SNMPContact = sc.Communities, sc.Contact
 	}
 	if dc.SNMP != nil {
-		// v49 kept communities and contact on the node; they are cluster settings now, so move them over once
-		if len(dc.NTP.SNMPCommunities) == 0 && dc.NTP.SNMPContact == "" && (len(dc.SNMP.Communities) > 0 || dc.SNMP.Contact != "") {
-			dc.NTP.SNMPCommunities, dc.NTP.SNMPContact = dc.SNMP.Communities, dc.SNMP.Contact
-		}
 		dc.SNMP.Communities, dc.SNMP.Contact = nil, ""
 		if err := dc.SNMP.Validate(); err != nil {
 			return err
@@ -1135,7 +1260,7 @@ type WebConfig struct {
 	// LegacyEnabled is the old "enabled" switch: the GUI is always on now.  The
 	// key is still accepted so existing config files load; it is dropped on save.
 	LegacyEnabled *bool `json:"enabled,omitempty"`
-	// Listen is the address:port to serve HTTPS on (default ":12380").
+	// Listen is the address:port to serve HTTPS on (default ":53853").
 	Listen string `json:"listen"`
 	// CertFile/KeyFile: PEM certificate and key.  Leave both empty to use an
 	// auto-generated self-signed certificate stored next to the config file.
@@ -1161,7 +1286,7 @@ type WebConfig struct {
 }
 
 const (
-	defaultWebPort       = 12380
+	defaultWebPort       = 53853
 	defaultMinPassword   = 8
 	maxMinPasswordLength = 128
 )
@@ -1177,8 +1302,8 @@ func (w WebConfig) minPassword() int {
 func defaultWeb() WebConfig {
 	return WebConfig{
 		Listen:                   fmt.Sprintf(":%d", defaultWebPort),
-		Group:                    "ntpdir,ntpdir-users",
-		PAMService:               "ntpdir",
+		Group:                    "dnsdir,dnsdir-users",
+		PAMService:               "dnsdir",
 		SessionIdleMinutes:       30,
 		MaxFailedLogins:          3,
 		FailedLoginWindowMinutes: 1,
@@ -1200,7 +1325,7 @@ func (w *WebConfig) UnmarshalJSON(b []byte) error {
 func (w *WebConfig) Validate() error {
 	_, port, err := net.SplitHostPort(w.Listen)
 	if err != nil {
-		return fmt.Errorf("web: listen %q must be host:port, e.g. \":12380\"", w.Listen)
+		return fmt.Errorf("web: listen %q must be host:port, e.g. \":53853\"", w.Listen)
 	}
 	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
 		return fmt.Errorf("web: listen port %q must be 1-65535", port)
@@ -1250,7 +1375,7 @@ type ClusterConfig struct {
 	// older files still load).  Every node is the primary of its own
 	// single-node cluster until it joins another.
 	Enabled bool `json:"-"`
-	// Listen is the address:port of the peer-to-peer listener (default ":12381").
+	// Listen is the address:port of the peer-to-peer listener (default ":53854").
 	Listen string `json:"listen"`
 	// Self is the host:port other nodes use to reach this one.  Empty means
 	// "this host's name and the listen port".
@@ -1262,7 +1387,7 @@ type ClusterConfig struct {
 	ShareCert bool `json:"-"`
 }
 
-const defaultClusterPort = 12381
+const defaultClusterPort = 53854
 
 func defaultCluster() ClusterConfig {
 	return ClusterConfig{
@@ -1295,7 +1420,7 @@ func (c *ClusterConfig) Validate() error {
 		return nil
 	}
 	if _, port, err := net.SplitHostPort(c.Listen); err != nil {
-		return fmt.Errorf("cluster: listen %q must be host:port, e.g. \":12381\"", c.Listen)
+		return fmt.Errorf("cluster: listen %q must be host:port, e.g. \":53854\"", c.Listen)
 	} else if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
 		return fmt.Errorf("cluster: listen port %q must be 1-65535", port)
 	}
@@ -1311,10 +1436,10 @@ func (c *ClusterConfig) Validate() error {
 }
 
 // isPaused reports whether the server (as written in Servers) is paused, on every node or on this one.
-func (d *NTPConfig) isPaused(addr string) bool { return d.serverPausedScope(addr) != "" }
+func (d *DNSConfig) isPaused(addr string) bool { return d.serverPausedScope(addr) != "" }
 
 // serverPausedScope says where the server is paused: "all" (every node), "node" (this one) or "" (not paused).
-func (d *NTPConfig) serverPausedScope(addr string) string {
+func (d *DNSConfig) serverPausedScope(addr string) string {
 	if containsStr(d.PausedServers, addr) {
 		return "all"
 	}
@@ -1324,8 +1449,53 @@ func (d *NTPConfig) serverPausedScope(addr string) string {
 	return ""
 }
 
-// keepStrings returns the distinct entries of l that are in valid (nil when none).
-func keepStrings(l []string, valid map[string]bool) []string {
+// queryKey names one probe domain of one server in the paused lists.
+func queryKey(server, name, typ string) string {
+	return server + "|" + strings.ToLower(strings.TrimSuffix(name, ".")) + "|" + strings.ToUpper(typ)
+}
+
+// queryPausedScope says where the server's probe domain is paused: "all", "node" or "".
+func (d *DNSConfig) queryPausedScope(server string, q DNSQuery) string {
+	k := queryKey(server, q.Name, q.Type)
+	if containsStr(d.PausedQueries, k) {
+		return "all"
+	}
+	if containsStr(d.PausedQueriesHere, k) {
+		return "node"
+	}
+	return ""
+}
+
+// pausedQueryCount is how many of the server's probe domains are paused, and how many it has.
+func (d *DNSConfig) pausedQueryCount(server string) (paused, total int) {
+	qs := d.queriesFor(server)
+	for _, q := range qs {
+		if d.queryPausedScope(server, q) != "" {
+			paused++
+		}
+	}
+	return paused, len(qs)
+}
+
+// allQueriesPaused says the server has probe domains and every one is paused: it cannot be verified, so it counts as down.
+func (d *DNSConfig) allQueriesPaused(server string) bool {
+	p, n := d.pausedQueryCount(server)
+	return n > 0 && p == n
+}
+
+// validQueryKeys lists the paused-list keys of every probe domain this block has.
+func (d *DNSConfig) validQueryKeys() map[string]bool {
+	m := map[string]bool{}
+	for _, sv := range d.Servers {
+		for _, q := range d.queriesFor(sv) {
+			m[queryKey(sv, q.Name, q.Type)] = true
+		}
+	}
+	return m
+}
+
+// keepQueries returns the distinct entries of l that are in valid (nil when none).
+func keepQueries(l []string, valid map[string]bool) []string {
 	var out []string
 	for _, k := range l {
 		if valid[k] && !containsStr(out, k) {
@@ -1336,9 +1506,9 @@ func keepStrings(l []string, valid map[string]bool) []string {
 }
 
 // live is the configuration the probe pool runs with: paused servers left out.
-func (d NTPConfig) live() NTPConfig {
+func (d DNSConfig) live() DNSConfig {
+	d.Schedule = nil    // the scheduler's tasks are not the pool's: a change must not restart it
 	d.ServerNames = nil // labels only: a rename must not restart the pool
-	d.clearNodeWide()   // chrony's and SNMP's, not the pool's
 	if len(d.PausedServers) != 0 || len(d.PausedServersHere) != 0 {
 		var up []string
 		for _, s := range d.Servers {
@@ -1348,12 +1518,57 @@ func (d NTPConfig) live() NTPConfig {
 		}
 		d.Servers = up
 	}
-	d.PausedServers, d.PausedServersHere = nil, nil
+	// paused probe domains are not asked; a server with every one of them paused cannot be verified, so it counts as
+	// down and is left out of the pool like a paused server
+	if len(d.PausedQueries) != 0 || len(d.PausedQueriesHere) != 0 {
+		var up []string
+		for _, s := range d.Servers {
+			if !d.allQueriesPaused(s) {
+				up = append(up, s)
+			}
+		}
+		d.Servers = up
+		sq := make(map[string][]DNSQuery, len(d.ServerQueries)+len(d.Servers))
+		for k, v := range d.ServerQueries {
+			sq[k] = v
+		}
+		for _, sv := range d.Servers {
+			all := d.queriesFor(sv)
+			var kept []DNSQuery
+			for _, q := range all {
+				if d.queryPausedScope(sv, q) == "" {
+					kept = append(kept, q)
+				}
+			}
+			if len(kept) > 0 && len(kept) < len(all) {
+				sq[sv] = kept
+			}
+		}
+		d.ServerQueries = sq
+	}
+	d.PausedServers, d.PausedServersHere, d.PausedQueries, d.PausedQueriesHere = nil, nil, nil, nil
 	return d
 }
 
 // maxGatewayName is the longest label a gateway may carry.
 const maxGatewayName = 40
+
+// maxServerName is the longest name a DNS server can be given: as long as a host name, because a full host name is also
+// registered in DNS.
+const maxServerName = 253
+
+// validServerName accepts an empty name or up to 253 characters with no control characters.
+func validServerName(n string) error {
+	if utf8.RuneCountInString(n) > maxServerName {
+		return fmt.Errorf("name is longer than %d characters", maxServerName)
+	}
+	for _, r := range n {
+		if unicode.IsControl(r) {
+			return errors.New("name must not contain control characters")
+		}
+	}
+	return nil
+}
 
 // validGatewayName accepts an empty name or up to 40 characters with no control characters.
 func validGatewayName(n string) error {
@@ -1374,26 +1589,45 @@ const (
 )
 
 // validateClientNames checks the hand-given client names and writes the addresses in their canonical form (in place).
-func (d *NTPConfig) validateClientNames() error {
+func (d *DNSConfig) validateClientNames() error {
+	d.RegisterKeyName = strings.TrimSpace(d.RegisterKeyName)
+	d.RegisterKey = strings.TrimSpace(d.RegisterKey)
+	if (d.RegisterKeyName == "") != (d.RegisterKey == "") {
+		return errors.New("dns: register_key_name and register_key go together")
+	}
+	if d.RegisterKey != "" {
+		if _, err := base64.StdEncoding.DecodeString(d.RegisterKey); err != nil {
+			return errors.New("dns: register_key must be base64")
+		}
+		if _, err := validHostName(d.RegisterKeyName); err != nil {
+			return fmt.Errorf("dns: register_key_name: %v", err)
+		}
+	}
+	if d.PolicyBlockTTL < 0 || d.PolicyBlockTTL > 604800 {
+		return errors.New("dns: policy_block_ttl is 0-604800 seconds (0: 14400)")
+	}
+	if d.RegisterTTL < 0 || d.RegisterTTL > 86400 {
+		return errors.New("dns: register_ttl is 0-86400 seconds (0: 300)")
+	}
 	if len(d.ClientNames) == 0 {
 		d.ClientNames = nil
 		return nil
 	}
 	if len(d.ClientNames) > maxClientNames {
-		return fmt.Errorf("ntp: client_names holds at most %d names", maxClientNames)
+		return fmt.Errorf("dns: client_names holds at most %d names", maxClientNames)
 	}
 	out := make(map[string]string, len(d.ClientNames))
 	for k, v := range d.ClientNames {
 		a, err := netip.ParseAddr(strings.TrimSpace(k))
 		if err != nil {
-			return fmt.Errorf("ntp: client_names: %q is not an address", k)
+			return fmt.Errorf("dns: client_names: %q is not an address", k)
 		}
 		v = strings.TrimSpace(v)
 		if v == "" {
 			continue // an empty name is no name
 		}
 		if len(v) > maxClientNameLen || strings.IndexFunc(v, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
-			return fmt.Errorf("ntp: client_names: the name of %s is too long (at most %d characters) or has control characters", a, maxClientNameLen)
+			return fmt.Errorf("dns: client_names: the name of %s is too long (at most %d characters) or has control characters", a, maxClientNameLen)
 		}
 		out[a.Unmap().String()] = v
 	}
@@ -1405,18 +1639,18 @@ func (d *NTPConfig) validateClientNames() error {
 }
 
 // validateClients checks and normalises the client list, exemptions, rate and action (in place).
-func (d *NTPConfig) validateClients() error {
+func (d *DNSConfig) validateClients() error {
 	for _, f := range []struct {
 		name string
 		list *[]string
-	}{{"allowed_clients", &d.AllowedClients}, {"blocked_clients", &d.BlockedClients}, {"client_exempt", &d.ClientExempt}} {
+	}{{"allowed_clients", &d.AllowedClients}, {"client_exempt", &d.ClientExempt}} {
 		if len(*f.list) == 0 {
 			*f.list = nil
 			continue
 		}
 		nets, err := parseClientNets(*f.list)
 		if err != nil {
-			return fmt.Errorf("ntp: %s: %w", f.name, err)
+			return fmt.Errorf("dns: %s: %w", f.name, err)
 		}
 		norm := make([]string, 0, len(nets))
 		seen := map[string]bool{}
@@ -1428,18 +1662,12 @@ func (d *NTPConfig) validateClients() error {
 		}
 		*f.list = norm
 	}
-	for _, s := range d.BlockedClients {
-		n, _ := netip.ParsePrefix(s)
-		if n.Contains(netip.MustParseAddr("127.0.0.1")) || n.Contains(netip.MustParseAddr("::1")) {
-			return fmt.Errorf("ntp: blocked_clients: %s covers this node itself, which always may ask", s)
-		}
-	}
 	if len(d.ClientLimits) == 0 {
 		d.ClientLimits = nil
 	} else {
 		ov, err := parseClientLimits(d.ClientLimits)
 		if err != nil {
-			return fmt.Errorf("ntp: client_limits: %w", err)
+			return fmt.Errorf("dns: client_limits: %w", err)
 		}
 		norm, seen := make([]string, 0, len(ov)), map[string]bool{}
 		for _, o := range ov {
@@ -1448,7 +1676,7 @@ func (d *NTPConfig) validateClients() error {
 				n = o.net.Addr().String()
 			}
 			if seen[n] {
-				return fmt.Errorf("ntp: client_limits: %s is listed twice", n)
+				return fmt.Errorf("dns: client_limits: %s is listed twice", n)
 			}
 			seen[n] = true
 			norm = append(norm, n+" "+strconv.Itoa(int(o.rate)))
@@ -1456,17 +1684,17 @@ func (d *NTPConfig) validateClients() error {
 		d.ClientLimits = norm
 	}
 	if d.ClientRate < 0 || d.ClientRate > 10_000_000 {
-		return errors.New("ntp: client_rate must be 0-10000000 requests per second")
+		return errors.New("dns: client_rate must be 0-10000000 queries per second")
 	}
 	if d.ClientBurst < 0 || d.ClientBurst > 100_000_000 {
-		return errors.New("ntp: client_burst must be 0-100000000")
+		return errors.New("dns: client_burst must be 0-100000000")
 	}
 	switch d.ClientAction {
 	case "", actDrop:
 		d.ClientAction = "" // the default is not written
-	case actKoD:
+	case actTruncate, actRefused:
 	default:
-		return fmt.Errorf("ntp: client_action must be drop or kod, not %q", d.ClientAction)
+		return fmt.Errorf("dns: client_action must be drop, truncate or refused, not %q", d.ClientAction)
 	}
 	return nil
 }
@@ -1500,17 +1728,9 @@ func (g GroupConfig) pausedAnycast() map[string]string {
 
 // snmpSettings is the whole SNMP configuration of this node: the cluster's communities and contact, this node's location.
 func (dc *DaemonConfig) snmpSettings() SNMPConfig {
-	c := SNMPConfig{Communities: dc.NTP.SNMPCommunities, Contact: dc.NTP.SNMPContact}
+	c := SNMPConfig{Communities: dc.DNS.SNMPCommunities, Contact: dc.DNS.SNMPContact}
 	if dc.SNMP != nil {
 		c.Location = dc.SNMP.Location
 	}
 	return c
-}
-
-// clearNodeWide drops the settings that belong to the node as a whole (SNMP, keys, NTS, leap seconds): a gateway's own pool and
-// the probe pool have no use for them, and a copy of them would only go stale.
-func (d *NTPConfig) clearNodeWide() {
-	d.SNMPCommunities, d.SNMPContact = nil, ""
-	d.Keys, d.ServerAuth, d.NTSServer, d.LeapTZ, d.LeapMode, d.LeapSmear = nil, nil, false, "", "", false
-	d.Schedule = nil
 }

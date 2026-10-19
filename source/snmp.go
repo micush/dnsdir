@@ -9,16 +9,16 @@ import (
 	"time"
 )
 
-// SNMP.  ntpdir runs net-snmp's snmpd on this node when, and only when, a community string is set (Configure ▸ SNMP):
+// SNMP.  dnsdir runs net-snmp's snmpd on this node when, and only when, a community string is set (Configure ▸ SNMP):
 //
 //	communities  read-only community strings, any number of them; none = snmpd is switched off
 //	location     what snmpd reports as sysLocation
 //	contact      what snmpd reports as sysContact
 //
-// The communities and the contact are cluster settings (NTPConfig.SNMPCommunities/SNMPContact, replicated); the location is
-// local to the node (DaemonConfig.SNMP) because it differs from node to node.  ntpdir owns
+// The communities and the contact are cluster settings (DNSConfig.SNMPCommunities/SNMPContact, replicated); the location is
+// local to the node (DaemonConfig.SNMP) because it differs from node to node.  dnsdir owns
 // /etc/snmp/snmpd.conf while it is in use: the file it writes starts with snmpHeader, an snmpd.conf that was there before
-// is kept once as snmpd.conf.ntpdir-orig and put back when the communities are emptied.  An snmpd that ntpdir never took
+// is kept once as snmpd.conf.dnsdir-orig and put back when the communities are emptied.  An snmpd that dnsdir never took
 // over (no header) is left alone when the communities are empty.
 
 // SNMPConfig is the snmp block of the configuration.
@@ -32,9 +32,9 @@ const (
 	maxSNMPCommunities   = 16
 	maxSNMPCommunityLen  = 64
 	maxSNMPTextLen       = 255
-	snmpHeader           = "# Managed by ntpdir (Configure ▸ SNMP). Changes made here are overwritten; change them there.\n"
+	snmpHeader           = "# Managed by dnsdir (Configure ▸ SNMP). Changes made here are overwritten; change them there.\n"
 	snmpUnit             = "snmpd"
-	snmpBackupSuffix     = ".ntpdir-orig"
+	snmpBackupSuffix     = ".dnsdir-orig"
 	snmpRestartThrottle  = 5 * time.Second
 	snmpNotInstalledWarn = "snmpd is not installed, so SNMP cannot answer: install the snmpd package (net-snmp on Fedora/RHEL/Arch) or run the installer again"
 )
@@ -123,7 +123,7 @@ var snmpMu sync.Mutex
 var snmpWarned time.Time
 
 // applySNMP makes snmpd match the settings: written, enabled and (re)started when a community is set; switched off, and the
-// file it replaced put back, when the communities are emptied after ntpdir had taken it over.  It is cheap when nothing
+// file it replaced put back, when the communities are emptied after dnsdir had taken it over.  It is cheap when nothing
 // changed, so it runs at start and after every configuration change.
 func applySNMP(cfg SNMPConfig) {
 	snmpMu.Lock()
@@ -167,7 +167,7 @@ func applySNMP(cfg SNMPConfig) {
 			warnf("snmp: %v", err)
 			return
 		}
-		tmp := snmpConfPath + ".ntpdir.tmp"
+		tmp := snmpConfPath + ".dnsdir.tmp"
 		if err := os.WriteFile(tmp, []byte(body), 0o600); err != nil {
 			warnf("snmp: could not write %s: %v", snmpConfPath, err)
 			return

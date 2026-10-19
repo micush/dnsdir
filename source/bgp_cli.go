@@ -128,13 +128,6 @@ func runBGP(sock string, f *cliFlags) {
 
 func printBGP(st BGPStatus) {
 	c := st.Config
-	if st.Blocked != "" {
-		fmt.Printf("BGP is unavailable: %s.\n", st.Blocked)
-		if c.Configured() {
-			fmt.Printf("  (the settings kept in the config, AS %d, have no effect; --asn off clears them)\n", c.ASN)
-		}
-		return
-	}
 	if c.Configured() && c.Disabled {
 		fmt.Printf("BGP is disabled on this node (AS %d, %d neighbor(s) kept); enable it with --bgp-enable\n", c.ASN, len(c.Neighbors))
 		return
@@ -144,7 +137,7 @@ func printBGP(st BGPStatus) {
 		if len(c.Neighbors) > 0 {
 			fmt.Printf("  (%d neighbor(s) kept; turn BGP on with --asn N)\n", len(c.Neighbors))
 		} else {
-			fmt.Println("  Set it up with: ntpdir --asn 64512 --bgp-neighbor-add 192.0.2.1 --remote-as 64500")
+			fmt.Println("  Set it up with: dnsdir --asn 64512 --bgp-neighbor-add 192.0.2.1 --remote-as 64500")
 		}
 		return
 	}

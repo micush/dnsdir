@@ -26,7 +26,7 @@ type fakeAuth struct {
 
 func (f *fakeAuth) Authenticate(service, user, pass string) error {
 	f.authCalls.Add(1)
-	if service != "ntpdir" {
+	if service != "dnsdir" {
 		return errors.New("wrong service " + service)
 	}
 	if (user == "alice" || user == "bob") && pass == "pw" {
@@ -36,7 +36,7 @@ func (f *fakeAuth) Authenticate(service, user, pass string) error {
 }
 
 func (f *fakeAuth) InGroup(user, group string) (bool, error) {
-	if group != "ntpdir,ntpdir-users" {
+	if group != "dnsdir,dnsdir-users" {
 		return false, errors.New("wrong group")
 	}
 	return user == "alice" && !f.removed.Load(), nil
@@ -59,7 +59,7 @@ func newWebEnv(t *testing.T) *webEnv {
 	failDelay = time.Millisecond
 	e := &webEnv{t: t, auth: &fakeAuth{}}
 	dir := t.TempDir()
-	e.conf = filepath.Join(dir, "ntpdir.conf")
+	e.conf = filepath.Join(dir, "dnsdir.conf")
 	dc := newDaemonConfig()
 	dc.Cluster.Enabled = false
 	mg, err := NewMgmt(e.conf, filepath.Join(dir, "state"), dc)
@@ -161,14 +161,14 @@ func TestLoginRules(t *testing.T) {
 			t.Fatalf("%v: code %d", c, r.code)
 		}
 		// identical message for every cause
-		if !strings.Contains(r.body["error"].(string), "Login failed") || strings.Contains(r.body["error"].(string), "ntpdir") {
+		if !strings.Contains(r.body["error"].(string), "Login failed") || strings.Contains(r.body["error"].(string), "dnsdir") {
 			t.Fatalf("%v: %v", c, r.body)
 		}
 		if _, has := r.body["attempts_left"]; has {
 			t.Fatalf("%v: attempts left is reported: %v", c, r.body)
 		}
 	}
-	// bob authenticated in PAM but is not in the ntpdir group → still refused
+	// bob authenticated in PAM but is not in the dnsdir group → still refused
 	if r := e.login("alice", "pw"); r.code != 200 || r.body["user"] != "alice" || r.body["version"] != version() {
 		t.Fatalf("alice login: %d %v", r.code, r.body)
 	}
@@ -177,7 +177,7 @@ func TestLoginRules(t *testing.T) {
 func TestAPIRequiresSession(t *testing.T) {
 	e := newWebEnv(t)
 	cookie = ""
-	for _, p := range []string{"/api/session", "/api/gateways", "/api/neighbors", "/api/ntp", "/api/config"} {
+	for _, p := range []string{"/api/session", "/api/gateways", "/api/neighbors", "/api/dns", "/api/config"} {
 		if r := e.do("GET", p, nil); r.code != 401 {
 			t.Fatalf("GET %s without session = %d", p, r.code)
 		}
@@ -193,7 +193,7 @@ func TestAPIRequiresSession(t *testing.T) {
 func TestCLIParityEndpoints(t *testing.T) {
 	e := newWebEnv(t)
 	e.login("alice", "pw")
-	for _, p := range []string{"/api/session", "/api/gateways", "/api/neighbors", "/api/ntp", "/api/config"} {
+	for _, p := range []string{"/api/session", "/api/gateways", "/api/neighbors", "/api/dns", "/api/config"} {
 		if r := e.do("GET", p, nil, withAuth(e, false)); r.code != 200 {
 			t.Fatalf("GET %s = %d %s", p, r.code, r.raw)
 		}
@@ -203,9 +203,9 @@ func TestCLIParityEndpoints(t *testing.T) {
 	if r.code != 200 || r.body["ok"] != false {
 		t.Fatalf("assert-agc: %d %v", r.code, r.body)
 	}
-	// no NTP server defined, nothing to show
-	r = e.do("GET", "/api/ntp", nil, withAuth(e, false))
-	if r.body["ok"] != false || !strings.Contains(r.body["error"].(string), "no NTP server") {
+	// no gateway, no DNS proxy
+	r = e.do("GET", "/api/dns", nil, withAuth(e, false))
+	if r.body["ok"] != false || !strings.Contains(r.body["error"].(string), "no gateway") {
 		t.Fatalf("dns: %v", r.body)
 	}
 }
@@ -260,7 +260,7 @@ func TestSessionIdleTimeoutAndGroupRevocation(t *testing.T) {
 	}
 
 	e.login("alice", "pw")
-	e.auth.removed.Store(true) // alice leaves the ntpdir group
+	e.auth.removed.Store(true) // alice leaves the dnsdir group
 	e.ws.mu.Lock()
 	for _, s := range e.ws.sessions {
 		s.checked = time.Now().Add(-time.Hour) // force the periodic re-check
@@ -279,7 +279,7 @@ func TestLoginThrottle(t *testing.T) {
 		// a guesser is not told how many tries it has left, nor what the policy is, nor which group is needed
 		msg, _ := r.body["error"].(string)
 		if _, has := r.body["attempts_left"]; has || r.code != 401 || strings.ContainsAny(msg, "0123456789") ||
-			strings.Contains(msg, "left") || strings.Contains(msg, "ntpdir") || strings.Contains(msg, "lockout") {
+			strings.Contains(msg, "left") || strings.Contains(msg, "dnsdir") || strings.Contains(msg, "lockout") {
 			t.Fatalf("attempt %d of %d leaks something: %d %v", i, max, r.code, r.body)
 		}
 	}
@@ -427,7 +427,8 @@ func TestConfigGetPutValidateAndSave(t *testing.T) {
 	}
 
 	// real save: written 0600, applied via reload, GET round-trips
-	cfg["ntp"] = map[string]any{"servers": []any{"10.0.0.123"}}
+	cfg["groups"].([]any)[0].(map[string]any)["dns_proxy"] = true
+	cfg["dns"] = map[string]any{"servers": []any{"10.0.0.53"}, "queries": []any{map[string]any{"name": "example.com", "type": "a"}}}
 	r = e.do("PUT", "/api/config", map[string]any{"config": cfg}, withAuth(e, true))
 	if r.code != 200 {
 		t.Fatalf("save: %d %v", r.code, r.body)
@@ -440,8 +441,8 @@ func TestConfigGetPutValidateAndSave(t *testing.T) {
 		t.Fatalf("saved file: %v %v", err, st)
 	}
 	dc, err := loadConfig(e.conf)
-	if err != nil || dc.Groups[0].VIP4 != "10.9.0.1/24" ||
-		dc.NTP.Servers[0] != "10.0.0.123:123" {
+	if err != nil || dc.Groups[0].VIP4 != "10.9.0.1/24" || !dc.Groups[0].DNSProxy ||
+		dc.DNS.Servers[0] != "10.0.0.53:53" || dc.DNS.Queries[0].Type != "A" {
 		t.Fatalf("saved content wrong: %v %+v", err, dc)
 	}
 	r = e.do("GET", "/api/config", nil, withAuth(e, false))
@@ -462,11 +463,11 @@ func TestWebConfigValidation(t *testing.T) {
 	if err := ok.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if ok.Listen != ":12380" || ok.Group != "ntpdir,ntpdir-users" || ok.PAMService != "ntpdir" || ok.MaxFailedLogins != 3 || ok.FailedLoginWindowMinutes != 1 || ok.LockoutMinutes != 15 {
+	if ok.Listen != ":53853" || ok.Group != "dnsdir,dnsdir-users" || ok.PAMService != "dnsdir" || ok.MaxFailedLogins != 3 || ok.FailedLoginWindowMinutes != 1 || ok.LockoutMinutes != 15 {
 		t.Fatalf("defaults wrong: %+v", ok)
 	}
 	for name, mod := range map[string]func(*WebConfig){
-		"bad listen":   func(w *WebConfig) { w.Listen = "12380" },
+		"bad listen":   func(w *WebConfig) { w.Listen = "53853" },
 		"bad port":     func(w *WebConfig) { w.Listen = ":99999" },
 		"cert w/o key": func(w *WebConfig) { w.CertFile = "/x.crt" },
 		"empty group":  func(w *WebConfig) { w.Group = "" },
@@ -512,10 +513,10 @@ func TestHTTPSListenerSelfSigned(t *testing.T) {
 	e.ws.Apply(cfg)
 	defer e.ws.Stop()
 
-	if _, err := os.Stat(filepath.Join(filepath.Dir(e.conf), "ntpdir-web.key")); err != nil {
+	if _, err := os.Stat(filepath.Join(filepath.Dir(e.conf), "dnsdir-web.key")); err != nil {
 		t.Fatalf("self-signed key not stored: %v", err)
 	}
-	if st, _ := os.Stat(filepath.Join(filepath.Dir(e.conf), "ntpdir-web.key")); st.Mode().Perm() != 0o600 {
+	if st, _ := os.Stat(filepath.Join(filepath.Dir(e.conf), "dnsdir-web.key")); st.Mode().Perm() != 0o600 {
 		t.Fatalf("key mode %v", st.Mode())
 	}
 	c := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, Timeout: 5 * time.Second}
@@ -582,8 +583,8 @@ func TestSessionsSurviveARestart(t *testing.T) {
 }
 
 // Whether the whole node is paused is changed only by pausing or resuming the node.  A page saves the copy of the config it
-// fetched earlier: with a stale node_paused in it, pausing a server must not pause the node, and a stale false must not
-// resume a paused node.
+// fetched earlier: with a stale node_paused in it, pausing a server must not pause the node (the log of a real node showed
+// "Groups changed … ; Node: paused" for exactly that), and a stale false must not resume a paused node.
 func TestConfigSaveNeverChangesTheNodePause(t *testing.T) {
 	e := newWebEnv(t)
 	e.login("alice", "pw")

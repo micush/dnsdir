@@ -47,10 +47,10 @@ func TestNodePauseFlagIsLocalAndOptional(t *testing.T) {
 }
 
 func TestNodePauseStartsNothingAndShowsOnTheCanvas(t *testing.T) {
-	a := newFakeNTP(t)
-	d := testNTPCfg(a.addr)
+	a := newFakeDNS(t)
+	d := testDNSCfg(a.addr)
 	g := defaultGroup()
-	g.NTP = &d
+	g.DNSProxy, g.DNS = true, &d
 	dc := newDaemonConfig()
 	dc.Groups = []GroupConfig{g}
 	dc.NodePaused = true
@@ -60,8 +60,8 @@ func TestNodePauseStartsNothingAndShowsOnTheCanvas(t *testing.T) {
 	if n := len(sup.engineList()); n != 0 {
 		t.Fatalf("a paused node must start no engines, got %d", n)
 	}
-	if sup.poolFor(1) == nil {
-		t.Fatal("a paused node keeps its pools: the servers are still its time sources")
+	if sup.poolFor(1) != nil {
+		t.Fatal("a paused node needs no probe pool")
 	}
 	cv := buildCanvas(sup.config(), nil, sup.poolList())[0]
 	if cv.Status != "paused" || !cv.Paused || !cv.NodePaused || !strings.Contains(cv.Detail, "This node is paused") {
@@ -157,53 +157,5 @@ func TestLastServing(t *testing.T) {
 	// a gateway this node is not serving is nothing to lose
 	if why := lastServing([]GwState{{GroupID: 3}}, []peerGateways{peer(false)}); why != "" {
 		t.Fatalf("not serving: %q", why)
-	}
-}
-
-// Pausing the primary moves the primary role to a node that is running, never to a paused one.
-func TestPickSuccessorSkipsPausedNodes(t *testing.T) {
-	peers := []PeerView{
-		{Addr: "10.0.0.1:12381", Self: true, IsPrimary: true, Reachable: true},
-		{Addr: "10.0.0.2:12381", Reachable: true, NodePaused: true, SharedRev: 9},
-		{Addr: "10.0.0.3:12381", Reachable: true, SharedRev: 5},
-	}
-	if got := pickSuccessor(peers, "1"); got != "10.0.0.3:12381" {
-		t.Fatalf("successor %q, want the running node", got)
-	}
-	peers[2].NodePaused = true
-	if got := pickSuccessor(peers, "1"); got != "" {
-		t.Fatalf("every other node is paused: successor %q", got)
-	}
-}
-
-func TestPausingThePrimaryMovesTheRole(t *testing.T) {
-	a, b := newTNode(t, "A"), newTNode(t, "B")
-	b.join(a)
-	a.sync()
-	b.sync()
-	paused := false
-	a.mg.pausedFn = func() bool { return paused }
-	a.mg.othersFn = func() int { return 1 }
-	a.mg.lastFn = func() string { return "" }
-	if a.mg.cl.Snapshot().Role != RolePrimary {
-		t.Fatal("A should start as the primary")
-	}
-	msg, err := a.mg.NodePause(true, "tester")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(msg, b.addr+" is now the primary") {
-		t.Fatalf("message %q", msg)
-	}
-	if b.mg.cl.Snapshot().Role != RolePrimary || a.mg.cl.Snapshot().Role == RolePrimary {
-		t.Fatalf("roles after the pause: A=%s B=%s", a.mg.cl.Snapshot().Role, b.mg.cl.Snapshot().Role)
-	}
-}
-
-func TestPausedNodeCannotBePromoted(t *testing.T) {
-	a := newTNode(t, "A")
-	a.mg.pausedFn = func() bool { return true }
-	if _, err := a.mg.Op("cluster.promote", nil, "tester"); err == nil || !strings.Contains(err.Error(), "paused") {
-		t.Fatalf("a paused node must refuse to become the primary: %v", err)
 	}
 }

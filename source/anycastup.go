@@ -26,7 +26,7 @@ func storeAnycastLocal(groups []CanvasGateway) {
 	var order []string
 	for _, g := range groups {
 		for _, a := range g.Anycast {
-			if a.External || !a.Up || a.Paused != "" || a.Status == "bad" || a.Uptime == nil || !a.Uptime.Up {
+			if !a.Up || a.Paused != "" || a.Status == "bad" || a.Uptime == nil || !a.Uptime.Up {
 				continue
 			}
 			if t, ok := best[a.Addr]; !ok {

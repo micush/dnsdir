@@ -20,7 +20,7 @@ import (
 // relays the request over the existing pinned-TLS, HMAC-signed cluster channel
 // (POST /cluster/proxy), and the target node runs it through its own web
 // handlers as though the user had made it there, attributed "user via node".
-// The user is authenticated and authorised (PAM, group ntpdir) on the node they
+// The user is authenticated and authorised (PAM, group dnsdir) on the node they
 // logged in to only; peers trust each other with the cluster secret already.
 // Everything but login, logout and the session can be relayed — the Cluster and
 // Upgrade pages included, so "Leave cluster", "Promote" or "Update now" act on
@@ -32,8 +32,8 @@ type proxyCtxKey struct{}
 // them except login, logout and the session, which belong to the node the
 // operator logged in to.
 var proxyPrefixes = []string{
-	"/api/gateways", "/api/neighbors", "/api/ntp", "/api/canvas", "/api/assert-agc",
-	"/api/config", "/api/versions", "/api/tls", "/api/cluster", "/api/update", "/api/power", "/api/users", "/api/nodepause", "/api/noderename", "/api/bgp", "/api/snmp", "/api/log", "/api/qstats", "/api/scan", "/api/nettool", "/api/whois", "/api/host", "/api/serverstats", "/api/hostlookup", "/api/dnslookup", "/api/schedule", "/api/time", "/api/capture", "/api/vmactest", "/api/tshoot/node",
+	"/api/gateways", "/api/neighbors", "/api/dns", "/api/canvas", "/api/assert-agc",
+	"/api/config", "/api/versions", "/api/tls", "/api/cluster", "/api/update", "/api/power", "/api/users", "/api/nodepause", "/api/bgp", "/api/snmp", "/api/log", "/api/qstats", "/api/scan", "/api/nettool", "/api/cache", "/api/regname", "/api/whois", "/api/host", "/api/serverstats", "/api/dnsupdates", "/api/dnslookup", "/api/schedule", "/api/capture", "/api/vmactest", "/api/tshoot/node",
 }
 
 // proxyAllowed reports why method+rawPath may not be relayed, or nil.

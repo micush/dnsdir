@@ -1,5 +1,5 @@
 "use strict";
-// AnyTime web GUI. No framework, no innerHTML: every value from the server goes
+// AnyName web GUI. No framework, no innerHTML: every value from the server goes
 // through textContent, so nothing it returns can inject markup.
 
 (() => {
@@ -78,10 +78,9 @@
   // scroll boxes inside it are not destroyed and re-created by every poll.
   const fill = (el, ...kids) => { morph(el, h("div", {}, ...kids)); return el; };
   // tc(text): a card heading in title case ("Upload a release" -> "Upload a Release").  Short joining words stay small (but not
-  // first); a word that already has a capital after its first letter (BGP, NTS, GUI) is left as it is, and so is what follows a
-  // hyphen ("Kiss-o'-death", "Policy-Based").
+  // first); a word that already has a capital after its first letter (BGP, NXDOMAIN, GUI) is left as it is.
   const SMALL_WORDS = new Set(["a", "an", "and", "as", "at", "but", "by", "for", "in", "nor", "of", "on", "or", "per", "the", "to", "via", "vs"]);
-  const tc = (t) => (typeof t !== "string" ? t : t.replace(/(?<![\w'’-])[A-Za-z][A-Za-z'’]*/g, (w, i) => ((i > 0 && SMALL_WORDS.has(w)) || /[A-Z]/.test(w.slice(1)) ? w : w[0].toUpperCase() + w.slice(1))));
+  const tc = (t) => (typeof t !== "string" ? t : t.replace(/(?<![\w'’])[A-Za-z][A-Za-z'’]*/g, (w, i) => ((i > 0 && SMALL_WORDS.has(w)) || /[A-Z]/.test(w.slice(1)) ? w : w[0].toUpperCase() + w.slice(1))));
   // Width (in chart units) the y-axis labels need: the chart's left margin grows with the longest label so big
   // numbers are never cut off.  ~6.6 units a character at the 11px axis font, plus the gap and a little edge room.
   const axisMargin = (labels, min) => Math.max(min, Math.ceil(Math.max(0, ...labels.map((t) => String(t).length)) * 6.6) + 14);
@@ -92,7 +91,16 @@
   // Everything follows the node picked in the top bar (relayed through the node
   // you are logged in to) except the login itself.  The picker's own list of
   // nodes is asked of the login node explicitly (api(..., true)).
-  const LOCAL_API = /^\/api\/(login|logout|session|proxy|tshoot\/download)(\/|\?|$)/;
+  // A text box in any table whose value is wider than the box shows the whole value in its tooltip (nothing when it fits,
+  // and never over a tooltip a box was given on purpose).
+  document.addEventListener("mouseover", (e) => {
+    const t = e.target;
+    if (!(t instanceof HTMLInputElement) || t.type !== "text" || !t.closest("td")) return;
+    if (t.title && !t.dataset.fit) return;
+    t.dataset.fit = "1";
+    t.title = t.scrollWidth > t.clientWidth ? t.value : "";
+  });
+  const LOCAL_API = /^\/api\/(login|logout|session|proxy|tshoot\/download|cache\/flush|cache\/clear)(\/|\?|$)/;
   // The Node menu's "Cluster" entry: Monitor ▸ Statistics and Monitor ▸ Host show every node's numbers added together
   // (the node you are logged in to asks the others).  Only those two pages offer it, and only their two requests change;
   // anything else a page asks goes to this node as before.
@@ -235,7 +243,7 @@
       btn);
     root.append(h("div", { class: "login-wrap" }, h("div", { class: "login" },
       h("div", { class: "card" }, h("div", { class: "body" },
-        h("h1", {}, "AnyTime NTP Director"),
+        h("h1", {}, "AnyName DNS Director"),
         h("p", { class: "sub" }, "Sign in with your system account"),
         err, form)))));
     user.focus();
@@ -250,9 +258,9 @@
   // Topology comes first; its items are the gateways themselves (filled in from the daemon).
   const TOPO = "Topology";
   const NAV_GROUPS = [
-    ["Configure", [["cfg_general", "General"], ["cfg_groups", "Gateway groups"], ["cfg_ntp", "NTP"], ["cfg_web", "Web GUI"], ["cfg_snmp", "SNMP"], ["cfg_cluster", "Cluster"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
+    ["Configure", [["cfg_general", "General"], ["cfg_groups", "Gateway groups"], ["cfg_dns", "DNS proxy"], ["cfg_web", "Web GUI"], ["cfg_snmp", "SNMP"], ["cfg_cluster", "Cluster"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
     ["Operate", [["node", "Node"], ["cluster", "Cluster"], ["anycastop", "Anycast"], ["scheduler", "Scheduler"], ["updates", "Upgrade"]]],
-    ["Monitor", [["stats", "Statistics"], ["host", "Host"], ["gateways", "Gateways"], ["nodes", "Cluster"], ["ntp", "NTP"], ["anycaststatus", "Anycast"], ["capture", "Capture"], ["log", "Log"]]],
+    ["Monitor", [["stats", "Statistics"], ["host", "Host"], ["gateways", "Gateways"], ["nodes", "Cluster"], ["dns", "DNS"], ["anycaststatus", "Anycast"], ["capture", "Capture"], ["log", "Log"]]],
   ];
   const TABS = [["topology", TOPO]].concat(NAV_GROUPS.flatMap(([, items]) => items));
   const groupOf = (id) => (id === "topology" ? TOPO : (NAV_GROUPS.find(([, items]) => items.some(([i]) => i === id)) || [null])[0]);
@@ -303,8 +311,8 @@
       h("div", { class: "nav-items hidden" },
         items.map(([id, label]) => h("button", { type: "button", class: "nav-item", "data-tab": id, onclick: () => selectTab(id) }, label)))));
     const nav = h("nav", { class: "side", "aria-label": "Sections" },
-      h("div", { class: "mark" }, h("div", { class: "brand" }, "AnyTime NTP Director"),
-        h("div", { class: "muted small" }, "v" + s.version + (s.hostname && s.hostname.toLowerCase() !== "ntpdir" ? " · " + s.hostname : ""))),
+      h("div", { class: "mark" }, h("div", { class: "brand" }, "AnyName DNS Director"),
+        h("div", { class: "muted small" }, "v" + s.version + (s.hostname && s.hostname.toLowerCase() !== "dnsdir" ? " · " + s.hostname : ""))),
       h("div", { class: "nav-section" }, groups),
       h("div", { class: "nav-footer" },
         h("div", { class: "who" }, "Signed in as ", h("strong", {}, s.user)),
@@ -324,8 +332,6 @@
     refreshNodes();
     state.topoTimer = setInterval(() => { if (!document.hidden) refreshTopoNav(); }, 4000);
     state.nodesTimer = setInterval(() => { if (!document.hidden) refreshNodes(); }, 6000);
-    loadClock();
-    state.clockTimer = setInterval(tickClock, 1000);
     let wanted = location.hash.slice(1);
     if (wanted === "canvas") wanted = "topology"; // the page's old name: keep old bookmarks working
     if (wanted === "neighbors") wanted = "nodes"; // likewise
@@ -369,7 +375,7 @@
   }
 
   // ── help: the "?" in the top right, a slide-out panel for the current page ──
-  // Content is data in help.js (NTPDIR_HELP); this builds it with DOM calls only.
+  // Content is data in help.js (DNSDIR_HELP); this builds it with DOM calls only.
   function richText(str) {
     const out = [];
     for (const part of String(str).split(/(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/)) {
@@ -382,7 +388,7 @@
     return out;
   }
   function helpBody(topic) {
-    const t = NTPDIR_HELP[topic] || NTPDIR_HELP._default;
+    const t = DNSDIR_HELP[topic] || DNSDIR_HELP._default;
     const kids = t.body.map((blk) => {
       if (typeof blk === "string") return h("p", {}, richText(blk));
       if (blk[0] === "h") return h("h3", {}, blk[1]);
@@ -461,8 +467,8 @@
     if (jump) m.scrollIntoView({ block: "center" });
   }
   function fillHelp() {
-    // the NTP page has a help page for each of its tabs
-    const topic = state.tab === "cfg_ntp" && NTPDIR_HELP["config_ntp" + state.ntpTab] ? "config_ntp" + state.ntpTab : state.tab.startsWith("cfg_") ? "config" : state.tab;
+    // the DNS proxy page has a help page for each of its tabs
+    const topic = state.tab === "cfg_dns" && DNSDIR_HELP["config_dns" + state.dnsTab] ? "config_dns" + state.dnsTab : state.tab.startsWith("cfg_") ? "config" : state.tab;
     const [t, kids] = helpBody(topic);
     document.getElementById("help-title").textContent = t;
     const body = clear(document.getElementById("help-body"));
@@ -495,112 +501,44 @@
     renderTopbar();
   }
 
-  function renderTopbar() {
+  // The picker is rebuilt only when what it shows changed, and not while it is open: the list is refreshed every few
+  // seconds, and replacing the <select> under an open drop-down closes it.  A change that arrives meanwhile is drawn
+  // as soon as the picker loses focus.  force: the person just picked something, draw it now.
+  let topbarSig = "";
+  function renderTopbar(force) {
     const bar = document.getElementById("topbar");
     if (!bar) return;
-    // The nodes are asked for every few seconds; the bar is only redrawn when what it shows changed, and not at all while one of its
-    // pickers has the focus (redrawing it shut an open list).
-    const view = [state.tab, state.target, state.tab === "topology" ? state.topo.gid : null];   // each gateway has its own time zone
-    const sig = JSON.stringify([view, GW_TABS.includes(state.tab) ? gwItems() : null, state.nodes.map((n) => [n.addr, nodeLabel(n), n.is_primary, n.reachable, !!n.self])]);
-    if (bar.dataset.sig === sig) return;
-    if (bar.contains(document.activeElement) && bar.dataset.view === JSON.stringify(view)) return;
-    bar.dataset.sig = sig;
-    bar.dataset.view = JSON.stringify(view);
+    const hidden = state.nodes.length < 2;
+    const items = hidden ? [] : [["", nodeLabel(selfNode()) + " (this node)", false]].concat(state.nodes.filter((x) => !x.self).map((n) =>
+      [n.addr, nodeLabel(n) + (n.is_primary ? " · primary" : "") + (n.reachable ? "" : " · unreachable"), !n.reachable && n.addr !== state.target]));
+    if (!hidden && GW_TABS.includes(state.tab)) items.push(...gwItems());   // nodes, then gateways, then the whole cluster
+    if (!hidden && CLUSTER_TABS.includes(state.tab)) items.push([CLUSTER, "Cluster (" + state.nodes.length + ")", false]);
+    const sig = JSON.stringify([hidden, items, state.target || ""]);
+    const cur = bar.querySelector("select");
+    if (!force && cur && sig === topbarSig) return;   // nothing to change
+    if (!force && cur && document.activeElement === cur) {   // open or in use: draw it when it is let go
+      if (!cur.dataset.pending) { cur.dataset.pending = "1"; cur.addEventListener("blur", () => { delete cur.dataset.pending; renderTopbar(); }, { once: true }); }
+      return;
+    }
+    topbarSig = sig;
     clear(bar);
-    const rows = [];
-    if (state.tab === "topology") {   // the time zone the clock in the gateway circle is shown in (kept in a cookie, per browser)
-      // a box you can type in: the list narrows as you type (the browser filters a datalist); the whole list shows on focus
-      const list = h("datalist", { id: "tz-list" }, tzList().map((z) => h("option", { value: z, label: tzLabel(z) })));
-      const tz = h("input", { id: "tz-pick", type: "text", list: "tz-list", autocomplete: "off", spellcheck: "false", "aria-label": "Time zone of the clock", value: getTz(),
-        onfocus: (e) => { e.target.placeholder = e.target.value; e.target.value = ""; },
-        oninput: (e) => { const z = tzList().find((x) => x.toLowerCase() === e.target.value.trim().toLowerCase()); if (z) { setTz(z); tickClock(true); } },
-        onblur: (e) => { const z = tzList().find((x) => x.toLowerCase() === e.target.value.trim().toLowerCase()); e.target.value = z || getTz(); e.target.placeholder = ""; } });
-      rows.push(h("div", { class: "tbrow" }, h("label", { for: "tz-pick", class: "muted small" }, "Time zone"), tz, list));
+    bar.classList.toggle("hidden", hidden);
+    if (hidden) return;
+    const sel = h("select", { id: "node-pick", "aria-label": "Node to configure and monitor", onchange: (e) => setTarget(e.target.value || null) });
+    for (const [value, text, disabled] of items) {
+      const o = h("option", { value }, text);
+      if (disabled) o.disabled = true;
+      sel.append(o);
     }
-    if (state.nodes.length >= 2) {
-      const sel = h("select", { id: "node-pick", "aria-label": "Node to configure and monitor", onchange: (e) => setTarget(e.target.value || null) });
-      const self = selfNode();
-      sel.append(h("option", { value: "" }, nodeLabel(self) + " (this node)"));
-      for (const n of state.nodes.filter((x) => !x.self)) {
-        const o = h("option", { value: n.addr }, nodeLabel(n) + (n.is_primary ? " · primary" : "") + (n.reachable ? "" : " · unreachable"));
-        if (!n.reachable && n.addr !== state.target) o.disabled = true;
-        sel.append(o);
-      }
-      if (GW_TABS.includes(state.tab)) for (const [value, text] of gwItems()) sel.append(h("option", { value }, text));   // nodes, then gateways, then the whole cluster
-      if (CLUSTER_TABS.includes(state.tab)) sel.append(h("option", { value: CLUSTER }, "Cluster (" + state.nodes.length + ")"));
-      sel.value = state.target || "";
-      rows.push(h("div", { class: "tbrow tbnode" }, h("label", { for: "node-pick", class: "muted small" }, "Node"), sel));
-    }
-    bar.classList.toggle("hidden", rows.length === 0);
-    bar.append(...rows);
-  }
-
-  // The clock in the gateway circle: the time of the node being looked at, from that node (asked every 15 s, and counted by the
-  // second in between), in the zone picked under the node picker; the tooltip says how chrony rates it.
-  const clock = { skew: null, info: null, asked: 0 };
-  // The zone list is the browser's own (every IANA zone it knows, plus UTC); the choice is a cookie, so each person's browser keeps its own.
-  const TZ_COOKIE = "ntpdir_tz";
-  let tzNames = null;
-  const tzList = () => {
-    if (!tzNames) {
-      let l = [];
-      try { l = Intl.supportedValuesOf("timeZone"); } catch (_) { /* an old browser: UTC only */ }
-      tzNames = ["UTC"].concat(l.filter((z) => z !== "UTC"));
-    }
-    return tzNames;
-  };
-  const tzOffset = (z) => {
-    try { return new Intl.DateTimeFormat("en-GB", { timeZone: z, timeZoneName: "shortOffset" }).formatToParts(new Date()).find((p) => p.type === "timeZoneName").value.replace("GMT", "UTC"); } catch (_) { return ""; }
-  };
-  const tzLabel = (z) => (z === "UTC" ? "UTC" : z.replace(/_/g, " ") + " (" + tzOffset(z) + ")");
-  // Each gateway (each drawing under Topology) remembers the zone picked for it; one that has none yet uses the zone chosen before
-  // gateways had their own (the plain cookie), then UTC.
-  const tzCookieName = () => (state.topo && state.topo.gid != null ? TZ_COOKIE + "_" + state.topo.gid : TZ_COOKIE);
-  function readTzCookie(name) {
-    try {
-      const m = document.cookie.match(new RegExp("(?:^|;\\s*)" + name + "=([^;]+)"));
-      if (m) { const z = decodeURIComponent(m[1]); if (tzList().includes(z)) return z; }
-    } catch (_) { /* no cookies */ }
-    return null;
-  }
-  function getTz() { return readTzCookie(tzCookieName()) || readTzCookie(TZ_COOKIE) || "UTC"; }
-  function setTz(z) {
-    try { document.cookie = tzCookieName() + "=" + encodeURIComponent(z) + "; max-age=31536000; path=/; SameSite=Strict" + (location.protocol === "https:" ? "; Secure" : ""); } catch (_) { /* kept for this page only */ }
-  }
-  const tzFmt = {};
-  const tzTime = (ms, z) => {
-    try {
-      const f = tzFmt[z] || (tzFmt[z] = new Intl.DateTimeFormat("en-GB", { timeZone: z, hourCycle: "h23", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short" }));
-      return f.format(new Date(ms)).replace(/GMT/, "UTC");
-    } catch (_) { return new Date(ms).toISOString().slice(11, 19) + " UTC"; }
-  };
-  const tzDate = (ms, z) => { try { return new Intl.DateTimeFormat("en-CA", { timeZone: z }).format(new Date(ms)); } catch (_) { return new Date(ms).toISOString().slice(0, 10); } };
-  const clockText = () => (clock.skew === null ? "--:--:--" : tzTime(Date.now() + clock.skew, getTz()));
-  const clockTip = () => {
-    const i = clock.info;
-    if (!i) return "Time of this node";
-    return tzDate(Date.now() + (clock.skew || 0), getTz()) + " — " + (!i.running ? "chrony is not running" : !i.synced ? "chrony is not synchronised yet" : "stratum " + i.stratum + (i.ref ? ", " + i.ref : "") + ", clock " + (i.offset_ms >= 0 ? "+" : "") + Number(i.offset_ms).toFixed(3) + " ms off");
-  };
-  async function loadClock() {
-    clock.asked = Date.now();
-    try {
-      const r = (await api("GET", "/api/time")).data;
-      clock.skew = r.now_ms - Date.now(); clock.info = r;
-    } catch (_) { /* the next tick asks again */ }
-    tickClock(true);
-  }
-  function tickClock(redraw) {
-    if (document.hidden && redraw !== true) return;
-    if (Date.now() - clock.asked > 15000) loadClock();
-    for (const el of document.querySelectorAll(".vipclock")) { el.firstChild.nodeValue = clockText(); const t = el.querySelector("title"); if (t) t.textContent = clockTip(); }
+    sel.value = state.target || "";
+    bar.append(h("label", { for: "node-pick", class: "muted small" }, "Node"), sel);
   }
 
   function setTarget(addr) {
     if ((addr || null) === state.target) return;
     state.target = addr || null;
     document.body.classList.toggle("remote", !!state.target && state.target !== CLUSTER && !isGw());   // another node's page is marked; the cluster's is no node
-    renderTopbar();
-    clock.skew = null; clock.info = null; loadClock();
+    renderTopbar(true);
     state.topo.action = null;   // the gateway picked stays picked: the sidebar list is the signed-in node's, whichever node is driven
     refreshTopoNav();
     certBanner();
@@ -621,8 +559,7 @@
     stopPolling();
     if (state.topoTimer) clearInterval(state.topoTimer);
     if (state.nodesTimer) clearInterval(state.nodesTimer);
-    if (state.clockTimer) clearInterval(state.clockTimer);
-    state.topoTimer = state.nodesTimer = state.clockTimer = null;
+    state.topoTimer = state.nodesTimer = null;
   }
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && state.timer && VIEWS[state.tab].poll) VIEWS[state.tab].poll().catch(() => {});
@@ -652,9 +589,10 @@
   const VIEWS = {};
 
 
-  // Topology  (CLI: ntpdir --canvas …)
+  // Topology  (CLI: dnsdir --canvas …)
   // One tab per gateway.  Circle = the gateway and its shared address, squares =
-  // the NTP servers it forwards to.  Every change is saved as soon as it is made.
+  // the DNS servers it forwards to, trapezoids = the domains each server must
+  // answer to count as healthy.  Every change is saved as soon as it is made.
   VIEWS.topology = (() => {
     const SVGNS = "http://www.w3.org/2000/svg";
     const sv = (tag, attrs, ...kids) => {
@@ -666,7 +604,8 @@
       for (const kid of kids.flat(Infinity)) if (kid != null) el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
       return el;
     };
-        const CV_ZOOM_MIN = 0.2, CV_ZOOM_MAX = 3;   // what the mouse wheel can zoom the drawing to
+    const QTYPES = ["A", "AAAA", "NS", "MX", "TXT", "SOA", "CNAME"];
+    const CV_ZOOM_MIN = 0.2, CV_ZOOM_MAX = 3;   // what the mouse wheel can zoom the drawing to
     const CV_MIN_SCALE = 0.65;   // the drawing shrinks to fit the window down to this, then scrolls
     const cv = { cfg: null, orig: null, gid: null, sel: null, view: [], loaded: false, drawn: null, ro: null };
     let svgHost, legendEl, pending = 0;
@@ -674,15 +613,13 @@
     const normAddr = (a) => {
       a = a.trim().toLowerCase();
       if (/^\[.*\]:\d+$/.test(a)) return a;
-      if (a.split(":").length > 2) return "[" + a.replace(/^\[|\]$/g, "") + "]:123";
+      if (a.split(":").length > 2) return "[" + a.replace(/^\[|\]$/g, "") + "]:53";
       if (/:\d+$/.test(a)) return a;
-      return a + ":123";
+      return a + ":53";
     };
-    // the servers a new gateway starts with (the same list as defaultGatewayServers in config.go; remove what you do not want)
-    const DEFAULT_SERVERS = ["pool.ntp.org", "time.nist.gov", "time.google.com", "time.cloudflare.com"];
-    const shortAddr = (a) => a.replace(/:123$/, "").replace(/^\[(.*)\]$/, "$1");
-    // the optional name of a server (ntp.server_names), shown under its address
-    const srvName = (g, addr) => ((g.ntp || cv.cfg.ntp || {}).server_names || {})[addr] || "";
+    const shortAddr = (a) => a.replace(/:53$/, "").replace(/^\[(.*)\]$/, "$1");
+    // the optional name of a server (dns.server_names), shown under its address
+    const srvName = (g, addr) => ((g.dns || cv.cfg.dns || {}).server_names || {})[addr] || "";
     const srvTitle = (g, addr) => (srvName(g, addr) ? srvName(g, addr) + " (" + shortAddr(addr) + ")" : shortAddr(addr));
     const trunc = (t, n) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
     // cut a text to a pixel width (measured in the font the drawing uses), ending in … when it had to be cut
@@ -723,6 +660,16 @@
     };
     const gwAddr = (g) => bareIP(g.vip4) || bareIP(g.vip6) || "gateway " + g.group_id;
     const gwLabel = (g) => g.name || gwAddr(g);
+    const effQueries = (g, addr) => {
+      const d = g.dns || {};
+      return (d.server_queries && d.server_queries[addr]) || d.queries || [];
+    };
+    const ownQueries = (g, addr) => {
+      const d = g.dns;
+      d.server_queries = d.server_queries || {};
+      if (!d.server_queries[addr]) d.server_queries[addr] = (d.queries || []).map((q) => ({ ...q }));
+      return d.server_queries[addr];
+    };
 
     // The daemon works out every colour (the CLI shows the same view); anything
     // not in it yet — an unsaved shape — is grey.
@@ -745,13 +692,15 @@
       if (via) why = "As " + v.via + " sees it (it serves the gateway; this node does not): " + why;
       return { via: (v && v.via) || "", circle, why, servers, fams, members, anycast: v ? v.anycast || [] : [], nodes: v ? v.nodes || [] : [], vmac: v && !via ? v.vmac || null : null, uptime: v && !gwPaused && !nodePaused && !removed ? v.uptime : null, clusterUp: v && !gwPaused && !removed ? v.cluster_up_sec || 0 : 0 };
     }
-    // Where a server is paused: "all" (shared, every node), "node" (this node's own settings) or "".
-    const srvPausedScope = (g, addr) => (((g.ntp || cv.cfg.ntp || {}).paused_servers || []).includes(addr) ? "all" : (cv.cfg.paused_servers_here || []).includes(addr) ? "node" : "");
+    // Where a server / domain is paused: "all" (shared, every node), "node" (this node's own settings) or "".
+    const srvPausedScope = (g, addr) => (((g.dns || cv.cfg.dns || {}).paused_servers || []).includes(addr) ? "all" : (cv.cfg.paused_servers_here || []).includes(addr) ? "node" : "");
     const pausedSrv = (g, addr) => !!srvPausedScope(g, addr);
-        const scopeWord = (sc) => (sc === "all" ? "all nodes" : "this node");
+    const qKey = (addr, q) => addr + "|" + String(q.name).replace(/\.$/, "").toLowerCase() + "|" + String(q.type).toUpperCase();
+    const qPausedScope = (g, addr, q) => ((((g.dns || cv.cfg.dns || {}).paused_queries || []).includes(qKey(addr, q))) ? "all" : (cv.cfg.paused_queries_here || []).includes(qKey(addr, q)) ? "node" : "");
+    const scopeWord = (sc) => (sc === "all" ? "all nodes" : "this node");
     function serverState(g, addr, st, via) {
       const sc = via ? "" : srvPausedScope(g, addr);   // seen from a serving node: what it says, not this node's own pauses
-      if (sc) return { c: "paused", why: "Paused on " + scopeWord(sc) + " — not probed or sent requests until resumed" };
+      if (sc) return { c: "paused", why: "Paused on " + scopeWord(sc) + " — not queried or probed until resumed" };
       if (st && st.status === "paused") return via ? { c: "paused", why: st.detail } : { c: "idle", why: "Resuming…" };
       return st ? { c: st.status, why: st.detail } : { c: "idle", why: "Not probed yet" };
     }
@@ -768,8 +717,8 @@
       if (!pause) { quick(() => { delete g[k]; }); return; }
       confirmDialog("Pause gateway " + gwLabel(g) + " on " + scopeWord(scope) + "?",
         scope === "all"
-          ? "Every node stops serving the gateway — it gives up its address and stops answering NTP. Resume it when you are done."
-          : "This node stops serving the gateway — it gives up its address and stops answering NTP — so it can be taken offline. The other cluster nodes carry on. Resume it here when you are done.",
+          ? "Every node stops serving the gateway — it gives up its address and stops answering DNS. Resume it when you are done."
+          : "This node stops serving the gateway — it gives up its address and stops answering DNS — so it can be taken offline. The other cluster nodes carry on. Resume it here when you are done.",
         "Pause gateway", () => quick(() => { g[k] = true; }), "btn primary");
     }
     // "Test virtual MACs…": asks this node to check that replies addressed to a virtual MAC reach it, and shows what it found.
@@ -793,10 +742,10 @@
     // The last server in service stays on unless the gateway has fallback servers to answer from; a server that is down (not answering or
     // paused) is not in service.  "" when it may be paused, otherwise the reason.
     function lastServerWhy(g, addr) {
-      const d = g.ntp || cv.cfg.ntp || {}, st = statusOf(g);
+      const d = g.dns || cv.cfg.dns || {}, st = statusOf(g);
       const inService = (x) => { const c = serverState(g, x, st.servers[x], st.via).c; return c !== "bad" && c !== "paused"; };
       return inService(addr) && !(d.servers || []).some((x) => x !== addr && inService(x)) && !(d.fallback_servers || []).length
-        ? "That is the last NTP server in service on gateway " + gwLabel(g) + " (the others are down or paused) and the gateway has no fallback servers, so pausing it would leave clients unanswered." : "";
+        ? "That is the last DNS server in service on gateway " + gwLabel(g) + " (the others are down or paused) and the gateway has no fallback servers, so pausing it would leave clients unanswered." : "";
     }
     function pauseServer(g, addr, scope, pause) {
       if (pause) {
@@ -804,8 +753,14 @@
         if (why) return;   // the menu item is greyed with the reason; nothing is written above the drawing
       }
       quick(() => {
-        if (scope === "all") { ensureNTP(g); toggleIn(g.ntp, "paused_servers", addr, pause); }
+        if (scope === "all") { ensureDNS(g); toggleIn(g.dns, "paused_servers", addr, pause); }
         else toggleIn(cv.cfg, "paused_servers_here", addr, pause);
+      });
+    }
+    function pauseDomain(g, addr, q, scope, pause) {
+      quick(() => {
+        if (scope === "all") { ensureDNS(g); toggleIn(g.dns, "paused_queries", qKey(addr, q), pause); }
+        else toggleIn(cv.cfg, "paused_queries_here", qKey(addr, q), pause);
       });
     }
 
@@ -818,15 +773,16 @@
       const g = curGroup();
       if (!g) { clear(svgHost); svgHost.append(h("div", { class: "empty" }, "No gateway yet. Click “＋ New gateway” under Topology in the sidebar (or right-click here) to draw one.")); return; }
       const st = statusOf(g);
-      const servers = (g.ntp && g.ntp.servers) || [];
-      const COLW = 190, SW = 156;
+      const servers = (g.dns && g.dns.servers) || [];
+      const COLW = 190, SW = 156, DW = 156, DH = 34, DG = 46;
+      const maxDoms = Math.max(0, ...servers.map((a) => effQueries(g, a).length));
       // The circle shows bare addresses (no /prefix) and grows until the longest one fits,
       // up to a full 39-character IPv6 address (monospace 12px ≈ 7.3px per character).
       const ip4 = (g.vip4 || "").split("/")[0], ip6 = (g.vip6 || "").split("/")[0];
       const dual = !!(ip4 && ip6);
-      const textW = Math.max(Math.max(ip4.length, ip6.length, 9) * 6.2, 118);   // wide enough for the clock line too
-      const R = Math.max(50, Math.ceil(Math.hypot((textW + 22) / 2, dual ? 36 : 28)));
-      const own = g.extra_vips || [], dds = g.dnsdir_vips || [], anys = [...own, ...dds], AH = 40, AG = 8;      // anycast pills sit to the right of the circle, the cluster's nodes to the left
+      const textW = Math.max(ip4.length, ip6.length, 9) * 7.3;
+      const R = Math.max(50, Math.ceil(Math.hypot((textW + 22) / 2, dual ? 24 : 14)));
+      const anys = g.extra_vips || [], AH = 40, AG = 8;      // anycast pills sit to the right of the circle, the cluster's nodes to the left
       const AW = Math.max(170, Math.ceil(Math.max(0, ...anys.map((a) => a.length)) * 7.3 + 28));  // wide enough for the longest address in full (monospace 12px)
       const waiting = cv.nodeWait || {};
       // a node removed from the gateway is not drawn (right-click the gateway ▸ Add node brings it back); the saved list decides, so it goes at once
@@ -853,10 +809,22 @@
         const nodeAt = (k) => ({ x: -(R + SIDE_GAP + NW + Math.floor(k / PER) * (NW + CG)), y: nodeTop + (k % PER) * (AH + AG) });
         const rightX = anys.length ? R + SIDE_GAP + aCols * AW + (aCols - 1) * CG : 0, leftX = nodes.length ? R + SIDE_GAP + nCols * NW + (nCols - 1) * CG : 0;
         const sideBottom = Math.max(anys.length ? anyTop + anyH : 0, nodes.length ? nodeTop + nodeH : 0);
-        // extra is spare height to use: it goes into the gap between the circle and the servers
-        const SY0 = Math.max(CY + R + 80, sideBottom ? sideBottom + 84 : 0);
-        const SY = SY0 + Math.max(0, extra);   // servers' top
-        const W = Math.max(Math.max(servers.length, 1) * COLW + 20, 2 * R + 140, 2 * Math.max(rightX, leftX) + 20), H = SY + SH + 12;
+        // extra is spare height to use.  It goes into the gaps (circle to servers, servers to their first domain, domain to
+        // domain) so that they come out as even as the drawing allows: the smallest gaps grow first, a gap that is already
+        // larger than the rest keeps its size.
+        const dm = Math.max(maxDoms - 1, 0), SY0 = Math.max(CY + R + 80, sideBottom ? sideBottom + 84 : 0);
+        const floors = [SY0 - (CY + R), 34, ...Array(dm).fill(DG - DH)];
+        let gaps = floors;
+        if (extra > 0) {
+          const order = floors.map((f, i) => i).sort((x, y) => floors[y] - floors[x]);   // largest first
+          let left = floors.reduce((a, b) => a + b, 0) + extra, k = floors.length;
+          for (const i of order) { if (floors[i] > left / k) { left -= floors[i]; k--; } else break; }
+          gaps = floors.map((f) => Math.max(f, left / k));
+        }
+        const eTop = gaps[0] - floors[0], eMid = gaps[1] - floors[1], eDom = dm ? gaps[2] - floors[2] : 0;
+        const DGE = DG + eDom;   // distance from one domain to the next
+        const SY = SY0 + eTop, DY0 = SY + SH + 34 + eMid;   // servers' top, first domain's top
+        const W = Math.max(Math.max(servers.length, 1) * COLW + 20, 2 * R + 140, 2 * Math.max(rightX, leftX) + 20), H = DY0 + (Math.max(maxDoms, 1) - 1) * DGE + DG + 6;
         const cx = W / 2, rowX = (W - Math.max(servers.length, 1) * COLW) / 2;   // the row of servers is centred under the circle
         // does a line from the circle to a server pass through a node or a pill?
         const boxes = [...anys.map((_, k) => ({ ...anyAt(k), w: AW })), ...nodes.map((_, k) => ({ ...nodeAt(k), w: NW }))];
@@ -868,7 +836,7 @@
             if (boxes.some((b) => px > b.x - 3 && px < b.x + b.w + 3 && py > b.y - 3 && py < b.y + AH + 3)) clash = true;
           }
         });
-        return { PER, anyAt, nodeAt, SY, W, H, cx, rowX, clash };
+        return { PER, anyAt, nodeAt, SY, DY0, DGE, W, H, cx, rowX, clash };
       };
       let lay = layout(4);
       if (lay.clash) lay = layout(3);
@@ -886,21 +854,20 @@
           if (extra > 20) { const taller = layout(lay.PER, extra); if (!taller.clash) lay = taller; }
         }
       }
-      const { anyAt, nodeAt, SY, W, H, cx, rowX } = lay;
+      const { anyAt, nodeAt, SY, DY0, DGE, W, H, cx, rowX } = lay;
       const svg = sv("svg", { class: "cv", viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "group", "aria-label": "Gateway diagram", tabindex: "0",
         onkeydown: (e) => { if ((e.key === "Delete" || e.key === "Backspace") && cv.sel && !/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) { e.preventDefault(); delSel(); } },
         onclick: (e) => { if (e.target === svg) { cv.sel = null; refresh(); } } });
-      const sel = (kind, addr) => cv.sel && cv.sel.kind === kind && cv.sel.addr === addr;
-      const pick = (kind, addr) => (e) => {
-        e.stopPropagation(); cv.sel = { kind, addr }; refresh();
+      const sel = (kind, addr, di) => cv.sel && cv.sel.kind === kind && cv.sel.addr === addr && cv.sel.di === di;
+      const pick = (kind, addr, di) => (e) => {
+        e.stopPropagation(); cv.sel = { kind, addr, di }; refresh();
         const el = svgHost.querySelector("svg"); if (el) el.focus({ preventScroll: true }); // keep the Delete key working after the redraw
       };
       const label = (x, y, t, cls) => sv("text", { x, y, "text-anchor": "middle", class: cls || "" }, t);
-      // the time of the node being looked at, kept by the clock timer (see tickClock); it is the time every node serving the gateway hands out
-      const clockEl = (x, y) => sv("text", { x, y, "text-anchor": "middle", class: "t1 vipclock" }, clockText(), sv("title", {}, clockTip()));
       const lines = [];
       const shapes = [];
-      // Drag a server left/right, or an anycast address up/down to another place.  The shape follows the pointer, a dashed outline shows where it will land, and letting go saves the new
+      // Drag a server left/right, a domain or an anycast address up/down to another place.  The shape follows the pointer
+      // (a server takes its domains with it), a dashed outline shows where it will land, and letting go saves the new
       // order at once.  Nothing is redrawn while it is held (the poll skips cv.drag); Escape puts it back.
       const dragStart = (sp) => (e) => {
         if (e.button !== 0 || cv.drag || sp.n < 2) return;
@@ -956,34 +923,22 @@
         sv("title", {}, gwTip(g, st, dual)),
         sv("circle", { cx, cy: CY, r: R }),
         ...(dual
-          ? [clockEl(cx, CY - 22), label(cx, CY - 4, g.name ? g.name.slice(0, 22) : g.interface + " · group " + g.group_id, "t2"), label(cx, CY + 14, ip4, "t2"), label(cx, CY + 32, ip6, "t2")]
-          : [clockEl(cx, CY - 10), label(cx, CY + 8, g.name ? g.name.slice(0, 22) : g.interface + " · group " + g.group_id, "t2"), label(cx, CY + 26, ip4 || ip6, "t2")])));
+          ? [label(cx, CY - 14, ip4, "ip"), label(cx, CY + 4, ip6, "ip"), label(cx, CY + 24, g.name ? g.name.slice(0, 22) : g.interface + " · group " + g.group_id, "t2")]
+          : [label(cx, CY - 2, ip4 || ip6, "ip"), label(cx, CY + 18, g.name ? g.name.slice(0, 22) : g.interface + " · group " + g.group_id, "t2")])));
       anys.forEach((addr, i) => {
         const at = anyAt(i), x = cx + at.x, y = at.y;
         const a = st.anycast.find((z) => z.addr === addr);
-        if (i >= own.length) {   // an address of dnsdir on this host: ntpdir only answers NTP on it, dnsdir holds and announces it
-          const c = a && a.up ? (a.reason ? "warn" : "ok") : "idle";
-          const dwhy = !a ? "Applying…" : a.up ? "Answering NTP; dnsdir announces it (on lo)" + (a.reason ? " — " + a.reason : "") : "Not answering: " + (a.reason || "dnsdir does not have it on lo");
-          lines.push(sv("line", { x1: cx + R, y1: CY, x2: x, y2: y + AH / 2, class: "edge" }));
-          shapes.push(sv("g", { class: "shape st-" + c + (sel("dd", addr) ? " sel" : ""), tabindex: "0", role: "button", "aria-label": "dnsdir address " + addr, onclick: pick("dd", addr), oncontextmenu: rightClick("dd", addr),
-            onkeydown: (e) => { if (e.key === "Enter") pick("dd", addr)(e); } },
-            sv("title", {}, "dnsdir address " + addr + " — " + dwhy),
-            sv("rect", { x, y, width: AW, height: AH, rx: 18 }),
-            label(x + AW / 2, y + 17, addr, "ip"),
-            label(x + AW / 2, y + 32, a && a.up ? (a.reason ? "dnsdir · " + a.reason : "dnsdir · answering") : "dnsdir · not announced", "t2")));
-          return;
-        }
-        const noSrv = !(g.ntp && (g.ntp.servers || []).length);
+        const noSrv = !(g.dns && (g.dns.servers || []).length);
         // A pill is never more alarming than its gateway: green while announced,
         // otherwise it takes the gateway's own colour only when that is amber, red or paused.
         const pzAll = (g.paused_vips || []).includes(addr), pzHere = !st.via && (g.paused_vips_here || []).includes(addr), pz = pzAll || pzHere;
         const c = pz ? "paused" : noSrv || !a ? "idle" : a.up ? (a.status === "warn" || a.status === "bad" ? a.status : "ok") : ["warn", "bad", "paused"].includes(st.circle) ? st.circle : "idle";
-        const why = pz ? "Paused on " + (pzAll ? "all nodes" : "this node") + ": not announced until resumed" : noSrv ? "Add an NTP server to this gateway: the address is only announced while a server answers"
+        const why = pz ? "Paused on " + (pzAll ? "all nodes" : "this node") + ": not announced until resumed" : noSrv ? "Add a DNS server to this gateway: the address is only announced while a server answers"
           : !st.via && (g.paused || g.paused_all) ? "Gateway paused on " + (g.paused_all ? "all nodes" : "this node") + ": not announced"
-          : !a ? "Applying…" : a.up ? "Announced from " + (st.via || "this node") + " (on lo)" + (a.carried && a.carried.length ? " — kept up by " + a.carried.map((n) => { const x = groups().find((z) => z.group_id === n); return x ? gwLabel(x) : "group " + n; }).join(", ") + (a.reason ? ", because this gateway's NTP cannot answer here (" + a.reason + ")" : "") : "") + (a.detail ? " — " + a.detail : "") : "Withdrawn on " + (st.via || "this node") + (a.reason ? ": " + a.reason : "");
+          : !a ? "Applying…" : a.up ? "Announced from " + (st.via || "this node") + " (on lo)" + (a.carried && a.carried.length ? " — kept up by " + a.carried.map((n) => { const x = groups().find((z) => z.group_id === n); return x ? gwLabel(x) : "group " + n; }).join(", ") + (a.reason ? ", because this gateway's DNS cannot answer here (" + a.reason + ")" : "") : "") + (a.detail ? " — " + a.detail : "") : "Withdrawn on " + (st.via || "this node") + (a.reason ? ": " + a.reason : "");
         lines.push(sv("line", { x1: cx + R, y1: CY, x2: x, y2: y + AH / 2, class: "edge" }));
         shapes.push(sv("g", { class: "shape drag st-" + c + (sel("any", addr) ? " sel" : ""), tabindex: "0", role: "button", "aria-label": "Anycast address " + addr, onclick: pick("any", addr), oncontextmenu: rightClick("any", addr),
-          onpointerdown: dragStart({ axis: "xy", n: own.length, index: i, pos: { x, y }, slot: (k) => ({ x: cx + anyAt(k).x, y: anyAt(k).y }),
+          onpointerdown: dragStart({ axis: "xy", n: anys.length, index: i, pos: { x, y }, slot: (k) => ({ x: cx + anyAt(k).x, y: anyAt(k).y }),
             ghost: (k) => sv("rect", { class: "dropslot", x: cx + anyAt(k).x, y: anyAt(k).y, width: AW, height: AH, rx: 18 }),
             drop: (k) => { reorder(g.extra_vips, i, k); cv.sel = { kind: "any", addr }; commit(); } }),
           onkeydown: (e) => { if (e.key === "Enter") pick("any", addr)(e); } },
@@ -1018,17 +973,35 @@
         const x = rowX + i * COLW + (COLW - SW) / 2, mx = x + SW / 2;
         const ss = serverState(g, addr, st.servers[addr], st.via);
         const info = st.servers[addr];
-        lines.push(sv("line", { x1: cx, y1: CY + R, x2: mx, y2: SY, class: "edge" + (info && (info.chrony === "*" || info.chrony === "+") ? " spread" : "") }));   // blue: chrony takes the time from it
-        shapes.push(sv("g", { class: "shape drag st-" + ss.c + (sel("srv", addr) ? " sel" : ""), "data-col": addr, tabindex: "0", role: "button", "aria-label": "NTP server " + srvTitle(g, addr), onclick: pick("srv", addr), oncontextmenu: rightClick("srv", addr),
+        lines.push(sv("line", { x1: cx, y1: CY + R, x2: mx, y2: SY, class: "edge" + (info && info.in_band ? " spread" : "") }));
+        shapes.push(sv("g", { class: "shape drag st-" + ss.c + (sel("srv", addr) ? " sel" : ""), "data-col": addr, tabindex: "0", role: "button", "aria-label": "DNS server " + srvTitle(g, addr), onclick: pick("srv", addr), oncontextmenu: rightClick("srv", addr),
           onpointerdown: dragStart({ axis: "x", n: servers.length, index: i, pos: x, origin: rowX + (COLW - SW) / 2, step: COLW, group: addr,
             ghost: (k) => sv("rect", { class: "dropslot", x: rowX + (COLW - SW) / 2 + k * COLW, y: SY, width: SW, height: SH, rx: 4 }),
-            drop: (k) => { ensureNTP(g); reorder(g.ntp.servers, i, k); cv.sel = { kind: "srv", addr }; commit(); } }),
+            drop: (k) => { ensureDNS(g); reorder(g.dns.servers, i, k); cv.sel = { kind: "srv", addr }; commit(); } }),
           onkeydown: (e) => { if (e.key === "Enter") pick("srv", addr)(e); } },
           sv("title", {}, srvTitle(g, addr) + " — " + ss.why + (info && ss.c !== "paused" && ss.c !== "idle" ? upLine(info.uptime) : "")),
           sv("rect", { x, y: SY, width: SW, height: SH, rx: 4 }),
-          label(mx, SY + (srvName(g, addr) ? 19 : 20), info && (ss.c === "ok" || ss.c === "warn") ? (info.time ? (info.time.offset_ms >= 0 ? "+" : "") + Number(info.time.offset_ms).toFixed(2) + " ms" : info.ms + " ms") + (info.chrony === "*" ? " *" : "") : ss.c === "bad" ? "down" : ss.c === "paused" ? "paused" : "", "t1 strong"),   // the offset first, in bold; the star: the source chrony has selected
+          label(mx, SY + (srvName(g, addr) ? 19 : 20), fitPx(shortAddr(addr), SW - 44, "600 13px system-ui, sans-serif"), "t1"),
           ...(srvName(g, addr) ? [label(mx, SY + 35, fitPx(srvName(g, addr), SW - 44, "400 11px system-ui, sans-serif"), "t2")] : []),
-          label(mx, SY + (srvName(g, addr) ? 51 : 35), fitPx(shortAddr(addr), SW - 44, "400 11px system-ui, sans-serif"), "t2")));
+          label(mx, SY + (srvName(g, addr) ? 51 : 35), info && (ss.c === "ok" || ss.c === "warn") ? info.ms + " ms" + (info.rank ? " · #" + info.rank : "") : ss.c === "bad" ? "down" : ss.c === "paused" ? "paused" : "", "t2")));
+        const qs = effQueries(g, addr);
+        qs.forEach((q, di) => {
+          const y = DY0 + di * DGE;
+          const t = info && (info.tests || []).find((z) => z.name === q.name && z.type === q.type);
+          const qsc = st.via ? "" : qPausedScope(g, addr, q);
+          const sp = ss.c === "paused" || !!qsc;
+          const c = sp ? "paused" : t && t.status !== "paused" ? t.status : st.via && t ? "paused" : "idle";
+          const why = ss.c === "paused" ? "Server paused" : qsc ? "Paused on " + scopeWord(qsc) + " — not asked until resumed" : t && t.status !== "paused" ? t.detail : "Not tested yet";
+          lines.push(sv("line", { x1: mx, y1: di ? y - DGE + DH : SY + SH, x2: mx, y2: y, class: "edge", "data-col": addr }));
+          shapes.push(sv("g", { class: "shape drag st-" + c + (sel("dom", addr, di) ? " sel" : ""), "data-col": addr, tabindex: "0", role: "button", "aria-label": "Domain " + q.name, onclick: pick("dom", addr, di), oncontextmenu: rightClick("dom", addr, di),
+          onpointerdown: dragStart({ axis: "y", n: qs.length, index: di, pos: y, origin: DY0, step: DGE,
+            ghost: (k) => { const gy = DY0 + k * DGE; return sv("polygon", { class: "dropslot", points: `${mx - DW / 2 + 14},${gy} ${mx + DW / 2 - 14},${gy} ${mx + DW / 2},${gy + DH} ${mx - DW / 2},${gy + DH}` }); },
+            drop: (k) => { ensureDNS(g); reorder(ownQueries(g, addr), di, k); cv.sel = { kind: "dom", addr, di: k }; commit(); } }),
+            onkeydown: (e) => { if (e.key === "Enter") pick("dom", addr, di)(e); } },
+            sv("title", {}, q.name + " (" + q.type + ") — " + why + (t && !sp && c !== "idle" ? upLine(t.uptime) : "")),
+            sv("polygon", { points: `${mx - DW / 2 + 14},${y} ${mx + DW / 2 - 14},${y} ${mx + DW / 2},${y + DH} ${mx - DW / 2},${y + DH}` }),
+            label(mx, y + 21, fitPx(q.name + (q.type === "A" ? "" : " " + q.type), DW - 46, "400 13px system-ui, sans-serif"), "t1 dn")));
+        });
       });
       svg.append(...lines, ...shapes);
       // The scrolling box (.cv-wrap) is made once and kept: only the drawing inside it is swapped on each refresh, so its
@@ -1151,11 +1124,17 @@
       }));
       for (const f of fields) if (f.on && f.initOn) f.on(els, () => {});
       const err = h("div", { "aria-live": "polite" });
-      const submit = (e) => {
+      const submit = async (e) => {
         e.preventDefault();
         const vals = {};
         for (const f of fields) vals[f.k] = els[f.k].value.trim();
-        const m = onOk(vals);
+        let m = onOk(vals);
+        if (m && typeof m.then === "function") {   // saved at once, then something else is done (a DNS registration): its failure is shown here
+          commit();
+          m = await m;
+          if (m) { errorBox(err, m); return; }
+          closeEditor(); return;
+        }
         if (m) { errorBox(err, m); return; }
         closeEditor(); commit();
       };
@@ -1305,13 +1284,13 @@
           const tx = x(i) > W / 2 ? x(i) - 260 : x(i) + 12;
           tip.setAttribute("transform", `translate(${tx} ${T + 6})`); tip.classList.remove("hidden");
         },
-        onmouseleave: () => { cross.classList.add("hidden"); tip.classList.add("hidden"); dots.forEach((c) => c.classList.add("hidden")); } });
+        onmouseleave: () => { cross.classList.add("hidden"); tip.classList.add("hidden"); dots.forEach((dt) => dt.classList.add("hidden")); } });
       svg.append(cross, ...dots, hit, tip);
       const legend = series.length > 1 || o.legend ? h("div", { class: "qlegend" }, series.map((s) => h("span", { class: "qchip " + s.cls }, h("span", { class: "sw" }), s.label))) : null;
       return h("div", { class: "tsc" }, h("h3", {}, tc(title)), legend, svg);
     }
 
-    // The statistics dialog for a server or a gateway.  It is built once; choosing another
+    // The statistics dialog for a server, a gateway or one domain on a server.  It is built once; choosing another
     // range only swaps the numbers and charts in place (the old charts stay until the new ones arrive), so the box
     // never shrinks and grows again.
     const pctAxis = (v) => (Number.isInteger(v) ? v : v.toFixed(1)) + "%";
@@ -1347,16 +1326,20 @@
           { label: "Worst", cls: "t3", values: r.latency_max, text: (i) => f1(r.latency_max[i]) + " ms" }], { floor: 1, axis: msAxis, legend: true });
         let charts;
         if (r.kind === "gateway") {
-          const goff = (r.offset_ms || []).map((v) => (v == null ? -1 : Math.abs(v)));
           charts = [
+            lat("Answer time (as clients see it)"),
+            tsChart("Errors", dd, [{ label: "Errors", cls: "t6", values: r.loss, text: (i) => r.loss[i].toFixed(2) + "% of " + r.queries[i] + " queries" }], { floor: 1, axis: pctAxis }),
             tsChart("Availability", dd, [{ label: "Available", cls: "t3", values: r.avail, text: (i) => r.avail[i].toFixed(2) + "% of the time" }], { fixedMax: 100, axis: pctAxis }),
-            tsChart("Clock offset", dd, [{ label: "Offset", cls: "t3", values: goff, text: (i) => (r.offset_ms[i] > 0 ? "+" : "") + Number(r.offset_ms[i]).toFixed(3) + " ms" }], { floor: 1, axis: msAxis }),
-            lat("Root delay")];
-        } else {
-          const off = (r.offset_ms || []).map((v) => (v == null ? -1 : Math.abs(v)));
-          charts = [lat("Round trip"),
-            tsChart("Clock offset", dd, [{ label: "Offset", cls: "t3", values: off, text: (i) => (r.offset_ms[i] > 0 ? "+" : "") + Number(r.offset_ms[i]).toFixed(2) + " ms" }], { floor: 1, axis: msAxis }),
+            tsChart("Queries per second", dd, [
+              { label: "All", cls: "t1", values: r.qps, text: (i) => r.qps[i].toFixed(1) + " per second" },
+              { label: "From the cache", cls: "t4", values: r.hit_qps, text: (i) => r.hit_qps[i].toFixed(1) + " per second" }], { floor: 1, axis: (v) => (Number.isInteger(v) ? v : v.toFixed(1)) + "/s", legend: true })];
+        } else if (r.kind === "domain") {
+          charts = [lat("Latency"),
             tsChart("Failed probes", dd, [{ label: "Failed probes", cls: "t6", values: r.loss, text: (i) => r.loss[i].toFixed(2) + "% of the probes" }], { floor: 1, axis: pctAxis })];
+        } else {
+          charts = [lat("Latency"),
+            tsChart("Failed probes", dd, [{ label: "Failed probes", cls: "t6", values: r.loss, text: (i) => r.loss[i].toFixed(2) + "% of the probes" }], { floor: 1, axis: pctAxis }),
+            tsChart("Failed queries", dd, [{ label: "Failed queries", cls: "t6", values: r.query_loss || [], text: (i) => r.query_loss[i].toFixed(2) + "% of " + r.queries[i] + " queries" }], { floor: 1, axis: pctAxis })];
         }
         sum.hidden = true;   // the graphs say it all; the line is only for "loading", "nothing recorded" and errors
         clear(body).append(...charts);
@@ -1364,6 +1347,10 @@
     }
     const serverStats = (g, addr) => statsDialog({ key: addr, title: srvTitle(g, addr), kind: "server" });
     const gatewayStats = (g) => statsDialog({ key: "gw:" + g.group_id, title: "gateway " + gwLabel(g), kind: "gateway" });
+    const domainStats = (g, addr, di) => {
+      const q = effQueries(g, addr)[di];
+      if (q) statsDialog({ key: "dom:" + addr + "|" + q.name + "|" + q.type, title: q.name + " " + q.type + " on " + srvTitle(g, addr), kind: "domain" });
+    };
 
     // "Pause ▸ This node / All nodes" and "Resume ▸ …": a menu that opens beside this one while the pointer is on the item.
     // `scopeOn(scope)` says whether the thing is paused in that scope; only the scopes that can still change are offered.
@@ -1375,12 +1362,11 @@
       else items.push(["Pause" + (noun ? " " + noun : ""), null, "", subs(true), whyNot || ""]);
       return items;
     };
-    const gwItems = (g) => [["Statistics", () => gatewayStats(g)], "-", ["Edit", () => gatewayForm(g)], ["Add NTP server", () => serverForm(g)], ["Add anycast address", () => anycastForm(g)],
-      ...(cv.dnsdir && cv.dnsdir.present ? [["Add dnsdir address", () => dnsdirForm(g)]] : []),
+    const gwItems = (g) => [["Statistics", () => gatewayStats(g)], "-", ["Edit", () => gatewayForm(g)], ["Add DNS server", () => serverForm(g)], ["Add anycast address", () => anycastForm(g)],
       ...(g.real_macs ? [] : [["Test virtual MACs", () => vmacTest(g)]]), ...addNodeItems(g),
       ...pauseItems("", (sc) => !!g[sc === "all" ? "paused_all" : "paused"], (sc, p) => pauseGateway(g, sc, p)), "-", ["Delete", delSel, "danger"]];
-    const srvItems = (g, addr) => [["Statistics", () => serverStats(g, addr)], "-", ["Edit", () => serverForm(g, addr)],
-      ...pauseItems("", (sc) => ((sc === "all" ? (g.ntp || cv.cfg.ntp || {}).paused_servers : cv.cfg.paused_servers_here) || []).includes(addr), (sc, p) => pauseServer(g, addr, sc, p), lastServerWhy(g, addr)), "-", ["Delete", delSel, "danger"]];
+    const srvItems = (g, addr) => [["Statistics", () => serverStats(g, addr)], "-", ["Edit", () => serverForm(g, addr)], ["Add domain", () => domainForm(g, addr, null)],
+      ...pauseItems("", (sc) => ((sc === "all" ? (g.dns || cv.cfg.dns || {}).paused_servers : cv.cfg.paused_servers_here) || []).includes(addr), (sc, p) => pauseServer(g, addr, sc, p), lastServerWhy(g, addr)), "-", ["Delete", delSel, "danger"]];
     // Pause / resume announcing one anycast address: on this node only (kept in this node's own settings) or on every node (shared)
     const anyPauseList = (g, scope) => (scope === "all" ? "paused_vips" : "paused_vips_here");
     const anyPaused = (g, addr, scope) => (g[anyPauseList(g, scope)] || []).includes(addr);
@@ -1391,9 +1377,14 @@
         if (!g[k].length) delete g[k];
       });
     }
-    const ddItems = (g, addr) => [["Delete", delSel, "danger"]];
     const anyItems = (g, addr) => [["Edit", () => anycastForm(g, addr)],
       ...pauseItems("", (sc) => anyPaused(g, addr, sc), (sc, p) => pauseAnycast(g, addr, sc, p)), "-", ["Delete", delSel, "danger"]];
+    const domItems = (g, addr, di) => {
+      const q = effQueries(g, addr)[di];
+      const on = (sc) => ((sc === "all" ? (g.dns || cv.cfg.dns || {}).paused_queries : cv.cfg.paused_queries_here) || []).includes(qKey(addr, q));
+      return [["Statistics", () => domainStats(g, addr, di)], "-", ["Edit", () => domainForm(g, addr, di)],
+        ...(q ? pauseItems("", on, (sc, p) => pauseDomain(g, addr, q, sc, p)) : []), "-", ["Delete", delSel, "danger"]];
+    };
     // the cluster's nodes (the parallelograms left of the circle)
     const nodeTip = (n) => [
       n.name + (n.self ? " (this node)" : "") + " — " + n.detail,
@@ -1428,26 +1419,6 @@
       };
       go();
     }
-    // Rename a node: its operating system host name and the /etc/hosts entry (CLI: --node-rename)
-    function renameNode(n) {
-      const input = h("input", { type: "text", autocomplete: "off", spellcheck: "false", maxlength: "253", value: n.hostname || n.name || "", "aria-label": "Host name" });
-      const err = h("div", { "aria-live": "polite" });
-      const save = h("button", { class: "btn primary", type: "submit" }, "Rename");
-      openDialog("Rename " + (n.name || n.addr),
-        h("form", { onsubmit: async (ev) => {
-          ev.preventDefault();
-          const v = input.value.trim().toLowerCase();
-          if (!v || v === (n.hostname || "")) { closeEditor(); return; }
-          save.disabled = true;
-          try { await nodeCall(n, "POST", "/api/noderename", { name: v }); }
-          catch (e) { save.disabled = false; errorBox(err, e.message); return; }
-          closeEditor(); refresh();
-        } },
-        h("label", { class: "f wide" }, "Host name", input),
-        err,
-        h("div", { class: "toolbar" }, save, h("button", { class: "btn", type: "button", onclick: closeEditor }, "Cancel"))));
-      input.focus(); input.select();
-    }
     // Make a node the gateway controller for all groups (the Node page's button, aimed at the node whose shape was clicked): it takes
     // the role first, then the node that held it is asked to step down, so clients lose nothing.
     function makeController(n) {
@@ -1476,6 +1447,34 @@
         (n.self ? (action === "restart" ? ", and you lose access to this page until it is back. " : ". You lose access to this page. ") : ". ") +
         "Its gateways stop serving and the other nodes take over.", verb + " host", () => run(false));
     }
+    // Rename the host of a node (the node's operating-system name and its /etc/hosts entry); the drawing shows the new name once the
+    // node reports it.
+    function renameNode(n) {
+      const input = h("input", { type: "text", autocomplete: "off", spellcheck: "false", maxlength: "253", value: n.name || "", "aria-label": "Host name" });
+      const err = h("div", { "aria-live": "polite" });
+      const d = h("dialog", { class: "cv-dialog", "aria-label": "Rename " + (n.name || "node") });
+      const close = () => { try { d.close(); } catch (_) { /* closed */ } d.remove(); };
+      d.addEventListener("close", () => d.remove());
+      d.append(h("h2", {}, "Rename " + (n.name || "node")),
+        h("form", { onsubmit: async (ev) => {
+          ev.preventDefault();
+          const v = input.value.trim().toLowerCase();
+          if (!v || v.length > 253 || !v.split(".").every((l) => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(l))) { errorBox(err, "Use letters, digits and - in parts of up to 63 characters, separated by dots."); return; }
+          if (v === n.name && !v.includes(".")) { close(); return; }
+          let r;
+          try { r = await nodeCall(n, "POST", "/api/host/rename", { hostname: v }); }
+          catch (e) { errorBox(err, e.message || "Could not rename the host."); return; }
+          draw(); refresh();
+          if (r && r.dns_error) { errorBox(err, "Renamed, but DNS: " + r.dns_error); return; }
+          close();
+        } },
+        h("label", { class: "f wide" }, "Host name", input),
+        err,
+        h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "submit" }, "Rename"), h("button", { class: "btn", type: "button", onclick: close }, "Cancel"))));
+      root.append(d);
+      d.showModal();
+      input.focus(); input.select();
+    }
     // Remove a node from the gateway shown (a shared setting, kept in the gateway's own settings): it serves nothing of it, whichever
     // node you look from, and is no longer drawn.  The gateway's right-click ▸ Add node brings it back.  The last node serving it
     // cannot be removed (pause the gateway instead).
@@ -1485,7 +1484,7 @@
       const left = (statusOf(g).nodes || []).filter((x) => x.node_id && x.node_id !== n.node_id && !(g.excluded_nodes || []).includes(x.node_id)).length;
       if (!left) return;
       confirmDialog("Remove " + (n.self ? "this node" : n.name) + " from gateway " + gwLabel(g) + "?",
-        "It stops serving the gateway — it gives up the address and stops answering NTP — and the other nodes carry on. Other gateways are not affected. Add it back from the same menu.",
+        "It stops serving the gateway — it gives up the address and stops answering DNS — and the other nodes carry on. Other gateways are not affected. Add it back from the same menu.",
         "Remove node", () => quick(() => toggleIn(g, "excluded_nodes", n.node_id, true)), "btn primary");
     }
     const memberItem = (n) => (curGroup() && n.node_id ? [["Remove from this gateway…", () => nodeMember(n)]] : []);
@@ -1521,7 +1520,7 @@
     const isController = (n, all) => {  // all: holds the role for every gateway (else: for at least one)
       const ips = new Set((n.addrs || []).flatMap((i) => [...(i.v4 || []), ...(i.v6 || [])].map((x) => String(x).split("/")[0])));
       const withMembers = groups().map((g) => statusOf(g).members || []).filter((ms) => ms.length);
-      const isIt = (m) => !n.node_paused && (m.via_local ? n.addr === viaAddr(m) : m.local ? n.self : ips.has(m.ip));   // a paused node is never the controller
+      const isIt = (m) => (m.via_local ? n.addr === viaAddr(m) : m.local ? n.self : ips.has(m.ip));
       const has = (ms) => ms.some((m) => m.agc && isIt(m));
       // all: for every gateway this node is a member of (one it is not on, another subnet, never gives it the role)
       const mine = withMembers.filter((ms) => ms.some(isIt));
@@ -1531,7 +1530,7 @@
     // gateway's IPv4 controller is another node (so the drawing can tell the two apart), "" otherwise (the plain dot).
     const controllerKind = (n) => {
       const ips = new Set((n.addrs || []).flatMap((i) => [...(i.v4 || []), ...(i.v6 || [])].map((x) => String(x).split("/")[0])));
-      const isIt = (m) => !n.node_paused && (m.via_local ? n.addr === viaAddr(m) : m.local ? n.self : ips.has(m.ip));
+      const isIt = (m) => (m.via_local ? n.addr === viaAddr(m) : m.local ? n.self : ips.has(m.ip));
       let v6 = false;
       for (const g of groups()) {
         const ms = statusOf(g).members || [];
@@ -1543,7 +1542,7 @@
       }
       return v6 ? "v6" : "";
     };
-    const controllerWhy = (n) => (n.node_paused ? "Paused: resume it first" : isController(n, true) ? "Already the controller" : "");
+    const controllerWhy = (n) => (isController(n, true) ? "Already the controller" : "");
     // Make a node the cluster's primary (the Cluster page's Promote button, aimed at the node whose shape was clicked): no gateway is
     // touched, so no question is asked.
     async function makePrimary(n) {
@@ -1554,60 +1553,67 @@
       const pause = [n.node_paused ? "Resume" : "Pause", () => pauseNode(n), "", null, n.node_paused ? "" : lastNodeWhy(n)];
       const rm = memberItem(n).map(([, f]) => ["Remove", f]);
       openMenu(e, n.self || n.reachable
-        ? [["Statistics", () => (n.self ? selectTab("host") : openNode(n, "host"))], ["Rename…", () => renameNode(n)], "-", ["Controller", () => makeController(n), "", null, controllerWhy(n)], ["Primary", () => makePrimary(n), "", null, n.node_paused ? "Paused: resume it first" : n.role === "primary" ? "Already the primary" : ""], "-", ...(n.self ? [] : [["Open", () => openNode(n)]]), pause, ["Restart", () => powerNode(n, "restart")], "-", ["Shut down", () => powerNode(n, "shutdown")], ...rm]
+        ? [["Statistics", () => (n.self ? selectTab("host") : openNode(n, "host"))], "-", ["Controller", () => makeController(n), "", null, controllerWhy(n)], ["Primary", () => makePrimary(n), "", null, n.role === "primary" ? "Already the primary" : ""], "-", ...(n.self ? [] : [["Open", () => openNode(n)]]), ["Rename", () => renameNode(n)], pause, ["Restart", () => powerNode(n, "restart")], "-", ["Shut down", () => powerNode(n, "shutdown")], ...rm]
         : [["Cluster page", () => selectTab("cluster")], ...rm]);
     };
     // right-click on a shape: select it, then show what can be done with it
-    const rightClick = (kind, addr) => (e) => {
-      cv.sel = { kind, addr }; refresh();
+    const rightClick = (kind, addr, di) => (e) => {
+      cv.sel = { kind, addr, di }; refresh();
       const g = curGroup();
-      openMenu(e, kind === "gw" ? gwItems(g) : kind === "srv" ? srvItems(g, addr) : kind === "dd" ? ddItems(g, addr) : anyItems(g, addr));
+      openMenu(e, kind === "gw" ? gwItems(g) : kind === "srv" ? srvItems(g, addr) : kind === "any" ? anyItems(g, addr) : domItems(g, addr, di));
     };
 
-    function nextGroupId() { const used = new Set(groups().map((g) => g.group_id)); for (let i = 100; i < 256; i++) if (!used.has(i)) return i; return 0; }
+    function nextGroupId() { const used = new Set(groups().map((g) => g.group_id)); for (let i = 1; i < 256; i++) if (!used.has(i)) return i; return 0; }
 
     // the gateway's own load-balancing values only show while "own values" is chosen
     function showLB(els) {
       const own = els.lbmode.value === LB_OWN;
-      for (const k of ["lb_stratum", "lb_rootdist", "lb_offset", "lb_fail"]) els[k].closest("label").style.display = own ? "" : "none";
+      for (const k of ["lb_spread", "lb_band", "lb_down", "lb_fail", "lb_attempts", "lb_alpha"]) els[k].closest("label").style.display = own ? "" : "none";
     }
     function renameGateway(g) {
-      form("Rename gateway", [{ k: "name", l: "Name (optional)", v: g.name || "", ph: "e.g. Office NTP" }], (v) => {
+      form("Rename gateway", [{ k: "name", l: "Name (optional)", v: g.name || "", ph: "e.g. Office DNS" }], (v) => {
         if ((v.name || "").length > 40) return "The name can be at most 40 characters.";
         if (v.name.trim()) g.name = v.name.trim(); else delete g.name;
         return null;
       }, "Rename");
     }
+    // Every new gateway starts with these public resolvers (remove any you don't want); keep in step with defaultTopologyServers in canvas.go.
+    const DEFAULT_SERVERS = [["8.8.8.8", "dns.google"], ["1.1.1.1", "one.one.one.one"], ["9.9.9.9", "dns9.quad9.net"], ["4.2.2.2", "b.resolvers.level3.net"]];   // [address, name]
+    const DEFAULT_DOMAINS = ["google.com", "amazon.com"];   // each default server is tested with these; keep in step with defaultTopologyDomains in canvas.go
     function gatewayForm(g) {
       const base = g || groups()[0];
       form(g ? "Edit gateway" : "New gateway", [
         { k: "id", l: "Group number", v: String(g ? g.group_id : nextGroupId()), disabled: !!g },
-        { k: "name", l: "Name (optional)", v: g ? (g.name || "") : "", ph: "e.g. Office NTP" },
+        { k: "name", l: "Name (optional)", v: g ? (g.name || "") : "", ph: "e.g. Office DNS" },
         { k: "vip4", l: "Shared IPv4 address / prefix", v: g ? g.vip4 : "", ph: "10.0.0.1/24" },
         { k: "vip6", l: "Shared IPv6 address / prefix (optional)", v: g ? g.vip6 : "", ph: "2001:db8::1/64" },
         { k: "more4", l: "More IPv4 addresses (same subnet, optional)", v: g ? (g.more_vip4 || []).join(", ") : "", ph: "10.0.0.2, 10.0.0.3" },
         { k: "more6", l: "More IPv6 addresses (same subnet, optional)", v: g ? (g.more_vip6 || []).join(", ") : "", ph: "2001:db8::2" },
         { k: "iface", l: "Network interface", v: g ? g.interface : (base ? base.interface : "eth0") },
-        { k: "fb", l: "Fallback NTP servers (optional)", v: fallbackOf(g).join(", "), ph: "e.g. 1.1.1.1, 9.9.9.9" },
-        { k: "lbmode", l: "Health checks", v: lbNow(g).own ? LB_OWN : LB_FOLLOW, options: [LB_FOLLOW, LB_OWN], initOn: true, on: (els) => showLB(els) },
-        { k: "lb_stratum", l: "Highest stratum", v: String(lbNow(g).lb.max_stratum) },
-        { k: "lb_rootdist", l: "Largest root distance (ms)", v: String(lbNow(g).lb.max_root_distance_ms) },
-        { k: "lb_offset", l: "Falseticker offset (ms, 0 = off)", v: String(lbNow(g).lb.max_offset_ms) },
+        { k: "ecs", l: "Tell the DNS servers which network the client is on (ECS)", v: ecsOn(g) ? "on" : "off", options: ["off", "on"] },
+        { k: "fb", l: "Fallback DNS servers (optional)", v: fallbackOf(g).join(", "), ph: "e.g. 1.1.1.1, 9.9.9.9" },
+        { k: "lbmode", l: "Load balancing", v: lbNow(g).own ? LB_OWN : LB_FOLLOW, options: [LB_FOLLOW, LB_OWN], initOn: true, on: (els) => showLB(els) },
+        { k: "lb_spread", l: "Spread queries over servers of similar speed", v: lbNow(g).lb.spread ? "on" : "off", options: ["on", "off"] },
+        { k: "lb_band", l: "Spread band (% of fastest)", v: String(lbNow(g).lb.spread_band) },
+        { k: "lb_down", l: "Down at (% of tests failing)", v: String(lbNow(g).lb.down_percent) },
         { k: "lb_fail", l: "Failures before down", v: String(lbNow(g).lb.fail_threshold) },
+        { k: "lb_attempts", l: "Max servers tried", v: String(lbNow(g).lb.max_attempts) },
+        { k: "lb_alpha", l: "Latency smoothing (0–1]", v: String(lbNow(g).lb.latency_alpha) },
       ], (v) => {
         let lbOwn = null;
         if (v.lbmode === LB_OWN) {
-          lbOwn = { ...lbShared(), max_stratum: Number(v.lb_stratum), max_root_distance_ms: Number(v.lb_rootdist), max_offset_ms: Number(v.lb_offset), fail_threshold: Number(v.lb_fail) };
+          lbOwn = { spread: v.lb_spread === "on", spread_band: Number(v.lb_band), down_percent: Number(v.lb_down), fail_threshold: Number(v.lb_fail), max_attempts: Number(v.lb_attempts), latency_alpha: Number(v.lb_alpha) };
           const intIn = (n, lo, hi) => Number.isInteger(n) && n >= lo && n <= hi;
-          if (!intIn(lbOwn.max_stratum, 1, 15)) return "The highest stratum is a whole number from 1 to 15.";
-          if (!intIn(lbOwn.max_root_distance_ms, 0, 60000)) return "The root distance is a whole number of milliseconds, 0 to 60000.";
-          if (!intIn(lbOwn.max_offset_ms, 0, 3600000)) return "The falseticker offset is a whole number of milliseconds, 0 to 3600000.";
+          if (!intIn(lbOwn.spread_band, 1, 1000)) return "The spread band is a whole number from 1 to 1000.";
+          if (!intIn(lbOwn.down_percent, 1, 100)) return "Down at is a whole number from 1 to 100.";
           if (!intIn(lbOwn.fail_threshold, 1, 1000000)) return "Failures before down is a whole number, at least 1.";
+          if (!intIn(lbOwn.max_attempts, 1, 1000000)) return "Max servers tried is a whole number, at least 1.";
+          if (!(lbOwn.latency_alpha > 0 && lbOwn.latency_alpha <= 1)) return "Latency smoothing is above 0 and at most 1.";
         }
         const fb = (v.fb || "").split(/[\s,;]+/).filter(Boolean);
         if (fb.some((a) => !/^[A-Za-z0-9_.\-:\[\]\/]+$/.test(a))) return "A fallback server needs to be an IP address or host name.";
         if (new Set(fb).size !== fb.length) return "A fallback server is listed twice.";
-        const own = new Set(((g && g.ntp && g.ntp.servers) || (g ? [] : DEFAULT_SERVERS.map(normAddr))).map(shortAddr));
+        const own = new Set(((g && g.dns && g.dns.servers) || []).map(shortAddr));
         const dup = fb.find((a) => own.has(shortAddr(normAddr(a))) || own.has(a));
         if (dup) return dup + " is already one of this gateway's servers.";
         if ((v.name || "").length > 40) return "The name can be at most 40 characters.";
@@ -1628,39 +1634,44 @@
           if (more4.length) g.more_vip4 = more4; else delete g.more_vip4;
           if (more6.length) g.more_vip6 = more6; else delete g.more_vip6;
           if (v.name.trim()) g.name = v.name.trim(); else delete g.name;
-          if (fb.join(",") !== fallbackOf(g).join(",")) { ensureNTP(g); if (fb.length) g.ntp.fallback_servers = fb; else delete g.ntp.fallback_servers; }
-          if (lbOwn) { ensureNTP(g); g.ntp.lb = lbOwn; }
-          else if (g.ntp) { delete g.ntp.lb; Object.assign(g.ntp, LB_DEFAULTS); }   // back to following Settings
+          if ((v.ecs === "on") !== ecsOn(g)) { ensureDNS(g); g.dns.ecs = v.ecs === "on"; }
+          if (fb.join(",") !== fallbackOf(g).join(",")) { ensureDNS(g); if (fb.length) g.dns.fallback_servers = fb; else delete g.dns.fallback_servers; }
+          if (lbOwn) { ensureDNS(g); g.dns.lb = lbOwn; }
+          else if (g.dns) { delete g.dns.lb; Object.assign(g.dns, LB_DEFAULTS); }   // back to following Settings
           return null;
         }
         const id = Number(v.id);
         if (!(id >= 1 && id <= 255) || groups().some((x) => x.group_id === id)) return "Pick an unused group number between 1 and 255.";
-        groups().push({ ...(v.name.trim() ? { name: v.name.trim() } : {}), group_id: id, interface: v.iface, vip4: v.vip4, vip6: v.vip6, ...(more4.length ? { more_vip4: more4 } : {}), ...(more6.length ? { more_vip6: more6 } : {}), real_macs: true, ntp: { servers: DEFAULT_SERVERS.map(normAddr), ...(fb.length ? { fallback_servers: fb } : {}), ...(lbOwn ? { lb: lbOwn } : {}) } });
+        groups().push({ ...(v.name.trim() ? { name: v.name.trim() } : {}), group_id: id, interface: v.iface, vip4: v.vip4, vip6: v.vip6, ...(more4.length ? { more_vip4: more4 } : {}), ...(more6.length ? { more_vip6: more6 } : {}), real_macs: true, dns: { servers: DEFAULT_SERVERS.map(([a]) => a + ":53"), server_queries: Object.fromEntries(DEFAULT_SERVERS.map(([a]) => [a + ":53", DEFAULT_DOMAINS.map((name) => ({ name, type: "A" }))])), server_names: Object.fromEntries(DEFAULT_SERVERS.map(([a, n]) => [a + ":53", n])), ecs: v.ecs === "on", ...(fb.length ? { fallback_servers: fb } : {}), ...(lbOwn ? { lb: lbOwn } : {}) } });
         setGid(id); cv.sel = { kind: "gw" };
         return null;
       }, g ? "Save" : "Add gateway");
     }
 
-    const fallbackOf = (g) => ((g ? (g.ntp || cv.cfg.ntp || {}) : {}).fallback_servers || []);
+    const fallbackOf = (g) => ((g ? (g.dns || cv.cfg.dns || {}) : {}).fallback_servers || []);
+    const ecsOn = (g) => !!(g ? (g.dns || cv.cfg.dns || {}).ecs : (cv.cfg.dns || {}).ecs); // a new gateway starts from the shared setting
 
     // The load-balancing settings a gateway's own pool starts from, so that it follows Settings until it is given its own
     // (the daemon treats a pool at other values as the gateway's own).
-    const LB_DEFAULTS = { spread: true, spread_band: 20, max_stratum: 15, max_root_distance_ms: 1500, max_offset_ms: 128, fail_threshold: 2, max_attempts: 2, latency_alpha: 0.3 };
+    const LB_DEFAULTS = { spread: true, spread_band: 20, down_percent: 100, fail_threshold: 2, max_attempts: 3, latency_alpha: 0.3 };
     const LB_FOLLOW = "follow Settings", LB_OWN = "own values";
-    const lbShared = () => { const d = cv.cfg.ntp || {}; return { spread: d.spread !== false, spread_band: d.spread_band, max_stratum: d.max_stratum, max_root_distance_ms: d.max_root_distance_ms, max_offset_ms: d.max_offset_ms, fail_threshold: d.fail_threshold, max_attempts: d.max_attempts, latency_alpha: d.latency_alpha }; };
+    const lbShared = () => { const d = cv.cfg.dns || {}; return { spread: d.spread !== false, spread_band: d.spread_band, down_percent: d.down_percent, fail_threshold: d.fail_threshold, max_attempts: d.max_attempts, latency_alpha: d.latency_alpha }; };
+    const lbText = (l) => "spread " + (l.spread ? "on" : "off") + ", band " + l.spread_band + "%, down at " + l.down_percent + "%, " + l.fail_threshold + " failures, " + l.max_attempts + " servers tried, smoothing " + l.latency_alpha;
     // what a gateway runs with now (the daemon works it out: cv.view) and whether that is its own
     const lbNow = (g) => {
       const v = g && (cv.view || []).find((x) => x.group_id === g.group_id);
       return v && v.lb ? { lb: v.lb, own: !!v.lb_own } : { lb: lbShared(), own: false };
     };
 
-    function ensureNTP(g) {
-      if (!g.ntp) {
-        const d = cv.cfg.ntp || {};
-        g.ntp = JSON.parse(JSON.stringify(d));
-        delete g.ntp.lb;
-        Object.assign(g.ntp, LB_DEFAULTS);
+    function ensureDNS(g) {
+      if (!g.dns) {
+        const d = cv.cfg.dns || {};
+        g.dns = JSON.parse(JSON.stringify(d));
+        delete g.dns.lb;
+        Object.assign(g.dns, LB_DEFAULTS);
+        g.dns.server_queries = g.dns.server_queries || {};
       }
+      g.dns.server_queries = g.dns.server_queries || {};
     }
 
     // Fill in one of the address and the name and the other follows: an address is looked up in reverse (PTR) for its
@@ -1669,9 +1680,10 @@
     const IPISH = /^(\[[0-9A-Fa-f:.]+\](:\d+)?|[0-9A-Fa-f:]*:[0-9A-Fa-f:.]*|\d{1,3}(\.\d{1,3}){3}(:\d+)?)$/;
     function lookupHooks() {
       const auto = { addr: "", label: "" };
-      const ask = async (q) => (await api("GET", "/api/hostlookup?lookup=" + encodeURIComponent(q))).data;
+      const ask = async (q) => (await api("GET", "/api/dnslookup?lookup=" + encodeURIComponent(q))).data;
       const canFill = (el, k) => !el.value.trim() || el.value.trim() === auto[k];
       return {
+        auto,
         addr: async (els, note) => {
           const q = els.addr.value.trim();
           if (!q || !IPISH.test(q) || !canFill(els.label, "label")) { note("label", ""); return; }
@@ -1702,56 +1714,57 @@
     }
     function serverForm(g, edit) {
       const lk = lookupHooks();
-      form(edit ? "Edit NTP server" : "Add NTP server", [
-        { k: "addr", l: "IP address or host name", v: edit ? shortAddr(edit) : "", ph: "10.0.0.123", hint: "Add :port for a port other than 123.", on: lk.addr },
-        { k: "label", l: "Name (optional)", v: edit ? srvName(g, edit) : "", ph: "e.g. ntp-a", hint: "Shown under the address on the diagram. Fill in the address and its name is looked up; fill in a host name here and its address is.", on: lk.label },
+      form(edit ? "Edit DNS server" : "Add DNS server", [
+        { k: "addr", l: "IP address or host name", v: edit ? shortAddr(edit) : "", ph: "8.8.8.8", hint: "Add :port for a port other than 53. Write tls://host for DNS over TLS (port 853) or https://host/path for DNS over HTTPS (port 443).", on: lk.addr },
+        { k: "label", l: "Name (optional)", v: edit ? srvName(g, edit) : "", ph: "e.g. dns-a", hint: "Shown under the address on the diagram. Fill in the address and its name is looked up; fill in a host name here and its address is.", on: lk.label },
+        ...(edit ? [] : [
+          { k: "name", l: "Domain to ask it about", v: "", ph: "google.com", hint: "A server is checked by asking it a question; add more domains afterwards." },
+          { k: "type", l: "Record type", v: "A", options: QTYPES }]),
       ], (v) => {
         if (!v.addr) return "Enter an IP address or host name.";
+        if (!edit && !/^[A-Za-z0-9_.\-]+$/.test(v.name)) return "Enter a domain name such as google.com.";
         if (!/^[A-Za-z0-9_.\-:\[\]]+$/.test(v.addr)) return "That doesn't look like an IP address or host name.";
         const nm = (v.label || "").trim();
-        if ([...nm].length > 40) return "The name can be at most 40 characters.";
+        const full = nm.toLowerCase();
+        const ip = (/^\[([0-9a-f:.]+)\](:\d+)?$/i.exec(v.addr) || /^(\d+\.\d+\.\d+\.\d+)(:\d+)?$/.exec(v.addr) || /^([0-9a-f:]*:[0-9a-f:]*)$/i.exec(v.addr) || [])[1] || "";
+        if ([...nm].length > 253) return "The name can be at most 253 characters.";
         if (/[\u0000-\u001f\u007f]/.test(nm)) return "The name must not contain control characters.";
-        ensureNTP(g);
+        ensureDNS(g);
         const a = normAddr(v.addr);
-        if (g.ntp.servers.includes(a) && a !== edit) return "That server is already on this gateway.";
+        if (g.dns.servers.includes(a) && a !== edit) return "That server is already on this gateway.";
         if (edit) {
-          const i = g.ntp.servers.indexOf(edit);
-          g.ntp.servers[i] = a;
+          const i = g.dns.servers.indexOf(edit);
+          g.dns.servers[i] = a;
           if (a !== edit) {
-            if (g.ntp.server_names) delete g.ntp.server_names[edit];
-            if ((g.ntp.paused_servers || []).includes(edit)) g.ntp.paused_servers = g.ntp.paused_servers.map((x) => (x === edit ? a : x));
+            if (g.dns.server_names) delete g.dns.server_names[edit];
+            g.dns.server_queries[a] = ownQueries(g, edit); delete g.dns.server_queries[edit];
+            if ((g.dns.paused_servers || []).includes(edit)) g.dns.paused_servers = g.dns.paused_servers.map((x) => (x === edit ? a : x));
           }
           cv.sel = { kind: "srv", addr: a };
         } else {
-          g.ntp.servers.push(a);
+          g.dns.servers.push(a);
+          g.dns.server_queries[a] = [{ name: v.name, type: v.type }];
           cv.sel = { kind: "srv", addr: a };
         }
-        if (nm) { g.ntp.server_names = g.ntp.server_names || {}; g.ntp.server_names[a] = nm; }
-        else if (g.ntp.server_names) { delete g.ntp.server_names[a]; if (!Object.keys(g.ntp.server_names).length) delete g.ntp.server_names; }
-        return null;
+        const oldNm = edit ? srvName(g, edit) : "";
+        if (nm) { g.dns.server_names = g.dns.server_names || {}; g.dns.server_names[a] = nm; }
+        else if (g.dns.server_names) { delete g.dns.server_names[a]; if (!Object.keys(g.dns.server_names).length) delete g.dns.server_names; }
+        const isFull = (s) => s.includes(".") && s.split(".").every((l) => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(l)) && s.length <= 253;
+        if (!ip || !isFull(full) || full === oldNm.toLowerCase() || nm === lk.auto.label) return null;   // a short name is only a label; a name already there, or one the reverse lookup filled in, is not registered again
+        const old = isFull(oldNm.toLowerCase()) && oldNm.toLowerCase() !== full ? oldNm.toLowerCase() : "";
+        return (async () => {
+          try {
+            const r = (await api("POST", "/api/regname", { client: ip, name: full, old })).data || {};
+            return r.ok ? null : "Saved, but DNS: " + ((r.lines || []).join("; ") || r.error || "failed");
+          } catch (e2) { return e2.message === "unauthenticated" ? null : "Saved, but DNS: " + e2.message; }
+        })();
       }, edit ? "Save" : "Add server");
-    }
-
-    // answer NTP on one of the anycast addresses the Anyname DNS Director on this host announces (it holds them; we only listen)
-    function dnsdirForm(g) {
-      const have = new Set(groups().flatMap((x) => [...(x.dnsdir_vips || []), ...(x.extra_vips || [])]));
-      const choices = ((cv.dnsdir && cv.dnsdir.offered) || []).filter((a) => !have.has(a));
-      form("Add dnsdir address", [
-        choices.length ? { k: "addr", l: "dnsdir anycast address", options: choices, v: choices[0], hint: "Answered here only while dnsdir holds it." }
-          : { k: "addr", l: "dnsdir anycast address", v: "", disabled: true, hint: "None left: dnsdir announces no other address." },
-      ], (v) => {
-        if (!v.addr) return "dnsdir announces no address that is free.";
-        g.dnsdir_vips = g.dnsdir_vips || [];
-        g.dnsdir_vips.push(v.addr);
-        cv.sel = { kind: "dd", addr: v.addr };
-        return null;
-      }, "Add address");
     }
 
     function anycastForm(g, edit) {
       form(edit ? "Edit anycast address" : "Add anycast address", [
-        { k: "addr", l: "Anycast address", v: edit || "", ph: "203.0.113.123 or 2001:db8:123::1",
-          hint: "Any subnet. Held on every node while an NTP server answers. Other gateways may carry it too." },
+        { k: "addr", l: "Anycast address", v: edit || "", ph: "203.0.113.53 or 2001:db8:53::1",
+          hint: "Any subnet. Held on every node while a DNS server answers. Other gateways may carry it too." },
       ], (v) => {
         const a = (v.addr || "").trim().replace(/\/(32|128)$/, "").toLowerCase();
         if (!a) return "Enter an IPv4 or IPv6 address.";
@@ -1768,31 +1781,57 @@
       }, edit ? "Save" : "Add address");
     }
 
+    function domainForm(g, addr, di) {
+      const q = di == null ? null : effQueries(g, addr)[di];
+      form(q ? "Edit domain" : "Add domain to " + shortAddr(addr), [
+        { k: "name", l: "Domain to ask about", v: q ? q.name : "", ph: "google.com", hint: "The server must answer this to be counted healthy." },
+        { k: "type", l: "Record type", v: q ? q.type : "A", options: QTYPES },
+      ], (v) => {
+        if (!/^[A-Za-z0-9_.\-]+$/.test(v.name)) return "Enter a domain name such as google.com.";
+        const list = ownQueries(g, addr);
+        if (list.some((x, i) => x.name.toLowerCase() === v.name.toLowerCase() && x.type === v.type && i !== di)) return "That domain is already tested on this server.";
+        if (q) { list[di] = { name: v.name, type: v.type }; } else { list.push({ name: v.name, type: v.type }); cv.sel = { kind: "dom", addr, di: list.length - 1 }; }
+        return null;
+      }, q ? "Save" : "Add domain");
+    }
+
     function delSel() {
       const g = curGroup(), s = cv.sel;
       if (!g || !s) return;
       const finish = () => { cv.sel = null; closeEditor(); commit(); };
       if (s.kind === "gw") {
-        const servers = (g.ntp && g.ntp.servers) || [];
+        const servers = (g.dns && g.dns.servers) || [];
+        const doms = servers.reduce((n, a) => n + effQueries(g, a).length, 0);
         confirmDialog("Delete gateway " + gwLabel(g) + "?",
-          "This removes its shared address" + (servers.length ? " and its " + servers.length + " NTP server(s)" : "") +
+          "This removes its shared address" + (servers.length ? ", its " + servers.length + " DNS server(s) and their " + doms + " domain test(s)" : "") +
           " from the configuration. You can restore it later from History.", "Delete gateway", () => {
             cv.cfg.groups = groups().filter((x) => x !== g);
             setGid(cv.cfg.groups.length ? cv.cfg.groups[0].group_id : null);
             finish();
           });
       } else if (s.kind === "srv") {
-        g.ntp.servers = g.ntp.servers.filter((a) => a !== s.addr);
-        if (g.ntp.server_names) { delete g.ntp.server_names[s.addr]; if (!Object.keys(g.ntp.server_names).length) delete g.ntp.server_names; }
-        if (g.ntp.paused_servers) g.ntp.paused_servers = g.ntp.paused_servers.filter((a) => a !== s.addr);
-        finish();
+        const n = effQueries(g, s.addr).length;
+        const del = () => {
+          g.dns.servers = g.dns.servers.filter((a) => a !== s.addr);
+          if (g.dns.server_queries) delete g.dns.server_queries[s.addr];
+          if (g.dns.server_names) { delete g.dns.server_names[s.addr]; if (!Object.keys(g.dns.server_names).length) delete g.dns.server_names; }
+          if (g.dns.paused_servers) g.dns.paused_servers = g.dns.paused_servers.filter((a) => a !== s.addr);
+          finish();
+        };
+        if (n) confirmDialog("Delete DNS server " + srvTitle(g, s.addr) + "?", "Its " + n + " domain test(s) are deleted with it.", "Delete server", del);
+        else del();
       } else if (s.kind === "any") {
         g.extra_vips = (g.extra_vips || []).filter((a) => a !== s.addr);
         if (!g.extra_vips.length) delete g.extra_vips;
         finish();
-      } else if (s.kind === "dd") {
-        g.dnsdir_vips = (g.dnsdir_vips || []).filter((a) => a !== s.addr);
-        if (!g.dnsdir_vips.length) delete g.dnsdir_vips;
+      } else if (s.kind === "dom") {
+        if (ownQueries(g, s.addr).length <= 1) {
+          openDialog("A server needs a domain", h("p", {}, "A DNS server is checked by asking it about a domain, so " + shortAddr(s.addr) +
+            " must keep at least one. Add another domain first, edit this one, or delete the server."),
+            h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "button", onclick: closeEditor }, "OK")));
+          return;
+        }
+        ownQueries(g, s.addr).splice(s.di, 1);
         finish();
       }
     }
@@ -1847,7 +1886,6 @@
       try {
         const r = await api("GET", "/api/canvas");
         cv.view = r.data || [];
-        cv.dnsdir = r.dnsdir || { present: false, offered: [] };
       } catch (ex) { if (ex.message === "unauthenticated") throw ex; }
       // Redrawing replaces every shape, and the browser's tooltip (the shape's <title>) only appears after the
       // pointer has rested on the same element for about a second: a redraw every poll while the pointer is on a
@@ -1868,9 +1906,9 @@
           onmouseout: (e) => { if (cv.stale && !cv.drag && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest(".shape"))) draw(); },
           // right-click on empty canvas (shapes and tabs handle their own menus)
           oncontextmenu: (e) => { cv.sel = null; refresh(); const g = curGroup();
-            openMenu(e, [["New gateway", () => gatewayForm(null)]].concat(g ? [["Add NTP server…", () => serverForm(g)]] : [])); } });
-        const legend = legendEl = h("div", { class: "cv-legend muted small hidden" },
-          h("span", { class: "dot st-ok" }), "working ", h("span", { class: "dot st-warn" }), "degraded ", h("span", { class: "dot st-bad" }), "down ", h("span", { class: "dot st-idle" }), "not yet known ", h("span", { class: "dot st-paused" }), "paused ", h("span", { class: "dot line-spread" }), "used for time (* selected)");
+            openMenu(e, [["New gateway…", () => gatewayForm(null)]].concat(g ? [["Add DNS server…", () => serverForm(g)]] : [])); } });
+        const legend = legendEl = h("div", { class: "cv-legend muted small" },
+          h("span", { class: "dot st-ok" }), "working ", h("span", { class: "dot st-warn" }), "degraded ", h("span", { class: "dot st-bad" }), "down ", h("span", { class: "dot st-idle" }), "not yet known ", h("span", { class: "dot st-paused" }), "paused ", h("span", { class: "dot line-spread" }), "active");
         main.append(svgHost, legend);
         cv.loaded = false;
         load().then(() => {
@@ -1913,13 +1951,13 @@
               m.preempt ? " " : null, m.preempt ? pill("preempt") : null),
             h("td", { class: "num", title: "average gap between this node's hellos / the largest gap in the last 30 to 60 seconds, counting a silence in progress" }, m.local || !m.hello_avg_ms ? "–" : m.hello_avg_ms + " / " + m.hello_max_ms),
             h("td", { class: "mono" }, m.vmac || "–"),
-            h("td", {}, pill(m.ntp_listening ? "answering" : "not answering", m.ntp_listening ? "ok" : "warn"))));
+            h("td", {}, pill(m.dns_listening ? "answering" : "not answering", m.dns_listening ? "ok" : "warn"))));
           out.append(h("div", { class: "card" },
             h("header", {}, h("h2", {}, g.name ? g.name + " · Group " + g.group_id : "Group " + g.group_id),
               h("span", { class: "mono muted" }, "VIP " + g.vip),
               g.agc ? h("span", { class: "muted" }, "AGC ", h("span", { class: "mono" }, g.agc)) : null),
             h("div", { class: "scroll" }, h("table", { class: "tight" },
-              h("thead", {}, h("tr", {}, ["Node name", "Node IP", "Pri", "Slot", "Weight", "Role", "State", "Hello avg / max (ms)", "vMAC", "NTP"].map((t, i) => h("th", { class: [2, 3, 4, 7].includes(i) ? "num" : "" }, t)))),
+              h("thead", {}, h("tr", {}, ["Node name", "Node IP", "Pri", "Slot", "Weight", "Role", "State", "Hello avg / max (ms)", "vMAC", "DNS"].map((t, i) => h("th", { class: [2, 3, 4, 7].includes(i) ? "num" : "" }, t)))),
               h("tbody", {}, rows)))));
         }
         morph(body, out);
@@ -1947,64 +1985,77 @@
     };
   })();
 
-  // NTP  (CLI: --show-ntp)
-  VIEWS.ntp = (() => {
+  // DNS  (CLI: --show-dns)
+  VIEWS.dns = (() => {
     let body;
-    const stat = (k, v, small) => h("div", { class: "stat" }, h("div", { class: "k" }, k), h("div", { class: "v" + (small ? " small" : "") }, v));
-    const sgn = (v) => (v > 0 ? "+" : "") + Number(v).toFixed(1);
+    const stat = (k, v, small, tip) => h("div", { class: "stat", title: tip || null }, h("div", { class: "k" }, k), h("div", { class: "v" + (small ? " small" : "") }, v));
+    const size = (v) => { let f = Number(v) || 0; for (const u of ["B", "KiB", "MiB", "GiB", "TiB"]) { if (f < 1024 || u === "TiB") return (u === "B" ? f : f.toFixed(1)) + " " + u; f /= 1024; } return ""; };
     return {
       mount(main) { body = h("div", {}); main.append(body); },
       async poll() {
-        const r = await api("GET", "/api/ntp");
+        const r = await api("GET", "/api/dns");
         const out = h("div", {});
         if (!r.ok) { out.append(h("div", { class: "notice bad", role: "alert" }, r.error)); morph(body, out); return; }
         const d = r.data;
-        const pools = d.pools && d.pools.length ? d.pools : [{ key: 0, groups: [], servers: d.servers }];
-        const c = d.chrony || {}, ss = d.server_stats || {};
-        const cState = !c.running ? "not running" : c.synced ? "synchronised" : "not synchronised";
-        out.append(h("div", { class: "stats" },
-          stat("chrony", d.chrony_roll ? h("span", { class: "pill warn" }, d.chrony_roll) : h("span", { class: "pill " + (c.synced ? "ok" : "bad") }, cState)),
-          stat("Stratum", c.synced ? c.stratum : "–"),
-          stat("System clock offset", c.synced ? sgn(c.offset_ms) + " ms" : "–"),
-          stat("Synchronised to", c.synced ? c.ref || "–" : "–", true),
-          stat("Requests", ss.received == null ? "–" : ss.received),
-          stat("Dropped", ss.dropped == null ? "–" : ss.dropped)));
-        // "group 1 192.168.0.5:123" -> where each gateway answers, shown on its own card
+        const pools = d.pools && d.pools.length ? d.pools : [{ key: 0, groups: [], servers: d.servers, down_percent: d.down_percent, probes: d.probes }];
+        const kept = pools.filter((p) => p.cache && p.cache.on);   // the answer caches of this node, all gateways together
+        const cacheBytes = kept.reduce((a, p) => a + p.cache.bytes, 0), cacheEntries = kept.reduce((a, p) => a + p.cache.entries, 0);
+        out.append(h("div", { class: "stats" }, stat("Queries", d.queries), stat("Answered", d.answered), stat("SERVFAIL", d.servfail),
+          (() => {
+            const tile = stat("Cache", kept.length ? size(cacheBytes) : "off", false, kept.length ? Number(cacheEntries).toLocaleString() + " answers kept" : null);
+            if (!kept.length) return tile;
+            const b = h("button", { type: "button", class: "btn small", title: "Empty the answer cache of every node",
+              onclick: async () => {
+                b.disabled = true;
+                const c = (await api("POST", "/api/cache/clear", {})).data || {};
+                b.textContent = c.cleared === undefined ? "Failed" : "Cleared";
+                setTimeout(() => { b.disabled = false; b.textContent = "Clear"; }, 2000);
+              } }, "Clear");
+            tile.firstChild.append(b);
+            tile.firstChild.classList.add("kb");
+            return tile;
+          })()));
+        // "group 1 192.168.0.5:53" -> where each gateway answers, shown on its own card
         const addrsOf = {};
         for (const l of d.listeners || []) { const m = /^group (\d+) (.+)$/.exec(l); if (m) (addrsOf[m[1]] = addrsOf[m[1]] || []).push(m[2]); }
         const fills = [];
-        const IN_CHRONY = { "*": ["synchronised to", "ok"], "+": ["combined", "ok"], "-": ["not combined", "info"], "?": ["not reachable", "warn"], "x": ["falseticker", "bad"], "~": ["too variable", "warn"] };
         for (const p of pools) {
           const maxE = Math.max(1, ...p.servers.filter((s) => s.healthy).map((s) => s.ewma_ms));
           out.append(h("div", { class: "card" },
-            h("header", {}, h("h2", {}, p.key ? "Gateway " + p.key + (p.name ? " · " + p.name : "") : "Shared Servers" + (p.groups.length ? " (Group " + p.groups.join(", ") + ")" : "")),
-              p.max_stratum ? h("span", { class: "muted small" }, "stratum up to " + p.max_stratum + " · root distance up to " + p.max_root_distance_ms + " ms · " + (p.max_rtt_ms ? "round trip up to " + p.max_rtt_ms + " ms" : "round trip not checked") + " · " + (p.max_offset_ms ? "falseticker beyond " + p.max_offset_ms + " ms" : "falseticker check off")) : null,
+            h("header", {}, h("h2", {}, p.key ? "Gateway " + p.key + (p.name ? " · " + p.name : "") : "Shared Pool" + (p.groups.length ? " (Group " + p.groups.join(", ") + ")" : "")),
+              h("span", { class: "muted" }, p.probes + " test" + (p.probes === 1 ? "" : "s") + " per round, down at " + p.down_percent + "% failing"),
+              p.ecs ? pill("client subnet sent · " + p.ecs_sent, "info") : h("span", { class: "muted small" }, "servers see this node's address"),
               p.using_fallback ? pill("every server is down: using the fallback servers", "warn") : null,
+              p.client_rate ? pill("limit " + p.client_rate + "/s per client" + (p.limited ? " · " + p.limited.toLocaleString() + " turned away" : ""), p.limited ? "warn" : "info") : null,
+              p.allowed_clients ? pill("allowed clients · " + p.allowed_clients + " network" + (p.allowed_clients === 1 ? "" : "s") + (p.denied ? " · " + p.denied.toLocaleString() + " refused" : ""), p.denied ? "warn" : "info") : null,
+              p.dot_port ? pill("DoT · " + p.dot_port, "info") : null,
+              p.doh_port ? pill("DoH · " + p.doh_port, "info") : null,
+              p.tls_insecure ? pill("tls:// and https:// certificates not checked", "warn") : null,
+              p.spread ? h("span", { class: "muted small", title: "Servers within " + p.spread_band + "% of the fastest one's latency take turns; slower ones are fallbacks." }, "spread within " + p.spread_band + "%") : null,
+              (() => {
+                const c = p.cache, n0 = (n) => Number(n || 0).toLocaleString();
+                if (!c || !c.on) return h("span", { class: "muted small" }, "cache off");
+                const t = c.hits + c.misses;
+                return h("span", { class: "muted small", title: "Answers kept: " + n0(c.entries) + " of " + n0(c.max) + ". Not cacheable (never kept): " + n0(c.bypassed) + ". Pushed out when full: " + n0(c.evicted) + ". Kept at most " + n0(c.max_ttl) + " s. Answered with a remembered failure: " + n0(c.fail_hits) + "." },
+                  "cache " + (t ? (100 * c.hits / t).toFixed(0) + "% hits" : "empty") + " · " + n0(c.entries) + " kept");
+              })(),
               h("span", { class: "spacer" }),
               (() => {
                 const on = (p.groups.length ? p.groups : [p.key]).flatMap((g) => addrsOf[g] || []);
                 return on.length ? h("span", { class: "mono small" }, "answering on " + on.join(" · ")) : h("span", { class: "muted small" }, "not answering on this node");
               })()),
-            h("div", { class: "scroll" }, h("table", { class: "ntp" },
-              h("thead", {}, h("tr", {}, ["Server name", "Server IP", "State", "In chrony", "Stratum", "Offset (ms)", "Root dist. (ms)", "Round trip (ms)", "Last (ms)", "OK", "Fail", "Last error"].map((t, i) => h("th", { class: i >= 4 && i <= 10 ? "num" : "" }, t)))),
+            h("div", { class: "scroll" }, h("table", { class: "dns" },
+              h("thead", {}, h("tr", {}, ["Rank", "Server name", "Server IP", "State", "EWMA (ms)", "Last (ms)", "OK", "Fail", "Served", "Last error"].map((t, i) => h("th", { class: i >= 4 && i <= 8 ? "num" : "" }, t)))),
               h("tbody", {}, p.servers.map((s) => h("tr", {},
+                h("td", {}, s.healthy && s.rank ? s.rank : "–"),
                 h("td", { class: "sname", title: s.name || null }, s.name || "–"),   // a long name is cut short; the whole is the tooltip
-                h("td", { class: "mono" }, s.addr, s.fallback ? [h("span", { class: "muted small fb-tag", title: "Used only while every other server is down" }, "fallback")] : null,
-                  // a server named by host is probed over IPv4 and over IPv6; the one whose numbers count is marked
-                  (s.families || []).length > 1 || s.via === "IPv6" ? (s.families || []).map((f) => h("span", { class: "fam-tag " + (!f.ok ? "bad" : f.family === s.via ? "use" : ""),
-                    title: f.family + " " + f.addr + ": " + (f.ok ? (f.ewma_ms ? fmtMs(f.ewma_ms) + " ms" : "answers") : f.error || "no answer") + (f.ok && f.family === s.via ? " (the numbers shown are from this family)" : "") }, f.family === "IPv4" ? "v4" : "v6")) : null,
-                  // authenticated with NTS or a key: green when it works, red when it does not, grey while chrony has yet to restart with it
-                  s.auth ? h("span", { class: "fam-tag " + (s.auth.status === "ok" ? "use" : s.auth.status === "failing" ? "bad" : ""), title: s.auth.detail }, (s.auth.mode === "nts" ? "NTS" : "key") + (s.auth.status === "failing" ? " ✗" : s.auth.status === "pending" ? " …" : "")) : null),
-                h("td", {}, s.falseticker ? pill("falseticker", "bad") : pill(s.healthy ? "up" : "down", s.healthy ? "ok" : "bad")),
-                h("td", {}, s.chrony && IN_CHRONY[s.chrony] ? pill(IN_CHRONY[s.chrony][0], IN_CHRONY[s.chrony][1]) : h("span", { class: "muted" }, "no")),
-                h("td", { class: "num", title: s.time ? "Reference: " + s.time.refid : null }, s.time ? s.time.stratum : "–"),
-                h("td", { class: "num" }, s.time ? sgn(s.time.offset_ms) : "–"),
-                h("td", { class: "num" }, s.time ? fmtMs(s.time.root_distance_ms) : "–"),
-                h("td", { class: "num" }, s.healthy && s.ewma_ms > 0 ? h("span", { class: "bar-wrap" }, h("span", { class: "bar-fill" })) : null, s.healthy && s.ewma_ms > 0 ? fmtMs(s.ewma_ms) : "–"),
+                h("td", { class: "mono" }, s.addr, s.fallback ? [h("span", { class: "muted small fb-tag", title: "Used only while every other server is down" }, "fallback")] : null),
+                h("td", {}, pill(s.healthy ? "up" : "down", s.healthy ? "ok" : "bad")),
+                h("td", { class: "num" }, s.healthy ? h("span", { class: "bar-wrap" }, h("span", { class: "bar-fill" })) : null, s.healthy ? fmtMs(s.ewma_ms) : "–"),
                 h("td", { class: "num" }, s.last_ms > 0 ? fmtMs(s.last_ms) : "–"),
-                h("td", { class: "num" }, s.successes), h("td", { class: "num" }, s.failures),
+                h("td", { class: "num" }, s.successes), h("td", { class: "num" }, s.failures), h("td", { class: "num" }, s.served),
                 h("td", { class: "wrap muted" }, s.last_error || ""))))))));
-          for (const s of p.servers) if (s.healthy && s.ewma_ms > 0) fills.push([s, maxE]);
+          for (const s of p.servers) if (s.healthy) fills.push([s, maxE]);
         }
         morph(body, out);
         // widths are set via the CSSOM (allowed under the page's CSP)
@@ -2035,39 +2086,59 @@
     { shared: true, k: "real_macs", l: "Use real MAC addresses (no virtual MACs)", t: "bool", hint: "On for a gateway you add now (most networks need it: a VMware port group that is not promiscuous, a cloud with one MAC per interface, a switch with port security); gateways that already existed keep their setting. Off is the older way with a virtual MAC per node. On: the VIP is on every node's lo and the controller answers ARP with the real MAC of the node it picks. Failover then depends on the neighbors honoring an unsolicited ARP. Restarts the gateway; set it on every node's cluster together." },
     { shared: true, k: "neighbors", l: "Neighbors (unicast mode)", t: "list", wide: true, hint: "Every node, one IP per line. Empty: multicast." },
   ];
-  const NTP_FIELDS = [
-    { section: "Upstream servers" },
-    { shared: true, k: "servers", l: "Servers", t: "list", wide: true, hint: "One per line: 10.0.0.123, 10.0.1.123:1123, [2001:db8::123]:123, ntp.example.com" },
-    { shared: true, k: "fallback_servers", l: "Fallback servers", t: "list", wide: true, hint: "Same forms. Used only while no server above is in service (all down or paused), and dropped as soon as one passes again. They are never probed and always count as up." },
-    { section: "Health", cols: 3, note: "A server that fails a check is taken out as a source of every node. Applies to every gateway unless it has its own checks (Topology ▸ right-click the gateway ▸ Edit)." },
-    { shared: true, k: "max_stratum", l: "Highest stratum", t: "int", min: 1, max: 15 },
-    { shared: true, k: "max_root_distance_ms", l: "Largest root distance (ms)", t: "int", min: 0, max: 60000 },
-    { shared: true, k: "max_rtt_ms", l: "Slowest round trip (ms, 0 = off)", t: "int", min: 0, max: 60000 },
-    { shared: true, k: "serve_offset_ms", l: "Serve only within (ms, 0 = off)", t: "int", min: 0, max: 3600000 },
-    { shared: true, k: "max_offset_ms", l: "Falseticker offset (ms, 0 = off)", t: "int", min: 0, max: 3600000 },
+  const DNS_FIELDS = [
+    { section: "Upstream servers", note: "The default settings for every gateway that has no servers of its own (a gateway drawn on the Topology page can have its own)." },
+    { shared: true, k: "servers", l: "Servers", t: "list", wide: true, hint: "One per line: 10.0.0.53, 10.0.1.53:5353, [2001:db8::53]:53, tls://dns.example.com (DNS over TLS, port 853), https://dns.example.com/dns-query (DNS over HTTPS)" },
+    { shared: true, k: "fallback_servers", l: "Fallback servers", t: "list", wide: true, hint: "Same forms. Used only while no server above is in service (all down or paused), and dropped as soon as one answers again. They are never probed and always count as up, so a public resolver that knows nothing of your internal names is fine." },
+    { shared: true, k: "queries", l: "Probe queries", t: "queries", wide: true, hint: "Every server is asked each of these to check it works. One per line: \"example.com\" or \"example.com AAAA\"" },
+    { shared: true, k: "tls_insecure", l: "Accept any certificate from tls:// and https:// servers (insecure)", t: "bool" },
+    { section: "Load Balancing", cols: 3, note: "Applies to every gateway unless that gateway has its own load balancing (Topology ▸ right-click the gateway ▸ Edit)." },
+    { shared: true, k: "spread", l: "Spread queries over servers of similar speed (round-robin)", t: "bool" },
+    { shared: true, k: "spread_band", l: "Spread band (% of fastest)", t: "int", min: 1, max: 1000 },
+    { shared: true, k: "down_percent", l: "Down at (% of tests failing)", t: "int", min: 1, max: 100 },
     { shared: true, k: "fail_threshold", l: "Failures before down", t: "int", min: 1 },
-    { section: "Serving" },
-    { shared: true, k: "listen_port", l: "NTP port (UDP, chrony)", t: "int", min: 1, max: 65535 },
-    { section: "Client Rate Limiting", note: "Written to chrony (allow, ratelimit). This node itself is always allowed. The rate limit restarts chrony." },
-    { shared: true, k: "allowed_clients", l: "Allowed clients", t: "list", wide: true, hint: "Networks that may ask, one per line: 10.0.0.0/8, 192.168.1.5, 2001:db8::/32. Empty = everyone." },
-    { shared: true, k: "blocked_clients", l: "Blocked clients", t: "list", wide: true, hint: "Clients and networks that get no answers, one per line, whatever Allowed clients says (the block wins). Statistics ▸ Top Clients ▸ right-click ▸ Block adds one. This node itself cannot be blocked." },
-    { shared: true, k: "client_rate", l: "Requests per second", t: "int", min: 0, max: 10000000, hint: "0 = no limit. A client is one IPv4 address or one IPv6 /64." },
-    { shared: true, k: "client_burst", l: "Burst (requests at once)", t: "int", min: 0, max: 100000000, hint: "0 = twice the rate, at least 10." },
-    { shared: true, k: "client_action", l: "Over the limit", t: "select", options: ["drop", "kod"] },
-    { section: "Authentication", note: "Symmetric keys and Network Time Security (NTS). Written to chrony, which is restarted on every node, one at a time, when anything here changes." },
-    { shared: true, k: "keys", l: "Keys", t: "list", wide: true },
-    { shared: true, k: "server_auth", l: "Authenticated servers", t: "list", wide: true },
-    { shared: true, k: "nts_server", l: "Serve NTS to clients", t: "bool" },
-    { section: "Leap seconds", note: "Written to chrony, which is restarted on every node, one at a time, when anything here changes." },
-    { shared: true, k: "leap_tz", l: "Leap second table", t: "text" },
-    { shared: true, k: "leap_mode", l: "Leap second mode", t: "select", options: ["system", "step", "slew", "ignore"] },
-    { shared: true, k: "leap_smear", l: "Smear leap seconds", t: "bool" },
+    { shared: true, k: "max_attempts", l: "Max servers tried", t: "int", min: 1 },
+    { shared: true, k: "latency_alpha", l: "Latency smoothing (0–1]", t: "float" },
+    { section: "Listeners", note: "Plain DNS is always on. DNS over TLS (usually 853) and DNS over HTTPS (usually 443, served at /dns-query) use the GUI certificate (Configure ▸ Web GUI); 0 turns one off." },
+    { shared: true, k: "listen_port", l: "DNS port (UDP and TCP)", t: "int", min: 1, max: 65535 },
+    { shared: true, k: "dot_port", l: "DNS over TLS port", t: "int", min: 0, max: 65535 },
+    { shared: true, k: "doh_port", l: "DNS over HTTPS port", t: "int", min: 0, max: 65535 },
+    { shared: true, k: "forward_updates", l: "Forward dynamic DNS updates to the zone's primary server", t: "bool" },
+    { section: "Sort List" },
+    { shared: true, k: "sortlist_on", l: "Sort list enabled", t: "bool" },
+    { shared: true, k: "sortlist", l: "Sort list", t: "list", wide: true },
+    { section: "Policy-Based Resolution" },
+    { shared: true, k: "policy_on", l: "Policy-Based Resolution enabled", t: "bool" },
+    { shared: true, k: "policy_log", l: "Log policy matches", t: "bool" },
+    { shared: true, k: "policy_block_ttl", l: "Blocked answer cache (s)", t: "int", min: 0, max: 604800, hint: "0 = 14400" },
+    { shared: true, k: "policy", l: "Policy rows", t: "policy", wide: true },
+    { section: "Client Rate Limiting", note: "Applies to every gateway that uses these settings, over UDP, TCP, DoT and DoH, before the cache. This node itself is always allowed and never limited. Counters are per node." },
+    { shared: true, k: "allowed_clients", l: "Allowed clients", t: "list", wide: true, hint: "Networks that may use the proxy, one per line: 10.0.0.0/8, 192.168.1.5, 2001:db8::/32. Empty = everyone. Anyone else is answered REFUSED (dynamic updates too)." },
+    { shared: true, k: "client_rate", l: "Queries per second", t: "int", min: 0, max: 10000000, hint: "0 = no limit. A client is one IPv4 address or one IPv6 /64." },
+    { shared: true, k: "client_burst", l: "Burst (queries at once)", t: "int", min: 0, max: 100000000, hint: "0 = twice the rate, at least 10." },
+    { shared: true, k: "client_action", l: "Over the limit", t: "select", options: ["drop", "truncate", "refused"] },
+    { shared: true, k: "client_limits", l: "Per-client limits", t: "list", wide: true, hint: "One per line: an address or network, then queries per second (192.168.1.5 50)." },
+    { shared: true, k: "client_exempt", l: "Never limited", t: "list", wide: true, hint: "Networks exempt from the rate limit (not from the allowed list), same forms." },
+    { section: "Client network (ECS)" },
+    { shared: true, k: "ecs", l: "Pass the client's network to the servers", t: "bool" },
+    { shared: true, k: "ecs_prefix4", l: "IPv4 prefix bits", t: "int", min: 1, max: 32 },
+    { shared: true, k: "ecs_prefix6", l: "IPv6 prefix bits", t: "int", min: 1, max: 128 },
+    { section: "Cache" },
+    { shared: true, k: "cache", l: "Answer repeated queries from a cache", t: "bool" },
+    { shared: true, k: "cache_entries", l: "Most answers kept", t: "int", min: 100, max: 1000000000 },
+    { shared: true, k: "cache_max_ttl", l: "Cache TTL (s)", t: "int", min: 1, max: 604800 },
+    { shared: true, k: "failure_cache_seconds", l: "Failure cache (s)", t: "int", min: 0, max: 300, hint: "how long a failure (SERVFAIL, REFUSED, or no server answering) is remembered, so the same failing name is not sent upstream again and again; 0 = off, at most 300 (RFC 9520)" },
     { section: "Timing" },
     { shared: true, k: "probe_interval_ms", l: "Probe interval (ms)", t: "int", min: 1 },
     { shared: true, k: "probe_timeout_ms", l: "Probe timeout (ms)", t: "int", min: 1 },
+    { shared: true, k: "query_timeout_ms", l: "Forward timeout (ms)", t: "int", min: 1 },
+    { section: "Client names", note: "Top Clients ▸ right-click ▸ Name… sends a dynamic update (RFC 2136) for the name and its reverse record to the primary server of the zone." },
+    { shared: true, k: "register_key_name", l: "Registration key name", t: "text", hint: "optional TSIG key name, e.g. dnsdir-key; empty sends the update unsigned" },
+    { shared: true, k: "register_key", l: "Registration key (base64)", t: "text", hint: "the key's secret as base64 (HMAC-SHA256)" },
+    { shared: true, k: "register_ttl", l: "Registered record TTL (s)", t: "int", min: 0, max: 604800, hint: "0 = 300" },
   ];
   const WEB_FIELDS = [
-    { k: "listen", l: "Listen address", t: "port", hint: "the port, default 12380 (all addresses); to listen on one address only, write it with the port: 10.0.0.1:12380" },
+    { k: "listen", l: "Listen address", t: "port", hint: "the port, default 53853 (all addresses); to listen on one address only, write it with the port: 10.0.0.1:53853" },
     { shared: true, k: "group", l: "Login groups", t: "text", hint: "one or more, separated by commas: a member of any may sign in. The first one that is a local group is the one the Users page manages; the others can be directory (Active Directory) groups" },
     { k: "pam_service", l: "PAM service", t: "text" },
     { k: "session_idle_minutes", l: "Session idle timeout (min)", t: "int", min: 1 },
@@ -2082,7 +2153,7 @@
     { shared: true, k: "snmp_contact", l: "Contact", t: "text" },
   ];
   const CLUSTER_FIELDS = [
-    { k: "listen", l: "Binding address", t: "port", hint: "the port, default 12381 (all addresses); or an address with the port: 10.0.0.1:12381" },
+    { k: "listen", l: "Binding address", t: "port", hint: "the port, default 53854 (all addresses); or an address with the port: 10.0.0.1:53854" },
     { k: "self", l: "Advertised address", t: "text" },
     { k: "sync_interval_sec", l: "Sync interval (s)", t: "int", min: 1, max: 3600 },
   ];
@@ -2092,10 +2163,181 @@
   const sharedTag = (f) => (f.shared && state.clustered
     ? h("span", { class: "pill info tiny", title: "Replicated from the cluster's primary. Changes made here are accepted by the primary first." }, "shared") : null);
 
+  // Policy-Based Resolution: a table of rows (source client, source name, destination servers, destination name) edited
+  // like a spreadsheet.  The rows live in a list and the table shows one page of it, optionally narrowed by a filter, so
+  // thousands of rows stay quick.  The rows are read from the top and the first match wins, so their order is kept and
+  // numbered.  Right-click a row for Edit, Copy, Paste, Add, Move and Delete; drag the handle to reorder on a page.
+  let policyClip = null;
+  const POLICY_LOCAL = /^(A|AAAA|CNAME|TXT|TTL)\s/i;
+  function policyTable(rows) {
+    const NAMES = ["Source client", "Source name", "Destination servers", "Destination name"];
+    // a local answer is shown in the destination name column, wherever it was written
+    const data = rows.map((r) => {
+      const sv = r.servers || [];
+      return sv.length === 1 && POLICY_LOCAL.test(sv[0]) ? { v: [r.client, r.name, "", sv[0]] } : { v: [r.client, r.name, sv.join(", "), r.dest || ""] };
+    });
+    let page = 0, size = 50, dragging = null;
+
+    const tbody = h("tbody", {});
+    const tbl = h("table", { class: "policy" },
+      h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number and order" }, "#"), ...NAMES.map((n) => h("th", {}, n)))), tbody);
+    const empty = h("div", { class: "policy-empty" }, "");
+    const wrap = h("div", { class: "policy-wrap" }, tbl, empty);
+
+    const filter = h("input", { type: "text", class: "policy-filter", placeholder: "Filter rows…", "aria-label": "Filter policy rows", autocomplete: "off", spellcheck: "false" });
+    const count = h("span", { class: "policy-count muted" }, "");
+    const sizeSel = h("select", { "aria-label": "Rows per page" }, [25, 50, 100, 250, 500].map((n) => h("option", { value: String(n) }, n + " per page")));
+    sizeSel.value = String(size);
+    const mkBtn = (label, title) => h("button", { type: "button", class: "btn small", title, "aria-label": title }, label);
+    const first = mkBtn("«", "First page"), prev = mkBtn("‹", "Previous page"), next = mkBtn("›", "Next page"), last = mkBtn("»", "Last page");
+    const pageIn = h("input", { type: "number", min: "1", class: "policy-page", "aria-label": "Page number" });
+    const pages = h("span", { class: "muted" }, "");
+    const pager = h("span", { class: "policy-pager" }, first, prev, pageIn, pages, next, last);
+    const bar = h("div", { class: "policy-bar" }, filter, count, h("span", { class: "grow" }), pager, sizeSel);
+    const box = h("div", { class: "policy-box" }, bar, wrap);
+    // the filter and paging controls are not settings: they must not trigger a save
+    bar.addEventListener("change", (e) => e.stopPropagation());
+
+    const changed = () => tbl.dispatchEvent(new Event("change", { bubbles: true }));
+    const visible = () => {
+      const q = filter.value.trim().toLowerCase();
+      return q ? data.filter((r) => r.v.some((x) => x.toLowerCase().includes(q))) : data;
+    };
+    const mark = (tr, row) => { tr.classList.toggle("incomplete", !row.v[2].trim() && !row.v[3].trim()); };
+    const copyText = (vals) => vals.join("\t");
+    const parseText = (txt) => txt.split(/\r?\n/).map((l) => l.split("\t").map((x) => x.trim())).filter((c) => c.length > 1 && c.some(Boolean))
+      .map((c) => [c[0] || "*", c[1] || "*", c[2] || "", c[3] || ""]);
+    const clearMarks = () => tbody.querySelectorAll(".drop-above, .drop-below").forEach((x) => x.classList.remove("drop-above", "drop-below"));
+    const trOf = (row) => [...tbody.children].find((t) => t._row === row);
+
+    // show the page; with `follow`, the page that holds that row
+    function render(follow) {
+      const vis = visible();
+      const n = Math.max(1, Math.ceil(vis.length / size));
+      if (follow) { const i = vis.indexOf(follow); if (i >= 0) page = Math.floor(i / size); }
+      page = Math.min(Math.max(page, 0), n - 1);
+      const from = page * size;
+      tbody.replaceChildren(...vis.slice(from, from + size).map(mk));
+      const filtered = vis.length !== data.length;
+      count.textContent = vis.length
+        ? `${from + 1}–${Math.min(from + size, vis.length)} of ${vis.length}${filtered ? ` (filtered from ${data.length})` : ""}`
+        : (filtered ? `0 of ${data.length}` : "0 rows");
+      pager.hidden = n < 2;
+      pageIn.value = String(page + 1);
+      pageIn.max = String(n);
+      pages.textContent = "of " + n;
+      first.disabled = prev.disabled = page === 0;
+      next.disabled = last.disabled = page >= n - 1;
+      empty.hidden = vis.length > 0;
+      empty.textContent = data.length ? "No rows match the filter." : "No rows. Right-click here ▸ Add row.";
+    }
+
+    function moveTo(row, target, after) {
+      if (row === target) return;
+      data.splice(data.indexOf(row), 1);
+      const j = data.indexOf(target);
+      data.splice(after ? j + 1 : j, 0, row);
+      render(row);
+      changed();
+    }
+    function mk(row) {
+      const tr = h("tr", {});
+      tr._row = row;
+      const grip = h("span", { class: "grip-h", draggable: "true", title: "Drag to reorder", "aria-hidden": "true" }, "⋮⋮");
+      tr.append(h("td", { class: "grip" }, h("span", { class: "rownum" }, String(data.indexOf(row) + 1)), grip));
+      for (let i = 0; i < 4; i++) {
+        const inp = h("input", { type: "text", autocomplete: "off", spellcheck: "false", "aria-label": NAMES[i] });
+        inp.value = row.v[i] || "";
+        inp.addEventListener("input", () => { row.v[i] = inp.value; mark(tr, row); });
+        tr.append(h("td", {}, inp));
+      }
+      grip.addEventListener("dragstart", (e) => {
+        dragging = row;
+        e.dataTransfer.effectAllowed = "move";
+        try { e.dataTransfer.setData("text/plain", "policy-row"); e.dataTransfer.setDragImage(tr, 0, 0); } catch (x) { /* a browser without drag images */ }
+        tr.classList.add("dragging");
+      });
+      grip.addEventListener("dragend", () => { dragging = null; tr.classList.remove("dragging"); clearMarks(); });
+      tr.addEventListener("dragover", (e) => {
+        if (!dragging || dragging === row) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        const r = tr.getBoundingClientRect();
+        clearMarks();
+        tr.classList.add(e.clientY > r.top + r.height / 2 ? "drop-below" : "drop-above");
+      });
+      tr.addEventListener("drop", (e) => {
+        if (!dragging || dragging === row) return;
+        e.preventDefault();
+        const below = tr.classList.contains("drop-below");
+        clearMarks();
+        const d = dragging;
+        dragging = null;
+        moveTo(d, row, below);
+      });
+      tr.addEventListener("contextmenu", (e) => rowMenu(menuFor(row))(e)); // the items depend on where the row is now
+      mark(tr, row);
+      return tr;
+    }
+    // add a row after `after` (the end when none); the filter is cleared so the new row shows
+    function insert(vals, after) {
+      const row = { v: [vals[0] || "", vals[1] || "", vals[2] || "", vals[3] || ""] };
+      data.splice(after ? data.indexOf(after) + 1 : data.length, 0, row);
+      filter.value = "";
+      render(row);
+      return row;
+    }
+    const focusRow = (row) => { const t = trOf(row); if (t) t.querySelector("input").focus(); };
+    async function paste(after) {
+      let list = [];
+      try { list = parseText(await navigator.clipboard.readText()); } catch (e) { /* no permission: the last copied row is used */ }
+      if (!list.length && policyClip) list = [policyClip];
+      if (!list.length) return;
+      let at = after;
+      for (const v of list) at = insert(v, at);
+      changed();
+    }
+    function menuFor(row) {
+      const vis = visible(), i = vis.indexOf(row), di = data.indexOf(row);
+      return [
+        ["Edit", () => focusRow(row)],
+        ["Copy", () => { policyClip = row.v.map((x) => x.trim()); try { navigator.clipboard.writeText(copyText(policyClip)); } catch (e) { /* the row stays in the page's own clipboard */ } }],
+        ["Paste", () => paste(row)],
+        ["Add", () => focusRow(insert(["*", "*", "", ""], row))],
+        ...(i > 0 ? [["Move up", () => moveTo(row, vis[i - 1], false)]] : []),
+        ...(i >= 0 && i < vis.length - 1 ? [["Move down", () => moveTo(row, vis[i + 1], true)]] : []),
+        ...(di > 0 ? [["Move to top", () => moveTo(row, data[0], false)]] : []),
+        ...(di < data.length - 1 ? [["Move to bottom", () => moveTo(row, data[data.length - 1], true)]] : []),
+        ["Delete", () => { data.splice(data.indexOf(row), 1); render(); changed(); }, "danger"],
+      ];
+    }
+    wrap.addEventListener("contextmenu", rowMenu([
+      ["Add", () => focusRow(insert(["*", "*", "", ""], null))],
+      ["Paste", () => paste(data[data.length - 1])],
+    ]));
+
+    filter.addEventListener("input", () => { page = 0; render(); });
+    sizeSel.addEventListener("change", () => { size = +sizeSel.value || 50; page = 0; render(); });
+    first.addEventListener("click", () => { page = 0; render(); });
+    prev.addEventListener("click", () => { page--; render(); });
+    next.addEventListener("click", () => { page++; render(); });
+    last.addEventListener("click", () => { page = 1e9; render(); });
+    pageIn.addEventListener("change", () => { page = (parseInt(pageIn.value, 10) || 1) - 1; render(); });
+    pageIn.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); pageIn.blur(); } });
+    filter.addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); });
+    render();
+    return {
+      el: box,
+      // a row with neither servers nor a destination name is not sent (it is marked until it has one); a blank client or source name is "*"
+      get: () => data.map((r) => r.v.map((x) => x.trim())).filter((c) => c[2] || c[3])
+        .map((c) => ({ client: c[0] || "*", name: c[1] || "*", servers: POLICY_LOCAL.test(c[2]) ? [c[2]] : c[2].split(/[\s,]+/).filter(Boolean), ...(c[3] && c[3] !== "*" ? { dest: c[3] } : {}) })),
+    };
+  }
+
   // Build inputs for one object; returns {el, get()} where get() reads values back with types.
   // With asCards, every {section} spec starts a card of its own (title in the header, optional note above the fields).
   // the gateway keys everybody knows, and the shortest key not called short (keep in step with gkey.go)
-  const WELL_KNOWN_KEYS = ["", "dnsdir", "ntpdir", "dgw", "ddgw", "change-me", "changeme", "secret", "password", "key", "test", "default"];
+  const WELL_KNOWN_KEYS = ["", "dnsdir", "dgw", "ddgw", "change-me", "changeme", "secret", "password", "key", "test", "default"];
   const isWeakKey = (k) => k.length < 12 || WELL_KNOWN_KEYS.includes(k.trim().toLowerCase());
 
   function fieldset(specs, obj, asCards) {
@@ -2122,15 +2364,26 @@
         getters[f.k] = get;
         continue;
       }
+      if (f.t === "policy") {
+        const pol = policyTable(v || []);
+        getters[f.k] = pol.get;
+        grid.append(h("div", { class: "f wide" }, h("span", {}, f.l, sharedTag(f)), pol.el));
+        continue;
+      }
       if (f.t === "select") {
         input = h("select", {}, f.options.map((o) => h("option", { value: o, selected: o === v }, o)));
         get = () => input.value;
-      } else if (f.t === "list") {
+      } else if (f.t === "list" || f.t === "queries") {
+        const lines = f.t === "queries" ? (v || []).map((q) => q.name + " " + q.type) : (v || []);
         input = h("textarea", { rows: 3, spellcheck: "false" });
-        input.value = (v || []).join("\n");
-        get = () => input.value.split("\n").map((s) => s.trim()).filter(Boolean);
+        input.value = lines.join("\n");
+        get = () => {
+          const ls = input.value.split("\n").map((s) => s.trim()).filter(Boolean);
+          if (f.t === "list") return ls;
+          return ls.map((s) => { const p = s.split(/\s+/); return { name: p[0], type: (p[1] || "A").toUpperCase() }; });
+        };
       } else if (f.t === "port") {
-        // a listen address kept as ":12380" in the file is shown as the port alone; one with a host in front is shown as it is
+        // a listen address kept as ":53853" in the file is shown as the port alone; one with a host in front is shown as it is
         input = h("input", { type: "text", inputmode: "numeric", autocomplete: "off", spellcheck: "false" });
         input.value = v == null ? "" : String(v).replace(/^:(\d+)$/, "$1");
         get = () => { const t = input.value.trim(); return /^\d+$/.test(t) ? ":" + t : t; };
@@ -2155,7 +2408,7 @@
     return { el: wrap, get: () => Object.fromEntries(Object.entries(getters).map(([k, g]) => [k, g()])) };
   }
 
-  // Configure ▸ General, Gateway groups, NTP relay, Web GUI and Cluster: one page each, all made from the one form
+  // Configure ▸ General, Gateway groups, DNS proxy, Web GUI and Cluster: one page each, all made from the one form
   // (every page shows its own panel and saves through the same call).
   const makeConfigView = (only) => {
     let holder, status, collect = null, refreshSNMP = () => {};
@@ -2167,9 +2420,8 @@
     function renderForm(cfg) {
       const general = fieldset(GENERAL_FIELDS, cfg);
       const web = fieldset(WEB_FIELDS, cfg.web);
-      const ntp = fieldset(NTP_FIELDS, cfg.ntp, true);
-      const cluster = fieldset(CLUSTER_FIELDS, cfg.cluster || {});
-      const snmp = fieldset(SNMP_FIELDS, { snmp_communities: cfg.ntp.snmp_communities, snmp_contact: cfg.ntp.snmp_contact, location: (cfg.snmp || {}).location });
+      const dns = fieldset(DNS_FIELDS, cfg.dns, true);
+      const snmp = fieldset(SNMP_FIELDS, { snmp_communities: cfg.dns.snmp_communities, snmp_contact: cfg.dns.snmp_contact, location: (cfg.snmp || {}).location });
       // what snmpd is doing, under the form (refreshed after every save)
       const snmpShared = () => { const v = snmp.get(); return { snmp_communities: v.snmp_communities, snmp_contact: v.snmp_contact }; };
       const snmpLocal = () => { const v = snmp.get(); return { location: v.location }; };
@@ -2182,37 +2434,39 @@
         } catch (_) { clear(snmpPill); }  // no tag when the node cannot be asked
       };
       refreshSNMP();
-      // the NTP page is five tabs; every card stays in the page (a hidden one is still read when saving)
-      const ntpTabs = () => {
+      const cluster = fieldset(CLUSTER_FIELDS, cfg.cluster || {});
+      // the DNS proxy page is six tabs; every card stays in the page (a hidden one is still read when saving)
+      const dnsTabs = () => {
         const TABS = [
           ["Servers", ["Upstream servers"]],
-          ["Health", ["Health", "Timing"]],
-          ["Clients", ["Serving", "Client Rate Limiting"]],
-          ["Security", ["Authentication"]],
-          ["Leap seconds", ["Leap seconds"]],
+          ["Health & balancing", ["Load Balancing", "Timing"]],
+          ["Listeners", ["Listeners"]],
+          ["Resolution", ["Policy-Based Resolution", "Sort List"]],
+          ["Cache & ECS", ["Cache", "Client network (ECS)"]],
+          ["Clients", ["Client Rate Limiting"]],
         ];
         const titleOf = (c) => ((c.querySelector("header h2") || {}).textContent || "");
         const panes = TABS.map(() => h("div", { role: "tabpanel" }));
-        for (const c of [...ntp.el.children]) {
+        for (const c of [...dns.el.children]) {
           const i = TABS.findIndex(([, names]) => names.some((n) => n.toLowerCase() === titleOf(c).toLowerCase()));   // the headings are in title case ("Upstream Servers"), the lists here are not
           panes[i < 0 ? TABS.length - 1 : i].append(c);
         }
         const buttons = TABS.map(([name], i) => h("button", { type: "button", role: "tab", class: "dtab", onclick: () => show(i) }, name));
         function show(i, focus) {
-          state.ntpTab = i;
+          state.dnsTab = i;
           panes.forEach((p, j) => { p.hidden = j !== i; });
           buttons.forEach((b, j) => { b.setAttribute("aria-selected", j === i ? "true" : "false"); b.tabIndex = j === i ? 0 : -1; b.classList.toggle("on", j === i); });
           if (focus) buttons[i].focus();
           if (document.getElementById("help-panel") && document.getElementById("help-panel").classList.contains("open")) fillHelp();
         }
-        const strip = h("div", { class: "dtabs", role: "tablist", "aria-label": "NTP settings" }, buttons);
+        const strip = h("div", { class: "dtabs", role: "tablist", "aria-label": "DNS proxy settings" }, buttons);
         strip.addEventListener("keydown", (e) => {
           const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
           if (!d) return;
           e.preventDefault();
-          show((state.ntpTab + d + TABS.length) % TABS.length, true);
+          show((state.dnsTab + d + TABS.length) % TABS.length, true);
         });
-        show(state.ntpTab >= 0 && state.ntpTab < TABS.length ? state.ntpTab : 0);
+        show(state.dnsTab >= 0 && state.dnsTab < TABS.length ? state.dnsTab : 0);
         return h("div", {}, strip, ...panes);
       };
       const groupsEl = h("div", {});
@@ -2224,7 +2478,7 @@
         const card = h("div", { class: "card" },
           h("header", {}, title),
           h("div", { class: "body" },
-            g.ntp ? h("p", { class: "hint" }, "This gateway has its own NTP servers — edit them on the Topology page.") : null,
+            g.dns ? h("p", { class: "hint" }, "This gateway has its own DNS servers and domains — edit them on the Topology page.") : null,
             fs.el));
         entry.card = card;
         const gid = fs.el.querySelector("input[type=number]");
@@ -2237,9 +2491,9 @@
       const section = (title, ...kids) => h("div", { class: "card" }, h("header", {}, h("h2", {}, tc(title))), h("div", { class: "body" }, ...kids));
       collect = () => ({
         ...general.get(),
-        // keep what this form has no fields for (a gateway's own NTP pool)
-        groups: groups.map((g) => ({ ...(g.orig.ntp ? { ntp: g.orig.ntp } : {}), ...(g.orig.paused ? { paused: true } : {}), ...(g.orig.paused_all ? { paused_all: true } : {}), ...(g.orig.excluded_nodes ? { excluded_nodes: g.orig.excluded_nodes } : {}), ...(g.orig.node_order ? { node_order: g.orig.node_order } : {}), ...(g.orig.paused_vips ? { paused_vips: g.orig.paused_vips } : {}), ...(g.orig.paused_vips_here ? { paused_vips_here: g.orig.paused_vips_here } : {}), ...(g.orig.extra_vips ? { extra_vips: g.orig.extra_vips } : {}), ...(g.orig.dnsdir_vips ? { dnsdir_vips: g.orig.dnsdir_vips } : {}), ...g.fs.get() })),
-        ntp: { ...(cfg.ntp.schedule ? { schedule: cfg.ntp.schedule } : {}), ...(cfg.ntp.server_names ? { server_names: cfg.ntp.server_names } : {}), ...(cfg.ntp.paused_servers ? { paused_servers: cfg.ntp.paused_servers } : {}), ...ntp.get(), ...snmpShared() },
+        // keep what this form has no fields for (a gateway's own DNS pool, per-server domains)
+        groups: groups.map((g) => ({ ...(g.orig.dns ? { dns: g.orig.dns } : {}), ...(g.orig.paused ? { paused: true } : {}), ...(g.orig.paused_all ? { paused_all: true } : {}), ...(g.orig.excluded_nodes ? { excluded_nodes: g.orig.excluded_nodes } : {}), ...(g.orig.node_order ? { node_order: g.orig.node_order } : {}), ...(g.orig.paused_vips ? { paused_vips: g.orig.paused_vips } : {}), ...(g.orig.paused_vips_here ? { paused_vips_here: g.orig.paused_vips_here } : {}), ...(g.orig.extra_vips ? { extra_vips: g.orig.extra_vips } : {}), ...g.fs.get() })),
+        dns: { ...(cfg.dns.schedule ? { schedule: cfg.dns.schedule } : {}), ...(cfg.dns.server_queries ? { server_queries: cfg.dns.server_queries } : {}), ...(cfg.dns.server_names ? { server_names: cfg.dns.server_names } : {}), ...(cfg.dns.paused_servers ? { paused_servers: cfg.dns.paused_servers } : {}), ...(cfg.dns.paused_queries ? { paused_queries: cfg.dns.paused_queries } : {}), ...dns.get(), ...snmpShared() },
         // the certificate is managed under Web GUI; keep any file paths already in the config
         web: { cert_file: cfg.web.cert_file || "", key_file: cfg.web.key_file || "", ...web.get() },
         cluster: cluster.get(),
@@ -2247,6 +2501,7 @@
         ...(cfg.bgp ? { bgp: cfg.bgp } : {}), // edited on the Anycast page
         ...(cfg.node_paused ? { node_paused: true } : {}), // set on the Node page
         ...(cfg.paused_servers_here ? { paused_servers_here: cfg.paused_servers_here } : {}), // set on the Topology page
+        ...(cfg.paused_queries_here ? { paused_queries_here: cfg.paused_queries_here } : {}),
       });
       // every committed edit (leaving a field, picking an option, ticking a box) is saved and applied
       // Automatic updates are not part of the config file: switching them is its own call, made at once
@@ -2261,7 +2516,7 @@
           catch (e) { cb.checked = !on; say("bad", "Not changed: " + (e.message || e)); }
         });
         // the repository "Fetch from online" downloads from: shared, saved when the field is left; empty goes back to the default
-        const DEFAULT_REPO = "https://github.com/micush/ntpdir";
+        const DEFAULT_REPO = "https://github.com/micush/dnsdir";
         const repoIn = h("input", { type: "text", value: state.updateRepo ? "https://github.com/" + state.updateRepo : DEFAULT_REPO, spellcheck: "false", autocomplete: "off", "aria-label": "Online repository" });
         const repoErr = h("span", { class: "notice bad", role: "alert" });
         repoIn.addEventListener("change", async (ev) => {
@@ -2285,7 +2540,7 @@
       const panels = [
         ["general", "General", h("div", {}, section("General", general.el), updatesCard())],
         ["groups", "Gateway groups", h("div", {}, groupsEl)],
-        ["ntp", "NTP", ntpTabs()],
+        ["dns", "DNS proxy", dnsTabs()],
         ["web", "Web GUI", h("div", {}, section("Web GUI", web.el), certBox)],
         ["snmp", "SNMP", h("div", {}, (() => { const c = section("SNMP", snmp.el); c.querySelector("h2").append(snmpPill); return c; })())],
         ["cluster", "Cluster", section("Cluster", cluster.el)],
@@ -2350,7 +2605,7 @@
       },
     };
   };
-  for (const id of ["general", "groups", "ntp", "web", "snmp", "cluster"]) VIEWS["cfg_" + id] = makeConfigView(id);
+  for (const id of ["general", "groups", "dns", "web", "snmp", "cluster"]) VIEWS["cfg_" + id] = makeConfigView(id);
 
   // ── shared helpers for the management pages ───────────────────────────────
   // Nothing is said when every node answered (the Node menu says "Cluster"); when one could not, which and why, since the
@@ -2428,30 +2683,18 @@
   // The Monitor page (named) has the node's name and its addresses in two columns; the cluster address is the name's tooltip.
   const membersTable = (v, onRemove, named) => {
     const roleOf = (p) => (p.is_primary ? "primary" : (p.role || "replica"));
-    // How far each node's clock is from this node's: both measure against the same servers, so the difference of the two offsets
-    // chrony reports is the difference of the clocks (a magnitude: which one leads is not claimed).
-    const me = v.peers.find((p) => p.self);
-    const clockCell = (p) => {
-      if (!p.reachable || !p.clock) return h("td", { class: "num muted", title: p.reachable ? "this node does not report its clock (an older version, or chrony is not running)" : "" }, "–");
-      if (!p.clock.synced) return h("td", { class: "num" }, pill("not synchronised", "warn"));
-      if (p.self || !me || !me.clock || !me.clock.synced) return h("td", { class: "num muted", title: "offset " + p.clock.offset_ms.toFixed(3) + " ms from chrony's time" }, p.self ? "this node" : "–");
-      const d = Math.abs(p.clock.offset_ms - me.clock.offset_ms);
-      return h("td", { class: "num", title: "offsets from chrony's time: this node " + me.clock.offset_ms.toFixed(3) + " ms, that node " + p.clock.offset_ms.toFixed(3) + " ms" }, d.toFixed(2));
-    };
     const rows = v.peers.map((p) => h("tr", Object.assign({ class: p.self ? "local" : "" }, onRemove && !p.self ? { tabindex: "0", oncontextmenu: rowMenu([["Remove", () => onRemove(p), "danger"]]) } : {}),
-      named ? h("td", { class: "nname", title: p.addr }, p.hostname || p.addr, p.self ? " ★" : "", soakMark(p.soak_sec)) : h("td", { class: "mono" }, p.addr, p.self ? " ★" : "", soakMark(p.soak_sec)),
+      named ? h("td", { class: "nname", title: p.hostname && p.hostname !== p.addr ? p.hostname + "\n" + p.addr : p.addr }, p.hostname || p.addr, p.self ? " ★" : "", soakMark(p.soak_sec)) : h("td", { class: "mono" }, p.addr, p.self ? " ★" : "", soakMark(p.soak_sec)),
       named ? h("td", { class: "mono" }, (p.ips && p.ips.length) ? p.ips.map((ip) => h("div", {}, ip)) : "–") : null,
       h("td", {}, pill(roleOf(p), p.is_primary ? "ok" : "info")),
       h("td", {}, p.reachable ? pill("yes", "ok") : p.restarting ? pill("restarting", "info") : pill("NO", "bad"), p.updating || p.restarting ? [" ", pill("updating", "warn")] : null),
       h("td", { class: "num" }, p.reachable ? p.epoch : "–"),
       h("td", { class: "num" }, p.version || "–"), h("td", { class: "num" }, p.source_version || "–"),
-      clockCell(p),
       h("td", {}, p.self ? "now" : when(p.last_seen)),
       h("td", { class: "wrap muted" }, p.error || "")));
     return h("div", { class: "scroll" }, h("table", { class: named ? "tight" : null },
-      h("thead", {}, h("tr", {}, (named ? ["Node name", "Node IP"] : ["Node"]).concat(["Role", "Reachable", "Epoch", "Running", "Source", "Clock vs this node (ms)", "Last seen", ""]).map((t, i) => h("th", { class: i >= (named ? 4 : 3) && i <= (named ? 7 : 6) ? "num" : "" }, t)))),
-      h("tbody", {}, rows)),
-      v.clock_spread ? h("p", { class: "hint" }, "Largest difference between nodes: " + v.clock_spread.ms.toFixed(2) + " ms (" + v.clock_spread.apart + "), across " + v.clock_spread.nodes + " synchronised nodes.") : null);
+      h("thead", {}, h("tr", {}, (named ? ["Node name", "Node IP"] : ["Node"]).concat(["Role", "Reachable", "Epoch", "Running", "Source", "Last seen", ""]).map((t, i) => h("th", { class: i >= (named ? 4 : 3) && i <= (named ? 6 : 5) ? "num" : "" }, t)))),
+      h("tbody", {}, rows)));
   };
   const say = (el, kind, ...msg) => kind !== "bad" ? clear(el) : clear(el).append(h("div", { class: "notice " + kind, role: kind === "bad" ? "alert" : "status" }, ...msg));
   const fail = (el) => (e) => { if (e.message !== "unauthenticated") say(el, "bad", e.message); };
@@ -2602,7 +2845,7 @@
   // ── Certificate  (CLI: --tls-status/-install/-csr/-revert/-regenerate) ─────
   VIEWS.certificate = (() => {
     let info, status, csrBox, tools;
-    const sourceLabel = { files: "Files set in the configuration file", installed: "Uploaded on this page", cluster: "Copied from the cluster's main node", "self-signed": "Created automatically by ntpdir" };
+    const sourceLabel = { files: "Files set in the configuration file", installed: "Uploaded on this page", cluster: "Copied from the cluster's main node", "self-signed": "Created automatically by dnsdir" };
     const fold = (title, ...kids) => h("details", { class: "card fold" }, h("summary", {}, title), h("div", { class: "body" }, ...kids));
 
     function drawInfo(c) {
@@ -2627,7 +2870,7 @@
         ta.value = c.pending_csr;
         csrBox.append(
           ta, h("div", { class: "toolbar" }, copyBtn(() => ta.value),
-            h("button", { class: "btn small", type: "button", onclick: () => saveText("ntpdir.csr", ta.value) }, "Download"),
+            h("button", { class: "btn small", type: "button", onclick: () => saveText("dnsdir.csr", ta.value) }, "Download"),
             h("button", { class: "btn small", type: "button", onclick: async () => {
               if (!confirm("Throw away the pending request?")) return;
               try { await api("POST", "/api/tls/csr/cancel", {}); await load(); } catch (e) { fail(status)(e); }
@@ -2672,7 +2915,7 @@
               try { await api("POST", "/api/tls/csr", { cn: cn.value.trim(), dns: lines(names), ips: lines(ips) }); say(status, "ok", "Request created."); await load(); } catch (e) { fail(status)(e); }
             } }, "Create request")), csrBox),
           fold("Go back to the automatic certificate",
-            h("p", { class: "hint" }, "AnyTime can make its own certificate. Browsers do not trust it, but connections are still encrypted."),
+            h("p", { class: "hint" }, "AnyName can make its own certificate. Browsers do not trust it, but connections are still encrypted."),
             h("div", { class: "toolbar" },
               h("button", { class: "btn warn", type: "button", onclick: async () => {
                 if (!confirm("Stop using the uploaded certificate and go back to the automatic one?")) return;
@@ -2726,9 +2969,9 @@
         status = h("div", { "aria-live": "polite" });
         dyn = h("div", {});
         tokenBox = h("div", {});
-        const code = h("textarea", { rows: 3, spellcheck: "false", class: "pem", placeholder: "ntpdir-join-v1:…", "aria-label": "Join code" });
+        const code = h("textarea", { rows: 3, spellcheck: "false", class: "pem", placeholder: "ddgw-join-v1:…", "aria-label": "Join code" });
         joinBox = section("Join an existing cluster",
-          h("p", { class: "hint" }, "Paste a join code created on a member (“Create join code” there). This node's shared settings — NTP block, VIPs, keys and timers — are replaced by the cluster's; its interface, priority, weight, preemption and neighbours stay its own. A snapshot of the current configuration is saved first."),
+          h("p", { class: "hint" }, "Paste a join code created on a member (“Create join code” there). This node's shared settings — DNS block, VIPs, keys and timers — are replaced by the cluster's; its interface, priority, weight, preemption and neighbours stay its own. A snapshot of the current configuration is saved first."),
           code, h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "button", onclick: async (ev) => {
             if (!confirm("Join this node to the cluster? Its shared settings will be replaced by the cluster's.")) return;
             ev.target.disabled = true;
@@ -2745,7 +2988,7 @@
                 const ta = h("textarea", { rows: 4, readonly: true, class: "pem", "aria-label": "Join code" }); ta.value = r.code;
                 clear(tokenBox).append(h("div", { class: "card" }, h("header", {}, h("h2", {}, tc("Join code")), h("span", { class: "muted" }, "single use, valid until " + when(r.expires))),
                   h("div", { class: "body" }, ta, h("div", { class: "toolbar" }, copyBtn(() => ta.value),
-                    h("span", { class: "hint" }, "Paste it on the new node (Cluster → Join) or run: ntpdir --cluster-join '<code>'")))));
+                    h("span", { class: "hint" }, "Paste it on the new node (Cluster → Join) or run: dnsdir --cluster-join '<code>'")))));
               } catch (e) { fail(status)(e); }
             } }, "Create join code"),
             h("button", { class: "btn", type: "button", onclick: () => act("/api/cluster/sync", {}, null, "Synced.") }, "Sync now"),
@@ -2778,7 +3021,7 @@
     function draw(v) { const real = dyn; dyn = h("div", {}); try { build(v); } finally { morph(real, dyn); dyn = real; } }
     // built into a detached copy and morphed in: the page keeps its elements (and so its scroll boxes) from one poll to the next
     function build(v) {
-      if (!v.toolchain) dyn.append(h("div", { class: "notice bad", role: "alert" }, "No Go toolchain (≥ 1.24) was found on this node, so it cannot build updates itself. Re-run install.sh, which keeps one under /usr/local/share/ntpdir/go."));
+      if (!v.toolchain) dyn.append(h("div", { class: "notice bad", role: "alert" }, "No Go toolchain (≥ 1.24) was found on this node, so it cannot build updates itself. Re-run install.sh, which keeps one under /usr/local/share/dnsdir/go."));
       const newer = v.source_version && Number(v.source_version) > Number(v.running);
       fill(stats, 
         stat("Running", "v" + v.running), stat("Staged source", v.source_version ? "v" + v.source_version : "none"),
@@ -2857,7 +3100,8 @@
   })();
 
   // ── Statistics, Monitor  (CLI: --stats) ──────────────────────────────────────
-  // Requests by outcome over time, NTP versions, IP families, top clients and servers.  The daemon keeps them for 30 days (in memory, saved to disk every 5 minutes).  The picked node (top-bar
+  // Query totals by response code over time, query types, transports, top clients and
+  // domains.  The daemon keeps them for 30 days (in memory, saved to disk every 5 minutes).  The picked node (top-bar
   // Node menu) is the one shown.
   VIEWS.stats = (() => {
     const SVGNS = "http://www.w3.org/2000/svg";
@@ -2873,15 +3117,18 @@
     // Series in the validated colour order; the colour belongs to the entity.
     const SERIES = [
       { key: "total", label: "Total", cls: "q-total" },
-      { key: "answered", label: "Answered", cls: "q-ok" },
-      { key: "kod", label: "Kiss-o'-death", cls: "q-nx" },
+      { key: "no_error", label: "No Error", cls: "q-ok" },
+      { key: "nx_domain", label: "NX Domain", cls: "q-nx" },
       { key: "refused", label: "Refused", cls: "q-ref" },
-      { key: "failed", label: "Failed", cls: "q-fail" },
+      { key: "other", label: "Other", cls: "q-oth" },
+      { key: "updates", label: "Updates", cls: "q-upd" },
+      { key: "server_failure", label: "Server Failure", cls: "q-fail" },
     ];
-    // an NTP version / IP family keeps its colour whatever its rank
-    const TYPE_CLS = { "NTPv4": "t1", "NTPv3": "t2", "NTPv2": "t3", "NTPv1": "t4" };
-    const OUTCOME_CLS = Object.fromEntries(SERIES.filter((x) => x.key !== "total").map((x) => [x.label, x.cls]));   // chrony cannot tell the NTP version of a client, so the card shows how the requests ended
-    const PROTO_CLS = { IPv4: "t1", IPv6: "t2" };
+    // a record type keeps its colour whatever its rank; the rest fold into "Other"
+    const TYPE_CLS = { A: "t1", AAAA: "t2", HTTPS: "t3", PTR: "t4", SRV: "t5", TXT: "t6", SOA: "t7", MX: "t8" };
+    // UDP over IPv4 blue, over IPv6 purple; TCP over IPv4 orange, over IPv6 pink.  Plain UDP / TCP (counted before the split
+    // existed, or by a node on an older version) are the muted blue-grey and tan.
+    const PROTO_CLS = { "UDP · IPv4": "t1", "UDP · IPv6": "t7", "TCP · IPv4": "t2", "TCP · IPv6": "t5", UDP: "t9", TCP: "t10" };
     const RANGES = [["now", "Now"], ["1h", "Last Hour"], ["1d", "Last Day"], ["7d", "Last Week"], ["30d", "Last Month"], ["custom", "Custom"]];
     const REFRESH_MS = 10000;
     const n0 = (n) => Number(n || 0).toLocaleString();
@@ -2894,15 +3141,15 @@
       return x >= 100 ? "99.99%" : x <= 0 ? "<0.01%" : String(x) + "%";
     };
 
-    let status, bar, cnote, tiles, chartBox, pies, tops, foot, rangeBtns, fromIn, toIn, customRow;
-    let range = "1h", qpsView = false, sel = "", pickClient = "", pickServer = "", hidden = new Set(), last = null, lastAt = 0, seq = 0, topPage = { c: 0, d: 0 }, topKey = "", cFilter = "", sFilter = "", filterTimer = 0;
+    let status, bar, cnote, tiles, chartBox, pies, tops, upds, foot, rangeBtns, fromIn, toIn, customRow;
+    let range = "1h", qpsView = false, sel = "", pickClient = "", pickDomain = "", hidden = new Set(), last = null, lastAt = 0, seq = 0, topPage = { c: 0, d: 0 }, topKey = "", cFilter = "", dFilter = "", filterTimer = 0;
 
     // ── fetching ──
     // the picked node (Node menu in the top bar) answers; pick another member there
     // sel: the answer kind a tile picked ("" = everything); the daemon limits the donuts and
     // top lists to it, the chart just shows that one line
-    const q = (from, to) => "/api/qstats?from=" + encodeURIComponent(from) + (to ? "&to=" + encodeURIComponent(to) : "") + (sel ? "&outcome=" + sel : "") + (pickClient ? "&client=" + encodeURIComponent(pickClient) : "") + (pickServer ? "&server=" + encodeURIComponent(pickServer) : "") + (cFilter ? "&cmatch=" + encodeURIComponent(cFilter) : "") + (sFilter ? "&smatch=" + encodeURIComponent(sFilter) : "");
-    const KINDS = { answered: "answered", failed: "failed", kod: "kod", refused: "refused" };
+    const q = (from, to) => "/api/qstats?from=" + encodeURIComponent(from) + (to ? "&to=" + encodeURIComponent(to) : "") + (sel ? "&rcode=" + sel : "") + (pickClient ? "&client=" + encodeURIComponent(pickClient) : "") + (pickDomain ? "&domain=" + encodeURIComponent(pickDomain) : "") + (cFilter ? "&cmatch=" + encodeURIComponent(cFilter) : "") + (dFilter ? "&dmatch=" + encodeURIComponent(dFilter) : "");
+    const KINDS = { no_error: "noerror", server_failure: "servfail", nx_domain: "nxdomain", refused: "refused", updates: "update" };
     async function fetchData() {
       let from = range, to = "";
       if (range === "custom") {
@@ -2936,17 +3183,22 @@
         h("div", { class: "qv", title: typeof value === "string" ? null : n0(value) }, typeof value === "string" ? value : shortCount(value)),   // a million and up is written short (2.71M, 100.5M), the full number in the tooltip
         h("div", { class: "qs" }, sub || "\u00a0"), h("div", { class: "ql" }, label));
       clear(tiles).append(
-        tile("q-total", "Total Requests", t, "", ""),
-        // requests per second: now = the last finished bucket (the newest one is still filling), with the average and the peak over the range
+        tile("q-total", "Total Queries", t, "", ""),
+        // queries per second: now = the last finished bucket (the newest one is still filling), with the average and the peak over the range
         (() => { const b = d.total || [], st = d.step || 60, f = (v) => (v >= 100 ? shortCount(Math.round(v)) : v.toFixed(1)),
             rate = b.map((v) => v / st), cur = rate.length > 1 ? rate[rate.length - 2] : rate.length ? rate[0] : 0,
             avg = rate.length ? rate.reduce((a, v) => a + v, 0) / rate.length : 0, peak = rate.length ? Math.max(...rate) : 0;
-          return tile("q-qps", "RPS", f(cur), rate.length ? "peak " + f(peak) : "", "qps", "Click to draw requests per second in the chart. Requests per second in the last finished interval. Over the chosen range: average " + f(avg) + ", peak " + f(peak)); })(),
-        tile("q-ok", "Answered", d.sums.answered, pct(d.sums.answered, t), "answered"),
-        tile("q-fail", "Failed", d.sums.failed, pct(d.sums.failed, t), "failed"),
-        tile("q-nx", "Kiss-o'-death", d.sums.kod, pct(d.sums.kod, t), "kod"),
+          return tile("q-qps", "QPS", f(cur), rate.length ? "peak " + f(peak) : "", "qps", "Click to draw queries per second in the chart. Queries per second in the last finished interval. Over the chosen range: average " + f(avg) + ", peak " + f(peak)); })(),
+        tile("q-ok", "No Error", d.sums.no_error, pct(d.sums.no_error, t), "no_error"),
+        tile("q-fail", "Server Failure", d.sums.server_failure, pct(d.sums.server_failure, t), "server_failure"),
+        tile("q-nx", "NX Domain", d.sums.nx_domain, pct(d.sums.nx_domain, t), "nx_domain"),
         tile("q-ref", "Refused", d.sums.refused, pct(d.sums.refused, t), "refused"),
-        tile("q-clients", "Clients", d.sums.clients, ""));
+        // dynamic DNS updates forwarded to a primary (they are part of Total too)
+        tile("q-upd", "Updates", d.sums.updates, d.sums.updates ? (d.sums.updates_failed ? shortCount(d.sums.updates_failed) + " failed" : "none failed") : "", "updates"),
+        tile("q-clients", "Clients", d.sums.clients, ""),
+        // answers served from the cache, out of the lookups that could be cached (the cache's own hit rate, over the chosen range)
+        (() => { const hit = d.sums.cache_hits || 0, look = hit + (d.sums.cache_misses || 0);
+          return tile("q-cache", "Cache Hits", look ? pct(hit, look) : "–", look ? "" : "off or unused", undefined, "Answered from the cache, out of the lookups that could be cached in this range" + (look ? ": " + n0(hit) + " of " + n0(look) : "")); })());
     }
 
     function drawChart(d) {
@@ -2955,7 +3207,7 @@
       if (qpsView) d = Object.assign({}, d, { qps: (d[only || "total"] || d.total).map((v) => v / (d.step || 60)) });   // the rate of what is picked (all queries when nothing is)
       const fq = (v) => (v >= 10 ? n0(Math.round(v)) : Number(v).toFixed(1));
       const qs = SERIES.find((s) => s.key === (only || "total"));
-      const avail = qpsView ? [{ key: "qps", label: "RPS" + (only ? " — " + qs.label : ""), cls: qs.cls }] : SERIES.filter((s) => only ? s.key === only : true);
+      const avail = qpsView ? [{ key: "qps", label: "QPS" + (only ? " — " + qs.label : ""), cls: qs.cls }] : SERIES.filter((s) => only ? s.key === only : (s.key !== "other" || d.sums.other > 0) && (s.key !== "updates" || d.sums.updates > 0));
       const shown = avail.filter((s) => only || !hidden.has(s.key));
       const legend = h("div", { class: "qlegend", role: "group", "aria-label": "Series" }, avail.map((s) =>
         h("button", { type: "button", class: "qchip " + s.cls, "aria-pressed": hidden.has(s.key) && !only ? "false" : "true", disabled: only || qpsView ? "" : null,
@@ -2967,7 +3219,7 @@
       const W = 1000, H = 300, L = axisMargin(yLabels, 52), R = 14, T = 12, B = 28, pw = W - L - R, ph = H - T - B;
       const x = (i) => L + (n <= 1 ? pw / 2 : (pw * i) / (n - 1));
       const y = (v) => T + ph - (ph * v) / max;
-      const svg = sv("svg", { class: "qchart", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": qpsView ? "Requests per second over time" : "Requests over time" });
+      const svg = sv("svg", { class: "qchart", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": qpsView ? "Queries per second over time" : "Queries over time" });
       for (let g = 0; g <= 4; g++) {
         const v = (max * g) / 4;
         svg.append(sv("line", { class: "qgrid", x1: L, x2: W - R, y1: y(v), y2: y(v) }), sv("text", { class: "qax", x: L - 6, y: y(v) + 4, "text-anchor": "end" }, yLabels[g]));
@@ -2983,7 +3235,7 @@
       }
       // hover: a crosshair, a dot per series and one tooltip with the values
       const cross = sv("line", { class: "qcross hidden", y1: T, y2: T + ph });
-      const dots = shown.map((s) => sv("circle", { class: "qdot hidden " + s.cls, r: 4, cx: 0, cy: 0 }));
+      const dots = shown.map((s) => sv("circle", { class: "qdot hidden " + s.cls, r: 4, cx: 0, cy: 0 }));   // parked out of sight until the pointer is over the chart
       const tip = sv("g", { class: "qtip hidden" });
       const tipBg = sv("rect", { class: "qtipbg", rx: 6, width: 210, height: 20 + 18 * (shown.length + 1 + (qpsView ? 0 : 1)) });
       const tipHead = sv("text", { class: "qtiph", x: 10, y: 17 });
@@ -2996,14 +3248,14 @@
           const px = ((e.clientX - r.left) / r.width) * W;
           const i = Math.max(0, Math.min(n - 1, Math.round(((px - L) / pw) * (n - 1))));
           cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i)); cross.classList.remove("hidden");
-          shown.forEach((s, k) => { dots[k].classList.remove("hidden"); dots[k].setAttribute("cx", x(i)); dots[k].setAttribute("cy", y(d[s.key][i])); });
+          shown.forEach((s, k) => { dots[k].setAttribute("cx", x(i)); dots[k].setAttribute("cy", y(d[s.key][i])); dots[k].classList.remove("hidden"); });
           tipHead.textContent = when((d.start + i * d.step) * 1000);
           shown.forEach((s, k) => { tipRows[k].lastChild.textContent = s.label + ": " + (qpsView ? fq(d[s.key][i]) : n0(d[s.key][i])); });
-          if (qpsRow) qpsRow.lastChild.textContent = "RPS" + (only ? " — " + qs.label : "") + ": " + fq(d[only || "total"][i] / (d.step || 60));
+          if (qpsRow) qpsRow.lastChild.textContent = "QPS" + (only ? " — " + qs.label : "") + ": " + fq(d[only || "total"][i] / (d.step || 60));
           const tx = x(i) > W / 2 ? x(i) - 220 : x(i) + 12;
           tip.setAttribute("transform", `translate(${tx} ${T + 6})`); tip.classList.remove("hidden");
         },
-        onmouseleave: () => { cross.classList.add("hidden"); tip.classList.add("hidden"); dots.forEach((c) => c.classList.add("hidden")); } });
+        onmouseleave: () => { cross.classList.add("hidden"); tip.classList.add("hidden"); dots.forEach((dt) => dt.classList.add("hidden")); } });
       svg.append(cross, ...dots, hit, tip);
       chartBox.append(legend, svg);
     }
@@ -3011,7 +3263,7 @@
     function donut(title, items, clsOf, keep) {
       const total = items.reduce((a, e) => a + e.count, 0);
       const card = h("div", { class: "qdonut" }, h("h3", {}, tc(title)));
-      if (!total) return card.appendChild(h("div", { class: "empty" }, "No requests in this range.")), card;
+      if (!total) return card.appendChild(h("div", { class: "empty" }, "No queries in this range.")), card;
       // fold everything beyond the named, coloured ones into "Other"
       const rows = [];
       let other = 0;
@@ -3046,13 +3298,12 @@
         return [w.domain, w.network && "Network: " + w.network, w.netname && "Name: " + w.netname, w.org && "Organization: " + w.org, w.country && "Country: " + w.country,
           w.origin && "Origin AS: " + w.origin, "From: " + w.server].filter(Boolean).join("\n");
       }
-      const addrs = w.name ? [w.name, w.ipv4 && "IPv4: " + w.ipv4, w.ipv6 && "IPv6: " + w.ipv6, !w.ipv4 && !w.ipv6 && "No address found", ""].filter((x) => x !== false && x !== undefined && x !== null && x !== 0).join("\n") + "\n" : "";
-      if (!w.found) return addrs + w.domain + " — " + w.note;
-      return addrs + [w.domain, w.registrar && "Registrar: " + w.registrar, w.registrant && "Registrant: " + w.registrant, w.registered && "Registered: " + w.registered,
+      if (!w.found) return w.domain + " — " + w.note;
+      return [w.domain, w.registrar && "Registrar: " + w.registrar, w.registrant && "Registrant: " + w.registrant, w.registered && "Registered: " + w.registered,
         w.updated && "Updated: " + w.updated, w.expires && "Expires: " + w.expires, (w.name_servers || []).length && "Name servers: " + w.name_servers.join(", "), "From: " + w.server].filter(Boolean).join("\n");
     };
-    // A row is a button: picking a client lists the servers that answered it, picking a
-    // server lists its clients in Top Clients.  o.picked is this list's picked row,
+    // A row is a button: picking a client lists what it asked for in Top Domains, picking a
+    // domain lists who asked for it in Top Clients.  o.picked is this list's picked row,
     // o.note says the list is filtered, o.onClear drops that filter.
     // Clear: forget the counts and the top lists (of every node when the Node menu says Cluster)
     async function clearStats() {
@@ -3105,7 +3356,7 @@
       again.addEventListener("click", go);
       go();
     }
-    // Ping / Traceroute of a client or server address: ping or mtr run on the picked node, shown as it comes in
+    // Ping / Traceroute of a client address or a domain: ping or mtr run on the picked node, shown as it comes in
     // a traceroute as a table, with the host names or the addresses (the daemon looks the names up as the hops appear, so the box can be ticked at any time)
     let traceNames = false;
     try { traceNames = localStorage.getItem("nt_trace_names") === "1"; } catch (_) { /* no storage */ }
@@ -3136,28 +3387,298 @@
         }
       }, extra);
     }
-    // Lookup: what this node's resolver says about a client address (its reverse names) or a server name (addresses, CNAME, MX, NS, TXT)
+    function whoisPopup(name) {
+      textPopup("Whois " + name, async (put) => put(whoisText((await api("GET", "/api/whois?domain=" + encodeURIComponent(name))).data)));
+    }
+
+    // Lookup: what this node's resolver says about a client address (its reverse names) or a domain (addresses, CNAME, MX, NS, TXT)
     function lookupPopup(name) {
       textPopup("Lookup " + name, async (put) => put((await api("GET", "/api/dnslookup/full?lookup=" + encodeURIComponent(name))).data.text));
     }
-    function whoisPopup(name) {
-      textPopup("Whois " + name, async (put) => put(whoisText((await api("GET", "/api/whois?lookup=" + encodeURIComponent(name))).data)));
+    // Flush: drop a domain from the answer cache of every node (whatever the Node menu says); the popup says how many answers went
+    function flushPopup(name) {
+      textPopup("Flush " + name, async (put) => {
+        const r = (await api("POST", "/api/cache/flush", { domain: name })).data || {};
+        const bad = (r.nodes || []).filter((n) => !n.ok);
+        put(r.flushed + " cached answer" + (r.flushed === 1 ? "" : "s") + " for " + (r.name || name) + " dropped on " + ((r.nodes || []).length > 1 ? "every node" : "this node") +
+          (bad.length ? "\nNot reached: " + bad.map((n) => n.name + " (" + n.error + ")").join(", ") : ""));
+      });
     }
-
     // Copy: the address or the name to the clipboard
     async function copyAddr(text) {
       try { await navigator.clipboard.writeText(text); } catch (_) { /* no permission: nothing copied */ }
     }
-    // Name…: give a client a name by hand (Settings ▸ client_names); an empty name removes it
-    async function setClientName(addr, name) {
+    // Limit…: a rate of its own for one client (Settings ▸ client_limits, "ADDRESS RATE"); 0 removes it
+    async function setClientLimit(addr, rate) {
       try {
         const cfg = (await api("GET", "/api/config")).config;
-        cfg.ntp = cfg.ntp || {};
-        const names = Object.assign({}, cfg.ntp.client_names || {});
+        cfg.dns = cfg.dns || {};
+        const list = (cfg.dns.client_limits || []).filter((x) => x.trim().split(/\s+/)[0] !== addr);
+        if (rate > 0) list.push(addr + " " + rate);
+        if (list.length) cfg.dns.client_limits = list; else delete cfg.dns.client_limits;
+        await api("PUT", "/api/config", { config: cfg, note: "Client limit from Statistics: " + addr + (rate > 0 ? " " + rate + " queries/s" : " removed") });
+        await load();
+      } catch (e) { if (e.message !== "unauthenticated") say(status, "bad", "Limit not saved: " + e.message); }
+    }
+    function askLimit(addr, current) {
+      const input = h("input", { type: "text", inputmode: "numeric", autocomplete: "off", spellcheck: "false", value: current ? String(current) : "", placeholder: "queries per second", "aria-label": "Queries per second" });
+      const err = h("div", { "aria-live": "polite" });
+      const d = h("dialog", { class: "cv-dialog", "aria-label": "Limit " + addr });
+      const close = () => { try { d.close(); } catch (_) { /* closed */ } d.remove(); };
+      d.addEventListener("close", () => d.remove());
+      d.append(h("h2", {}, "Limit " + addr),
+        h("form", { onsubmit: (ev) => {
+          ev.preventDefault();
+          const v = input.value.trim();
+          if (!/^\d+$/.test(v) || Number(v) < 1 || Number(v) > 10000000) { errorBox(err, "Write a number of queries per second, 1 to 10000000."); return; }
+          close(); setClientLimit(addr, Number(v));
+        } },
+        h("label", { class: "f wide" }, "Queries per second", input), err,
+        h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "submit" }, "Save"),
+          current ? h("button", { class: "btn", type: "button", onclick: () => { close(); setClientLimit(addr, 0); } }, "Remove limit") : null,
+          h("button", { class: "btn", type: "button", onclick: close }, "Cancel"))));
+      root.append(d);
+      d.showModal();
+      input.focus(); input.select();
+    }
+
+    // adds a row "any client / name / keyword" at the end of the shared Policy-Based Resolution table and saves it
+    async function addPolicyRow(name, keyword, client, dest) {
+      client = client || "*";
+      try {
+        const cfg = (await api("GET", "/api/config")).config;
+        cfg.dns = cfg.dns || {};
+        const list = cfg.dns.policy || [];
+        const same = list.findIndex((r) => (r.client || "*") === client && String(r.name || "*").toLowerCase() === name.toLowerCase());
+        if (same >= 0) { say(status, "bad", "There already is a policy row for " + (client === "*" ? name : client + " asking for " + name) + " (row " + (same + 1) + ", " + ((list[same].servers || []).join(", ") || "no servers") + "). Edit it on Configure ▸ DNS proxy ▸ Resolution."); return; }
+        list.push(dest ? { client, name, servers: [], dest } : { client, name, servers: [keyword] });
+        cfg.dns.policy = list;
+        await api("PUT", "/api/config", { config: cfg, note: "Policy row from Statistics: " + (dest ? "rewrite to " + dest : keyword) + " for " + (client === "*" ? name : client + " / " + name) });
+        await load();
+        say(status, cfg.dns.policy_on === false ? "warn" : "info", "Added policy row 1: " + (client === "*" ? name : client + " asking for " + name) + " → " + (dest || keyword) + "." + (cfg.dns.policy_on === false ? " Policy-Based Resolution is switched off, so it does nothing until you switch it on (Configure ▸ DNS proxy ▸ Resolution)." : ""));
+      } catch (e) { if (e.message !== "unauthenticated") say(status, "bad", "Not added: " + e.message); }
+    }
+
+    // the row Block writes: this client, any name, answered NODATA
+    let blockRules = [];   // the Block rows of the policy table (any client cell but "*"), for the icon after a client's name
+    let nameRules = [];   // the policy rows that apply to every client, in table order, for the icon after a domain
+    let limitRules = [];   // client_limits in order, the first line that matches a client is its own rate
+    const KEYWORD_ROWS = ["null", "nxdomain", "nodata", "refused"];
+    const isRewriteRow = (r, name) => (r.client || "*") === "*" && String(r.name || "").toLowerCase() === name.toLowerCase() && !!String(r.dest || "").trim() && String(r.dest).trim() !== "*" &&
+      ((r.servers || []).length === 0 || ((r.servers || []).length === 1 && String(r.servers[0]).toLowerCase() === "pool"));
+    // What the table does with a domain (the icon after it): the first row from the top that applies to every client (client "*") and whose name
+    // covers the domain decides, like the daemon: a keyword row blocks it (🚫), a Destination-name row rewrites it (✏️), any other row (a pool row,
+    // other servers) lets it through and ends the search.  A name can be exact, "*.name" (the name and everything below it), a pattern with "*"
+    // or "?" inside a label, or "*" (every name).
+    const nameMatcher = (cell) => {
+      const t = String(cell || "*").trim().toLowerCase().replace(/\.$/, "");
+      if (t === "" || t === "*") return { all: true, test: () => true };
+      const wild = (p, x) => new RegExp("^" + p.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^.]*").replace(/\?/g, "[^.]") + "$").test(x);
+      if (!/[*?]/.test(t.startsWith("*.") ? t.slice(2) : t)) {
+        if (t.startsWith("*.")) { const base = t.slice(2); return /^[a-z0-9_]([a-z0-9_.-]*[a-z0-9_])?$/.test(base) ? { test: (d) => d === base || d.endsWith("." + base) } : null; }
+        return /^[a-z0-9_]([a-z0-9_.-]*[a-z0-9_])?$/.test(t) ? { exact: true, test: (d) => d === t } : null;
+      }
+      let rest = t, any = false;
+      if (rest.startsWith("*.")) { any = true; rest = rest.slice(2); }
+      const labels = rest.split(".");
+      if (labels.some((l) => !/^[a-z0-9_*?-]{1,63}$/.test(l))) return null;
+      if (labels.filter((l) => l === "**").length > 3 || !labels.some((l) => !/[*?]/.test(l)) && labels.includes("**")) return null;   // the daemon refuses these
+      if (labels.includes("**")) {   // "**" is any number of whole labels, none included (a leading "*." counts as one)
+        const pat = any ? ["**", ...labels] : labels;
+        return { test: (d) => {
+          const ls = d.split(".");
+          let prev = Array(ls.length + 1).fill(false); prev[0] = true;
+          for (const p of pat) {
+            const cur = Array(ls.length + 1).fill(false);
+            for (let j = 0; j <= ls.length; j++) cur[j] = p === "**" ? (prev[j] || (j > 0 && cur[j - 1])) : j > 0 && prev[j - 1] && wild(p, ls[j - 1]);
+            prev = cur;
+          }
+          return prev[ls.length];
+        } };
+      }
+      return { test: (d) => { let ls = d.split("."); if (any) { if (ls.length < labels.length) return false; ls = ls.slice(ls.length - labels.length); } else if (ls.length !== labels.length) return false; return labels.every((p, i) => wild(p, ls[i])); } };
+    };
+    const nameRulesOf = (cfg) => {
+      const out = [];
+      for (const r of ((cfg.dns || {}).policy || [])) {
+        const c = String(r.client || "*").trim().toLowerCase();
+        if (c !== "*" && c !== "any") continue;   // a row for particular clients does not decide for every client
+        const m = nameMatcher(r.name);
+        if (!m) continue;
+        const sv = r.servers || [], k = sv.length === 1 ? String(sv[0]).toLowerCase() : "";
+        let kind = "pass", dest = "";
+        if (KEYWORD_ROWS.includes(k)) kind = "block", dest = k;
+        else if (String(r.dest || "").trim() && String(r.dest).trim() !== "*" && (sv.length === 0 || k === "pool")) kind = "rewrite", dest = String(r.dest).trim();
+        out.push({ m, kind, dest, text: String(r.name || "*").trim() });
+      }
+      return out;
+    };
+    const nameDecision = (name) => {
+      const d = String(name).toLowerCase().replace(/\.$/, ""), hit = [];
+      for (const r of nameRules) {
+        if (!r.m.test(d)) continue;
+        if (r.kind === "pass") break;                              // lets the domain through: the rows below are not reached
+        if (r.m.all) { if (hit.length) break; return null; }       // every name: not marked one by one (unless a row above names it)
+        hit.push(r);
+      }
+      if (!hit.length) return null;
+      const same = hit.filter((r) => r.kind === hit[0].kind), own = same.find((r) => r.m.exact);
+      return own ? { ...own, exact: true } : { ...same[0], exact: false };
+    };
+    // the speedometer after a rate-limited client: an outline dome with ticks, a needle and a hub, in blue (an SVG built from nodes, never markup)
+    const gaugeIcon = () => sv("svg", { class: "qgauge", viewBox: "0 0 24 22", "aria-hidden": "true", fill: "none", stroke: "#1e88e5", "stroke-width": "2.2", "stroke-linecap": "round", "stroke-linejoin": "round" },
+      sv("path", { d: "M4.8 18.5 A8.7 8.7 0 1 1 19.2 18.5 Z" }),
+      sv("path", { d: "M12 5.8 V7.6 M7 8.6 L8.2 9.8 M17 8.6 L15.8 9.8" }),
+      sv("path", { d: "M12 15 L15.6 9.4" }),
+      sv("circle", { cx: "12", cy: "15", r: "1.3", fill: "#1e88e5" }));
+    // addresses and networks as numbers, to tell which clients a rule covers (the same matching the daemon does)
+    const ipNum = (t) => {
+      let str = String(t).trim().toLowerCase(), v4 = null;
+      const m4 = /^(?:::ffff:)?(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(str);
+      if (m4) { const o = m4.slice(1).map(Number); if (o.some((x) => x > 255)) return null; return { v: 4, n: BigInt(((o[0] * 256 + o[1]) * 256 + o[2]) * 256 + o[3]) }; }
+      if (!/^[0-9a-f:.]+$/.test(str) || !str.includes(":")) return null;
+      const em = /(\d+\.\d+\.\d+\.\d+)$/.exec(str);
+      if (em) { const q = ipNum(em[1]); if (!q) return null; const hx = q.n.toString(16).padStart(8, "0"); str = str.slice(0, -em[1].length) + hx.slice(0, 4) + ":" + hx.slice(4); }
+      const parts = str.split("::");
+      if (parts.length > 2) return null;
+      const side = (x) => (x === "" ? [] : x.split(":"));
+      const a = side(parts[0]), b = parts.length === 2 ? side(parts[1]) : [];
+      const fill = parts.length === 2 ? 8 - a.length - b.length : 0;
+      if ((parts.length === 1 && a.length !== 8) || fill < (parts.length === 2 ? 1 : 0)) return null;
+      const all = [...a, ...Array(fill).fill("0"), ...b];
+      if (all.length !== 8 || all.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+      return { v: 6, n: BigInt("0x" + all.map((g) => g.padStart(4, "0")).join("")) };
+    };
+    const netOf = (t) => {
+      const [a, len] = String(t).split("/");
+      const ip = ipNum(a);
+      if (!ip) return null;
+      const w = ip.v === 4 ? 32 : 128;
+      let bits = len === undefined ? w : Number(len);
+      if (/^::ffff:/i.test(a) && len !== undefined && ip.v === 4) bits -= 96;   // ::ffff:a.b.c.d/N is a.b.c.d/(N-96)
+      if (!Number.isInteger(bits) || bits < 0 || bits > w) return null;
+      return { v: ip.v, n: ip.n, bits, w };
+    };
+    const inNet = (net, ip) => net && ip && net.v === ip.v && (net.bits === 0 || (ip.n >> BigInt(net.w - net.bits)) === (net.n >> BigInt(net.w - net.bits)));
+    const limitedOf = (cfg) => ((cfg.dns || {}).client_limits || []).map((x) => x.trim().split(/\s+/)).filter((f) => f.length === 2 && Number(f[1]) > 0 && netOf(f[0]))
+      .map((f) => ({ net: netOf(f[0]), text: f[0], rate: Number(f[1]) }));
+    // the rule that decides for a client: the most specific limit (a line for one address beats the network around it, as in the daemon),
+    // and a block written for the client's own address before one that covers it through a network, a list or an exclusion
+    const limitedBy = (addr) => {
+      const ip = ipNum(addr);
+      let best = null;
+      for (const r of limitRules) if (inNet(r.net, ip) && (!best || r.net.bits > best.net.bits)) best = r;
+      return best && { ...best, host: best.net.bits === best.net.w };
+    };
+    const blockedBy = (addr) => {
+      const ip = ipNum(addr), hit = [];
+      for (const r of blockRules) {
+        if (r.not.some((n) => inNet(n, ip)) || (r.pos.length && !r.pos.some((n) => inNet(n, ip)))) continue;
+        if (!r.block) break;                       // a row that lets this client through (or sends it elsewhere) ends the search
+        if (r.everyone) { if (hit.length) break; return null; }   // every client is blocked: not marked one by one (unless a row above names it)
+        hit.push(r);
+      }
+      const own = hit.find((r) => r.pos.some((n) => n.bits === n.w && inNet(n, ip)));
+      return own ? { ...own, host: true } : hit[0] ? { ...hit[0], host: false } : null;
+    };
+    // the rows of the policy table that answer for every name (name "*"), in table order, with whether each blocks: the first one that
+    // matches a client decides for it (the daemon reads the table from the top), so a row that lets a client through ends the search
+    const blockedOf = (cfg) => {
+      const out = [];
+      for (const r of ((cfg.dns || {}).policy || [])) {
+        if (String(r.name || "*") !== "*") continue;
+        const pos = [], not = [];
+        let ok = true, any = false;
+        for (const f of String(r.client || "*").trim().split(/[,\s]+/).filter(Boolean)) {
+          if (f === "*" || f.toLowerCase() === "any") { any = true; continue; }
+          const n = netOf(f.startsWith("!") ? f.slice(1) : f);
+          if (!n) { ok = false; break; }
+          (f.startsWith("!") ? not : pos).push(n);
+        }
+        if (ok) out.push({ pos, not, any: any || !pos.length && !not.length, everyone: any || !pos.length && !not.length, text: String(r.client || "*").trim(), block: isBlockRow(r, r.client || "*") });
+      }
+      return out;
+    };
+    const isBlockRow = (r, client) => (r.client || "*") === client && String(r.name || "*") === "*" && (r.servers || []).length === 1 && String(r.servers[0]).toLowerCase() === "nodata";
+    async function unblockClient(client) {
+      try {
+        const cfg = (await api("GET", "/api/config")).config;
+        const list = (cfg.dns && cfg.dns.policy) || [];
+        const keep = list.filter((r) => !isBlockRow(r, client));
+        if (keep.length === list.length) { say(status, "warn", client + " is not blocked any more."); return; }
+        cfg.dns.policy = keep;
+        await api("PUT", "/api/config", { config: cfg, note: "Policy row removed from Statistics: unblock " + client });
+        await load();
+        say(status, "info", "Unblocked " + client + ": its policy row was removed.");
+      } catch (e) { if (e.message !== "unauthenticated") say(status, "bad", "Not unblocked: " + e.message); }
+    }
+    // a domain: the rows that answer exactly this name with a keyword for every client
+    const isNameRow = (r, name) => (r.client || "*") === "*" && String(r.name || "").toLowerCase() === name.toLowerCase() && (r.servers || []).length === 1 && KEYWORD_ROWS.includes(String(r.servers[0]).toLowerCase());
+    async function unblockName(name, rewrite) {
+      try {
+        const cfg = (await api("GET", "/api/config")).config;
+        const list = (cfg.dns && cfg.dns.policy) || [];
+        const keep = list.filter((r) => !(rewrite ? isRewriteRow(r, name) : isNameRow(r, name)));
+        if (keep.length === list.length) { say(status, "warn", name + " has no such policy row any more."); return; }
+        cfg.dns.policy = keep;
+        await api("PUT", "/api/config", { config: cfg, note: "Policy row removed from Statistics: " + (rewrite ? "remove rewrite of " : "unblock ") + name });
+        await load();
+        say(status, "info", (rewrite ? "Rewrite of " + name + " removed" : "Unblocked " + name) + ": its policy row was removed.");
+      } catch (e) { if (e.message !== "unauthenticated") say(status, "bad", "Not unblocked: " + e.message); }
+    }
+    // Rewrite…: a small dialog for the Destination name of the row (an address, records, or another name to ask for)
+    function askRewrite(name) {
+      const input = h("input", { type: "text", autocomplete: "off", spellcheck: "false", placeholder: "10.5.5.5   or   other.example.com", "aria-label": "Answer with" });
+      const err = h("div", { "aria-live": "polite" });
+      const d = h("dialog", { class: "cv-dialog", "aria-label": "Rewrite " + name });
+      const close = () => { try { d.close(); } catch (_) { /* closed */ } d.remove(); };
+      d.addEventListener("close", () => d.remove());
+      d.append(h("h2", {}, "Rewrite " + name),
+        h("form", { onsubmit: (ev) => {
+          ev.preventDefault();
+          const v = input.value.trim();
+          if (!v) { errorBox(err, "Write an address, or the name to ask for instead."); return; }
+          if (v.length > 253 || /[\s]{2,}/.test(v)) { errorBox(err, "That is too long or not valid."); return; }
+          close(); addPolicyRow(name, "", "*", v);
+        } },
+        h("label", { class: "f wide" }, "Answer with", input,
+          h("span", { class: "hint" }, "An address (10.5.5.5, or 10.5.5.5, 2001:db8::5) makes the name that address. A name (other.example.com) asks the servers for that name instead and answers as if it were " + name + ". Records such as A 10.5.5.5; TTL 300 or CNAME host.example.com work too.")),
+        err,
+        h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "submit" }, "Rewrite"), h("button", { class: "btn", type: "button", onclick: close }, "Cancel"))));
+      root.append(d);
+      d.showModal();
+      input.focus();
+    }
+    async function domainMenu(e, name) {
+      e.preventDefault(); e.stopPropagation();
+      let has = false, rewritten = false;
+      try {
+        const list = (((await api("GET", "/api/config")).config.dns || {}).policy || []);
+        has = list.some((r) => isNameRow(r, name)); rewritten = list.some((r) => isRewriteRow(r, name));
+      } catch (_) { /* offer Block and Rewrite */ }
+      rowMenu([["Whois", () => whoisPopup(name)], ["Lookup", () => lookupPopup(name)], "-",
+        ["Ping", () => netTool("ping", name)], ["Traceroute", () => netTool("trace", name)], "-",
+        ["Copy", () => copyAddr(name)], "-",
+        ["Flush", () => flushPopup(name)],
+        ...(rewritten ? [["Remove rewrite", () => unblockName(name, true)]]
+          : [["Rewrite…", () => askRewrite(name)], has ? ["Unblock", () => unblockName(name)] : ["Block", () => addPolicyRow(name, "nodata")]])])(e);
+    }
+    // Name…: give a client a name by hand (Settings ▸ client_names); an empty name removes it
+    async function setClientName(addr, name, old) {
+      try {
+        const cfg = (await api("GET", "/api/config")).config;
+        cfg.dns = cfg.dns || {};
+        const names = Object.assign({}, cfg.dns.client_names || {});
         if (name) names[addr] = name; else delete names[addr];
-        if (Object.keys(names).length) cfg.ntp.client_names = names; else delete cfg.ntp.client_names;
+        if (Object.keys(names).length) cfg.dns.client_names = names; else delete cfg.dns.client_names;
         await api("PUT", "/api/config", { config: cfg, note: "Client name from Statistics: " + addr + (name ? " is " + name : " name removed") });
         await load();
+        if (!name) { say(status, "info", "The name of " + addr + " was removed (DNS was not changed)."); return; }
+        say(status, "info", addr + " is now named " + name + "; registering it in DNS…");
+        try {
+          const r = (await api("POST", "/api/regname", { client: addr, name, old: old || "" })).data || {};
+          say(status, r.ok ? "info" : "bad", (r.ok ? "Registered " + name + ": " : "The name is saved, but DNS registration failed: ") + (r.lines || []).join("; ") + (r.ok || !r.error || (r.lines || []).length ? "" : r.error));
+        } catch (e2) { if (e2.message !== "unauthenticated") say(status, "bad", "The name is saved, but DNS registration failed: " + e2.message); }
       } catch (e) { if (e.message !== "unauthenticated") say(status, "bad", "Name not saved: " + e.message); }
     }
     function askName(addr, current) {
@@ -3172,88 +3693,44 @@
           const v = input.value.trim();
           const lc = v.toLowerCase().replace(/\.$/, "");
           if (v && !(lc.split(".").length >= 2 && lc.split(".").every((l) => /^[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?$/.test(l)))) { errorBox(err, "Give the full host name: at least two parts separated by dots, using letters, digits, - and _ (e.g. ann-pc.corp.example)."); return; }
-          close(); setClientName(addr, lc);
+          close(); setClientName(addr, lc, current);
         } },
         h("label", { class: "f wide" }, "Name", input,
-          h("span", { class: "hint" }, "The full host name, shown under the address in Top Clients instead of the reverse-DNS name. Empty removes it.")),
+          h("span", { class: "hint" }, "The full host name. It is shown under the address in Top Clients instead of the reverse-DNS name, found by the Filter box, shared by the cluster, and registered in DNS: an update for its A/AAAA record and the PTR record of the address goes to the primary server of each zone. Renaming also removes the old name's record. Empty removes the name and leaves DNS as it is.")),
         err,
         h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "submit" }, "Save"), h("button", { class: "btn", type: "button", onclick: close }, "Cancel"))));
       root.append(d);
       d.showModal();
       input.focus(); input.select();
     }
-    // ── blocked clients (Settings ▸ blocked_clients, written to chrony as `deny`) ──
-    // an address as [number, bits]; a prefix is the same plus its length
-    const blocked = { list: [], nets: [] };
-    function ipBig(t) {
-      t = String(t).replace(/%.*$/, "");
-      const m4 = t.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-      if (m4) return { v: m4.slice(1).reduce((a, x) => a * 256n + BigInt(x), 0n), bits: 32 };
-      if (!t.includes(":")) return null;
-      let [head, tail] = t.split("::");
-      const grp = (x) => (x ? x.split(":") : []);
-      let hs = grp(head), ts = tail === undefined ? [] : grp(tail);
-      const v4 = (a) => { const l = a[a.length - 1]; if (l && l.includes(".")) { const b = ipBig(l).v; a.splice(a.length - 1, 1, ((b >> 16n) & 0xffffn).toString(16), (b & 0xffffn).toString(16)); } };
-      v4(hs); v4(ts);
-      if (tail === undefined ? hs.length !== 8 : hs.length + ts.length > 7) return null;
-      const all = tail === undefined ? hs : [...hs, ...Array(8 - hs.length - ts.length).fill("0"), ...ts];
-      return { v: all.reduce((a, x) => a * 65536n + BigInt(parseInt(x || "0", 16)), 0n), bits: 128 };
-    }
-    function setBlocked(list) {
-      blocked.list = list;
-      blocked.nets = list.map((t) => {
-        const [a, l] = t.split("/"), ip = ipBig(a);
-        return ip ? { text: t, v: ip.v, bits: ip.bits, len: l === undefined ? ip.bits : Number(l) } : null;
-      }).filter(Boolean);
-    }
-    // the entry that blocks this client, or null: its own address (exact) or a network that holds it
-    function blockedBy(addr) {
-      const ip = ipBig(addr);
-      if (!ip) return null;
-      let hit = null;
-      for (const n of blocked.nets) {
-        if (n.bits !== ip.bits) continue;
-        const sh = BigInt(n.bits - n.len);
-        if ((ip.v >> sh) === (n.v >> sh) && (!hit || n.len > hit.len)) hit = n;
-      }
-      return hit ? { text: hit.text, exact: hit.len === hit.bits } : null;
-    }
-    async function setBlock(addr, on) {
-      try {
-        const cfg = (await api("GET", "/api/config")).config;
-        cfg.ntp = cfg.ntp || {};
-        const list = (cfg.ntp.blocked_clients || []).filter((x) => x !== addr && x !== addr + "/32" && x !== addr + "/128");
-        if (on) list.push(addr);
-        if (list.length) cfg.ntp.blocked_clients = list; else delete cfg.ntp.blocked_clients;
-        await api("PUT", "/api/config", { config: cfg, note: "Client " + (on ? "blocked" : "unblocked") + " from Statistics: " + addr });
-        await load();
-      } catch (e) { if (e.message !== "unauthenticated") say(status, "bad", (on ? "Not blocked: " : "Not unblocked: ") + e.message); }
-    }
-    function clientMenu(e, addr, entry) {
+    async function clientMenu(e, addr, entry) {
       e.preventDefault(); e.stopPropagation();
-      const blk = blockedBy(addr);
+      let blocked = false, limit = 0;
+      try {
+        const dns = (await api("GET", "/api/config")).config.dns || {};
+        blocked = (dns.policy || []).some((r) => isBlockRow(r, addr));
+        const own = (dns.client_limits || []).map((x) => x.trim().split(/\s+/)).find((f) => f[0] === addr);
+        limit = own ? Number(own[1]) || 0 : 0;
+      } catch (_) { /* offer Block */ }
       const manual = !!(entry && entry.manual), host = (entry && entry.host) || "";
       rowMenu([["Whois", () => whoisPopup(addr)], ["Lookup", () => lookupPopup(addr)], "-",
         ["Ping", () => netTool("ping", addr)], ["Traceroute", () => netTool("trace", addr)], ["Scan", () => scanPopup(addr)], "-",
         ["Copy", () => copyAddr(addr)], "-",
-        blk ? (blk.exact ? ["Unblock", () => setBlock(addr, false)] : ["Blocked by " + blk.text + " (edit it in Settings)", () => say(status, "info", addr + " is blocked by " + blk.text + ". Edit Blocked clients in Configure ▸ Settings.")]) : ["Block", () => setBlock(addr, true)], "-",
-        ...(host ? [["Rename…", () => askName(addr, host)], ...(manual ? [["Remove name", () => setClientName(addr, "")]] : [])] : [["Name…", () => askName(addr, "")]])])(e);
-    }
-    function serverMenu(e, addr) {
-      e.preventDefault(); e.stopPropagation();
-      rowMenu([["Whois", () => whoisPopup(addr.replace(/:\d+$/, ""))], ["Lookup", () => lookupPopup(addr.replace(/:\d+$/, ""))], "-", ["Ping", () => netTool("ping", addr.replace(/:\d+$/, ""))], ["Traceroute", () => netTool("trace", addr.replace(/:\d+$/, ""))], "-", ["Copy", () => copyAddr(addr)]])(e);
+        ...(host ? [["Rename…", () => askName(addr, host)], ...(manual ? [["Remove name", () => setClientName(addr, "")]] : [])] : [["Name…", () => askName(addr, "")]]),
+        ["Limit…" + (limit ? " (" + limit + "/s)" : ""), () => askLimit(addr, limit)],
+        blocked ? ["Unblock", () => unblockClient(addr)] : ["Block", () => addPolicyRow("*", "nodata", addr)]])(e);
     }
 
     // the filter box of a top list: the server keeps only the names that contain the text (everything it counted, not only
     // the ten shown), a moment after the typing stops
     function onFilter(withHost, text) {
-      if (withHost) cFilter = text.trim().toLowerCase(); else sFilter = text.trim().toLowerCase();
+      if (withHost) cFilter = text.trim().toLowerCase(); else dFilter = text.trim().toLowerCase();
       clearTimeout(filterTimer);
       filterTimer = setTimeout(load, 300);
     }
     const TOP_PAGE = 10, TOP_PAGE_PLAIN = 12;   // rows with a host name under them are taller, so the list without them holds more and the two cards stay level
     function topTable(title, items, total, withHost, o) {
-      const filtered = !!(withHost ? cFilter : sFilter);
+      const filtered = !!(withHost ? cFilter : dFilter);
       const pk = withHost ? "c" : "d";
       const size = withHost ? TOP_PAGE : TOP_PAGE_PLAIN;
       const pages = Math.max(1, Math.ceil(items.length / size));
@@ -3266,37 +3743,50 @@
         h("button", { class: "btn small", type: "button", "aria-label": "Previous page", disabled: topPage[pk] === 0, onclick: go(-1) }, "‹"),
         h("span", { class: "muted small" }, "Page " + (topPage[pk] + 1) + " of " + pages),
         h("button", { class: "btn small", type: "button", "aria-label": "Next page", disabled: topPage[pk] >= pages - 1, onclick: go(1) }, "›"));
-      const mine = withHost ? "Client" : "Server";
+      const mine = withHost ? "Client" : "Domain";
       return h("div", { class: "card qcard" }, h("header", { class: "bar" }, h("h2", {}, tc(title)), h("span", { class: "grow" }),
-        h("input", { type: "text", class: "qfilter", placeholder: "Filter (AND, OR)", "aria-label": "Filter " + (withHost ? "clients" : "servers") + ", words may be joined by AND or OR", autocomplete: "off", spellcheck: "false",
-          value: withHost ? cFilter : sFilter, oninput: (ev) => onFilter(withHost, ev.currentTarget.value),
+        h("input", { type: "text", class: "qfilter", placeholder: "Filter (AND, OR)", "aria-label": "Filter " + (withHost ? "clients" : "domains") + ", words may be joined by AND or OR", autocomplete: "off", spellcheck: "false",
+          value: withHost ? cFilter : dFilter, oninput: (ev) => onFilter(withHost, ev.currentTarget.value),
           onkeydown: (ev) => { if (ev.key === "Escape" && ev.currentTarget.value) { ev.currentTarget.value = ""; onFilter(withHost, ""); } } }),
         ),
         h("div", { class: "hint qnote" }, o.note ? [o.note, " ", h("button", { class: "qlink", type: "button", onclick: o.onClear }, "Show all")] : "\u00a0"),
         h("div", { class: "body flush" }, rows.length
-          ? h("div", { class: "scroll" }, h("table", { class: "qtop" + (withHost ? "" : " plain") }, h("thead", {}, h("tr", {}, h("th", {}, mine), h("th", { class: "num" }, "Requests"), h("th", { class: "num" }, "Share"))),
+          ? h("div", { class: "scroll" }, h("table", { class: "qtop" + (withHost ? "" : " plain") }, h("thead", {}, h("tr", {}, h("th", {}, mine), h("th", { class: "num" }, "Queries"), h("th", { class: "num" }, "Share"))),
             h("tbody", {}, rows.map((e) => h("tr", { class: inPick(o.picked, e.name) ? "picked" : null,
-              oncontextmenu: e.name === "(others)" ? null : (ev) => (withHost ? clientMenu(ev, e.name, e) : serverMenu(ev, e.name)) },
+              // right-click a domain: add a Policy-Based Resolution row for it
+              oncontextmenu: e.name === "(others)" ? null : (ev) => (withHost ? clientMenu(ev, e.name, e) : domainMenu(ev, e.name)) },
               h("td", {}, e.name === "(others)" ? h("div", { class: "muted" }, e.name)
                 : (() => {
-                  const tail = withHost ? "\n\nClick: show the servers that answered this client (Ctrl-click: add more clients)" : "\n\nClick (Ctrl-click: add more servers): show the clients this server answered";
+                  const tail = withHost ? "\n\nClick: show what this client asked for (Ctrl-click: add more clients)" : "\n\nClick: show who asked for this domain (Ctrl-click: add more domains)";
                   const head = withHost ? (e.hosts && e.hosts.length ? e.hosts.join("\n") : "No reverse DNS name known (yet)") : "";
                   const b = h("button", { type: "button", class: "qlink mono", "data-name": e.name, "aria-pressed": inPick(o.picked, e.name) ? "true" : "false",
-                    title: withHost ? head + tail : tail.trim(),
+                    title: withHost ? head + tail : e.name + tail,   // a long domain is cut in the cell; the tooltip has all of it
                     onclick: (ev) => o.onPick(e.name, ev.ctrlKey || ev.metaKey) }, e.name);
-                  const blk = withHost ? blockedBy(e.name) : null;
-                  return blk ? h("div", { class: "qname" }, b, h("span", { class: "qblocked" + (blk.exact ? "" : " qdim"), role: "img", "aria-label": "blocked",
-                    title: blk.exact ? "Blocked: this client gets no answers. Right-click ▸ Unblock to remove it." : "Blocked by " + blk.text + ": this client gets no answers. Edit it in Configure ▸ Settings ▸ Blocked clients." }, "🚫")) : b;
+                  const nd = withHost ? null : nameDecision(e.name);
+                  const blk = withHost ? blockedBy(e.name) : null, lim = withHost ? limitedBy(e.name) : null;
+                  const marks = withHost ? [
+                    blk ? h("span", { class: "qblocked" + (blk.host ? "" : " qdim"), role: "img", "aria-label": "blocked",
+                      title: blk.text === e.name ? "Blocked: this client gets no answers (a Policy-Based Resolution row). Right-click ▸ Unblock to remove it."
+                        : "Blocked: this client gets no answers (the Policy-Based Resolution row for " + blk.text + "). Edit it on Configure ▸ DNS proxy ▸ Resolution." }, "🚫") : null,
+                    lim ? h("span", { class: "qblocked" + (lim.host ? "" : " qdim"), role: "img", "aria-label": "rate limited",
+                      title: "Rate limited to " + lim.rate + " queries per second" + (lim.text === e.name ? ". Right-click ▸ Limit to change or remove it." : " (" + lim.text + "). Edit it on Configure ▸ DNS proxy ▸ Clients ▸ Per-client limits.") }, gaugeIcon()) : null,
+                  ].filter(Boolean) : [];
+                  return marks.length
+                    ? h("div", { class: "qname" }, b, ...marks)
+                    : nd ? h("div", { class: "qname" }, b, h("span", { class: "qblocked" + (nd.exact ? "" : " qdim"), role: "img", "aria-label": nd.kind === "block" ? "in the Policy-Based Resolution table" : "rewritten",
+                      title: (nd.kind === "block" ? "Answered by the Policy-Based Resolution table: " + nd.dest.toUpperCase() + " for every client" : "Rewritten by the Policy-Based Resolution table: answered with " + nd.dest + " for every client") +
+                        (nd.exact ? ". " + (nd.kind === "block" ? "Edit it on Configure ▸ DNS proxy ▸ Resolution." : "Right-click ▸ Remove rewrite to undo it.") : " (the row for " + nd.text + "). Edit it on Configure ▸ DNS proxy ▸ Resolution.") }, nd.kind === "block" ? "🚫" : "✏️"))
+                    : b;
                 })(),
                 e.host ? h("div", { class: "muted small" }, e.host) : null),
               h("td", { class: "num", title: n0(e.count) }, shortCount(e.count)), h("td", { class: "num" }, pct(e.count, total)))))))
-          : h("div", { class: "empty" }, filtered ? "Nothing matches “" + (withHost ? cFilter : sFilter) + "”." : "No requests in this range.")),
+          : h("div", { class: "empty" }, filtered ? "Nothing matches “" + (withHost ? cFilter : dFilter) + "”." : "No queries in this range.")),
         h("footer", { class: "qpager" }, pager));
     }
 
     const shareBase = (d) => { const k = Object.keys(KINDS).find((x) => KINDS[x] === sel); return k ? d.sums[k] : d.sums.total; };
-    const kindLabel = (sep = " — ") => { const s = SERIES.find((x) => KINDS[x.key] === sel); return s ? sep + s.label : ""; };   // the donuts say "Outcome — Refused", the top lists "Top Clients: Refused"
-    // picking a client clears the server and the other way round: one drill-down at a time
+    const kindLabel = (sep = " — ") => { const s = SERIES.find((x) => KINDS[x.key] === sel); return s ? sep + s.label : ""; };   // the donuts say "Query types — No Error", the top lists "Top Clients: No Error"
+    // picking a client clears the domain and the other way round: one drill-down at a time
     // Ctrl-click (Cmd on a Mac) adds a row to what is picked, or takes it off again; the picks travel as a comma-separated list
     function inPick(picked, name) { return !!picked && picked.split(",").includes(name); }
     function pickText(picked) { const l = picked.split(","); return l.length > 3 ? l.length + " picked (" + l.slice(0, 2).join(", ") + ", …)" : l.join(", "); }
@@ -3308,8 +3798,8 @@
       if (i >= 0) l.splice(i, 1); else l.push(name);
       return l.join(",");
     }
-    function pickC(c, add) { const v = togglePick(pickClient, c, add); if (v === pickClient) return; pickClient = v; pickServer = ""; load(); }
-    function pickD(n, add) { const v = togglePick(pickServer, n, add); if (v === pickServer) return; pickServer = v; pickClient = ""; load(); }
+    function pickC(c, add) { const v = togglePick(pickClient, c, add); if (v === pickClient) return; pickClient = v; pickDomain = ""; load(); }
+    function pickD(n, add) { const v = togglePick(pickDomain, n, add); if (v === pickDomain) return; pickDomain = v; pickClient = ""; load(); }
     function pick(kind) {
       const was = qpsView;
       qpsView = false;   // any other tile goes back to counting queries
@@ -3325,27 +3815,46 @@
       clear(status);
       drawTiles(d);
       drawChart(d);
-      clear(pies).append(donut("Outcome" + kindLabel(), SERIES.filter((x) => x.key !== "total").map((x) => ({ name: x.label, count: d.sums[x.key] || 0 })).filter((x) => x.count > 0), OUTCOME_CLS, 4), donut("IP family" + kindLabel(), d.families, PROTO_CLS, 2));
+      clear(pies).append(donut("Query types" + kindLabel(), d.types, TYPE_CLS, 8), donut("Transport" + kindLabel(), d.protos, PROTO_CLS, 6));
       const sumOf = (l) => l.reduce((a, e) => a + e.count, 0);
-      const tk = [range, sel, pickClient, pickServer, cFilter, sFilter].join("|");   // a different question starts on page one
+      const tk = [range, sel, pickClient, pickDomain, cFilter, dFilter].join("|");   // a different question starts on page one
       if (tk !== topKey) { topKey = tk; topPage = { c: 0, d: 0 }; }
-      fill(tops,
-        topTable("Top Clients" + kindLabel(": "), d.clients, pickServer ? sumOf(d.clients) : shareBase(d), true,
-          { picked: pickClient, onPick: pickC, note: pickServer ? "Clients that " + pickText(pickServer) + " answered" : "", onClear: () => pickD("") }),
-        topTable("Top Servers" + kindLabel(": "), d.servers, pickClient ? sumOf(d.servers) : shareBase(d), false,
-          { picked: pickServer, onPick: pickD, note: pickClient ? "Servers that answered " + pickText(pickClient) : "", onClear: () => pickC("") }));
+      fill(tops, 
+        topTable("Top Clients" + kindLabel(": "), d.clients, pickDomain ? sumOf(d.clients) : shareBase(d), true,
+          { picked: pickClient, onPick: pickC, note: pickDomain ? "Clients that asked for " + pickText(pickDomain) : "", onClear: () => pickD("") }),
+        topTable("Top Domains" + kindLabel(": "), d.domains, pickClient ? sumOf(d.domains) : shareBase(d), false,
+          { picked: pickDomain, onPick: pickD, note: pickClient ? "Domains that " + pickText(pickClient) + " asked for" : "", onClear: () => pickC("") }));
       clear(cnote).append(...clusterNote(d.cluster));   // which nodes are added together, when the Node menu says Cluster
       foot.hidden = true;
+    }
+
+    // the recent dynamic DNS updates (always the latest ones, whatever the range)
+    function drawUpdates(list) {
+      const at = (u) => { const d = new Date(u.at * 1000); return [h("div", { class: "small" }, d.toLocaleTimeString()), h("div", { class: "muted small" }, d.toLocaleDateString())]; };
+      fill(upds, h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc("Recent dynamic updates")), h("span", { class: "grow" }),
+        h("span", { class: "muted small" }, list.length ? "the last " + list.length + " of this node, newest first" : "")),
+        h("div", { class: "body flush" }, list.length
+          ? h("div", { class: "scroll" }, h("table", {}, h("thead", {}, h("tr", {}, ["When", "Client", "Zone", "Changes", "Primary", "Result"].map((c) => h("th", {}, c)))),
+            h("tbody", {}, list.map((u) => h("tr", {},
+              h("td", {}, at(u)),
+              h("td", { class: "mono small" }, u.client),
+              h("td", { class: "mono small" }, u.zone),
+              h("td", {}, u.changes.map((c) => h("div", { class: "mono small" }, c)), u.more ? h("div", { class: "muted small" }, "… and " + n0(u.more) + " more") : null),
+              h("td", { class: "wrap" }, u.addr ? [h("div", { class: "small" }, u.primary), h("div", { class: "muted small mono" }, u.addr)] : h("div", { class: "muted small" }, u.note || "not delivered")),
+              h("td", {}, h("span", { class: "pill " + (u.ok ? "ok" : "bad") }, u.result)))))))
+          : h("div", { class: "empty" }, "No dynamic DNS updates yet."))));
     }
 
     async function load() {
       const my = ++seq;
       try {
-        const [d, blk] = await Promise.all([fetchData(), api("GET", "/api/config").then((r) => (r.config && r.config.ntp && r.config.ntp.blocked_clients) || []).catch(() => blocked.list)]);
+        const wantUpd = sel === "update"; // the card of recent updates belongs to the Updates tile
+        const [d, u] = await Promise.all([fetchData(), wantUpd ? api("GET", "/api/dnsupdates").then((r) => r.data.updates, () => null) : null,
+          api("GET", "/api/config").then((r) => { blockRules = blockedOf(r.config); limitRules = limitedOf(r.config); nameRules = nameRulesOf(r.config); }, () => null)]);
         if (my !== seq) return;
-        setBlocked(blk);
         lastAt = Date.now();
         draw(d);
+        if (wantUpd && u) drawUpdates(u); else clear(upds);
       } catch (e) { fail(status)(e); }
     }
 
@@ -3374,9 +3883,10 @@
         chartBox = h("div", { class: "card qchartcard" });
         pies = h("div", { class: "qpies" });
         tops = h("div", { class: "grid2" });
+        upds = h("div", { class: "qupd" });
         foot = h("p", { class: "hint" });
         cnote = h("div", {});
-        main.append(status, bar, cnote, tiles, h("div", { class: "card" }, h("div", { class: "body" }, chartBox)), pies, tops, foot);
+        main.append(status, bar, cnote, tiles, h("div", { class: "card" }, h("div", { class: "body" }, chartBox)), pies, tops, upds, foot);
         setRange(range);
       },
       async poll() {
@@ -3463,7 +3973,7 @@
           const tx = x(i) > W / 2 ? x(i) - 260 : x(i) + 12;
           tip.setAttribute("transform", `translate(${tx} ${T + 6})`); tip.classList.remove("hidden");
         },
-        onmouseleave: () => { cross.classList.add("hidden"); tip.classList.add("hidden"); dots.forEach((c) => c.classList.add("hidden")); } });
+        onmouseleave: () => { cross.classList.add("hidden"); tip.classList.add("hidden"); dots.forEach((dt) => dt.classList.add("hidden")); } });
       svg.append(cross, ...dots, hit, tip);
       const legend = series.length > 1 || o.legend ? h("div", { class: "qlegend" }, series.map((s) => h("span", { class: "qchip " + s.cls }, h("span", { class: "sw" }), s.label))) : null;
       return h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc(title))), h("div", { class: "body" }, legend, svg));
@@ -3614,14 +4124,14 @@
       tsBtn.disabled = true; tsHold = Infinity;
       say(status, "info", "Collecting from every node… this takes up to a minute.");
       try {
-        await apiDownload("/api/tshoot/download?capture=1", "ntpdir-tshoot.tgz");
+        await apiDownload("/api/tshoot/download?capture=1", "dnsdir-tshoot.tgz");
         say(status, "info", "Downloaded. Passwords, the gateway key, tokens and join codes are removed; README.txt in it lists what it holds.");
       } catch (e) { fail(status)(e); }
       tsBtn.disabled = false; tsHold = Date.now() + 20000;
     }
     function download() {
       const text = shown.map((l) => l.raw).join("\n") + "\n";
-      const a = h("a", { href: URL.createObjectURL(new Blob([text], { type: "text/plain" })), download: "ntpdir-log.txt" });
+      const a = h("a", { href: URL.createObjectURL(new Blob([text], { type: "text/plain" })), download: "dnsdir-log.txt" });
       document.body.append(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }
@@ -3679,8 +4189,8 @@
       const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
       if (box.firstChild && box.firstChild.classList && box.firstChild.classList.contains("empty")) clear(box);
       for (const p of pk) {
-        const dns = / NTP /.test(p.summary), arp = /^(ARP|ICMPv6 .*neighbor)/.test(p.summary) || p.summary.startsWith("ARP");
-        box.append(h("div", { class: "capline" + (dns ? " ntp" : "") + (arp ? " arp" : ""), title: p.len + " bytes" },
+        const dns = / DNS /.test(p.summary), arp = /^(ARP|ICMPv6 .*neighbor)/.test(p.summary) || p.summary.startsWith("ARP");
+        box.append(h("div", { class: "capline" + (dns ? " dns" : "") + (arp ? " arp" : ""), title: p.len + " bytes" },
           h("span", { class: "ct" }, p.time), h("span", { class: "cs" }, p.summary)));
       }
       shown += pk.length;
@@ -3757,13 +4267,13 @@
         cursor = 0; shown = 0; last = null; running = false; job = null; ifs = null;
         status = h("div", { "aria-live": "polite" });
         iface = ifaceSelect();
-        filter = h("input", { type: "text", class: "grow", placeholder: "Filter, e.g. host 10.20.0.205 and port 123", "aria-label": "Capture filter", spellcheck: "false", autocomplete: "off", maxlength: "300",
+        filter = h("input", { type: "text", class: "grow", placeholder: "Filter, e.g. host 10.20.0.205 and port 53", "aria-label": "Capture filter", spellcheck: "false", autocomplete: "off", maxlength: "300",
           onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); (cluster() ? goAll : start)(); } } });
         if (cluster()) {
           durSel = h("select", { "aria-label": "How long" }, [["5", "5 seconds"], ["10", "10 seconds"], ["30", "30 seconds"], ["60", "60 seconds"]].map(([v, t]) => h("option", { value: v }, t)));
           durSel.value = "10";
           goBtn = h("button", { class: "btn primary", type: "button", onclick: goAll }, "Capture on all nodes");
-          dlJob = h("button", { class: "btn", type: "button", disabled: true, onclick: () => apiDownload("/api/clustercapture/download", "ntpdir-cluster-capture.tgz").catch(fail(status)) }, "Download .tgz");
+          dlJob = h("button", { class: "btn", type: "button", disabled: true, onclick: () => apiDownload("/api/clustercapture/download", "dnsdir-cluster-capture.tgz").catch(fail(status)) }, "Download .tgz");
           jobBox = h("div", {});
           main.append(status, section("Capture on every node",
             h("div", { class: "hint nomargin" }, "Runs the same capture on every node of the cluster at the same time, for the time you choose, and bundles one .pcap per node in a .tgz. Each node keeps its newest packets (about 4 MB). The capture only listens."),
@@ -3774,7 +4284,7 @@
         }
         startBtn = h("button", { class: "btn primary", type: "button", onclick: start }, "Start");
         stopBtn = h("button", { class: "btn", type: "button", disabled: true, onclick: stop }, "Stop");
-        dlBtn = h("button", { class: "btn", type: "button", disabled: true, onclick: () => apiDownload("/api/capture/download", "ntpdir-capture.tgz").catch(fail(status)) }, "Download .tgz");
+        dlBtn = h("button", { class: "btn", type: "button", disabled: true, onclick: () => apiDownload("/api/capture/download", "dnsdir-capture.tgz").catch(fail(status)) }, "Download .tgz");
         info = h("div", { class: "hint nomargin" });
         box = h("div", { class: "logbox capbox", tabindex: "0", role: "log", "aria-label": "Captured packets" });
         main.append(status, section("Packet capture",
@@ -3802,10 +4312,6 @@
     // built into a detached copy and morphed in: the page keeps its elements (and so its scroll boxes) from one poll to the next
     function build(st) {
       const c = st.config;
-      if (st.blocked) {
-        box.append(section("BGP", h("div", { class: "muted" }, "BGP is unavailable: dnsdir is installed on this host.")));
-        return;
-      }
       if (!c.asn) {
         box.append(section("BGP", h("div", { class: "muted" }, "BGP is off on this node.")));
         return;
@@ -3982,13 +4488,7 @@
     }
 
     async function load() {
-      const st = (await api("GET", "/api/bgp")).data;
-      cfg = st.config;
-      if (st.blocked) {
-        clear(nbrs);
-        clear(settings).append(section("BGP", h("div", { class: "muted" }, "BGP is unavailable: dnsdir is installed on this host.")));
-        return;
-      }
+      cfg = (await api("GET", "/api/bgp")).data.config;
       drawSettings(); drawNeighbors();
     }
 
@@ -4015,10 +4515,6 @@
     // built into a detached copy and morphed in: the page keeps its elements (and so its scroll boxes) from one poll to the next
     function build(st) {
       const c = st.config;
-      if (st.blocked) {
-        box.append(section("BGP", h("div", { class: "muted" }, "BGP is unavailable: dnsdir is installed on this host.")));
-        return;
-      }
       if (!c.asn) {
         box.append(section("BGP", h("div", { class: "muted" }, "BGP is off on this node.")));
         return;
@@ -4114,8 +4610,8 @@
       const where = state.nodes.length > 1
         ? h("div", { class: "f wide" }, h("span", {}, "Runs on"), allLabel, h("label", { class: "f check" }, someNodes, "Only these nodes:"), nodesList)
         : h("div", { class: "hint" }, "Runs on this node.");
-      const dateIn = h("input", { type: "date", value: t.date || new Date(Date.now() + 86400000).toISOString().slice(0, 10), "aria-label": "Date (UTC)" });
       const freq = h("select", { "aria-label": "How often" }, [["once", "Once"], ["hourly", "Hourly"], ["daily", "Daily"], ["weekly", "Weekly"], ["monthly", "Monthly"], ["yearly", "Yearly"]].map(([k, l]) => h("option", { value: k, selected: k === t.freq }, l)));
+      const dateIn = h("input", { type: "date", value: t.date || new Date(Date.now() + 86400000).toISOString().slice(0, 10), "aria-label": "Date (UTC)" });
       const every = h("input", { type: "number", min: "1", max: "720", value: String(t.every || 1), "aria-label": "Every how many" });
       const everyUnit = h("span", {});
       const at = h("input", { type: "time", step: "60", value: (t.at || "12:00:00").slice(0, 5), "aria-label": "Time of day" });
@@ -4154,7 +4650,7 @@
       const sync = () => {
         const f = freq.value;
         rows.shell.hidden = action.value !== "shell";
-        const unitName = { hourly: "hour", daily: "day", weekly: "week", monthly: "month", yearly: "year" }[f];
+        const unitName = { once: "", hourly: "hour", daily: "day", weekly: "week", monthly: "month", yearly: "year" }[f];
         everyUnit.textContent = " " + unitName + (+every.value === 1 ? "" : "s");
         every.max = { hourly: 720, daily: 366, weekly: 52, monthly: 24, yearly: 10 }[f];
         rows.date.hidden = f !== "once"; rows.every.hidden = f === "once";

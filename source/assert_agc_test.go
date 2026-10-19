@@ -54,7 +54,7 @@ func newMesh(t *testing.T, ips ...string) (*mesh, map[string]*Engine) {
 		cfg.Interface = "dgwtest0"
 		cfg.Neighbors = ips
 		cfg.HelloMS, cfg.HoldMS = 60000, 180000 // nothing fires by itself: the test sends every hello
-		e := NewEngine(cfg, afIPv4, func() NTPConfig { return defaultNTP() }, func() *Pool { return nil })
+		e := NewEngine(cfg, afIPv4, func() DNSConfig { return defaultDNS() }, func() *Pool { return nil })
 		e.running, e.myIP, e.conn = true, ip, &meshConn{m: m}
 		m.engines[ip] = e
 		t.Cleanup(e.Stop)

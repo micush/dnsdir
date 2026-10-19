@@ -22,7 +22,7 @@ import (
 // The scheduler (Operate ▸ Scheduler): tasks that run on every node of the cluster, or on chosen nodes, at times given
 // as hourly / daily / weekly / monthly / yearly rules, including "the 3rd Saturday of every month".  A task also has an
 // window: it is due at its scheduled time (At), and each node runs it at a time of its own somewhere between then and
-// the end of the window (To), so the nodes do not all act at once.  The task list is part of the shared settings (NTPConfig.Schedule,
+// the end of the window (To), so the nodes do not all act at once.  The task list is part of the shared settings (DNSConfig.Schedule,
 // replicated like the rest); every node works out for itself what is due, so a node that is down only misses its own runs.
 // The history of what ran is kept per node.
 
@@ -89,7 +89,8 @@ const (
 
 // schedActions are the built-in actions.  The first is the label shown in the page.
 var schedActions = map[string]string{
-	"chrony_restart": "Restart chrony",
+	"dnsdir_restart": "Restart dnsdir",
+	"cache_clear":    "Empty the answer cache",
 	"node_pause":     "Pause this node",
 	"node_resume":    "Resume this node",
 	"stats_clear":    "Clear the statistics",
@@ -937,14 +938,22 @@ func (l *limitWriter) Write(p []byte) (int, error) {
 // builtin runs one of the built-in actions on this node.
 func (s *Scheduler) builtin(action, actor string) (string, error) {
 	switch action {
-	case "chrony_restart":
-		if err := chronyRestart(); err != nil {
-			return "", err
+	case "dnsdir_restart":
+		if s.m.restartFn == nil {
+			return "", errors.New("this process cannot restart itself")
 		}
-		chrony.mu.Lock()
-		chrony.pending = true // the sources added at run time are gone: write them again
-		chrony.mu.Unlock()
-		return "chrony restarted", nil
+		go func() {
+			time.Sleep(1500 * time.Millisecond) // let the history entry be written first
+			waitUntilSafe(s.m.updateSafeToApply, false, restartRecheck, func(string) {})
+			s.m.handOver("scheduler", "restarting for a scheduled task")
+			s.m.restartFn()
+		}()
+		return "restarting once it is safe to go down", nil
+	case "cache_clear":
+		if s.m.clearFn == nil {
+			return "", errors.New("the cache is not available on this node")
+		}
+		return fmt.Sprintf("%d answers dropped", s.m.clearFn()), nil
 	case "node_pause", "node_resume":
 		return s.m.NodePause(action == "node_pause", actor)
 	case "update_online":
@@ -1064,7 +1073,7 @@ func schedEnv(base []string, task string) []string {
 	if !home {
 		out = append(out, "HOME=/root")
 	}
-	return append(out, "NTPDIR_TASK="+task)
+	return append(out, "DNSDIR_TASK="+task)
 }
 
 func strconvI(n int64) string { return strconv.FormatInt(n, 10) }

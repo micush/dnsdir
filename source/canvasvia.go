@@ -48,11 +48,11 @@ func servingPeers(g CanvasGateway) []CanvasNode {
 	return append(ok, degraded...)
 }
 
-// takeFrom puts the serving node's picture of the gateway in place of this node's: its colour, servers, anycast
+// takeFrom puts the serving node's picture of the gateway in place of this node's: its colour, servers, domains, anycast
 // addresses, members and uptime; the cluster's nodes and everything about this node's own entry stay.
 func (g *CanvasGateway) takeFrom(p CanvasGateway, from CanvasNode) {
 	g.Status, g.Detail, g.Families, g.Servers, g.Fallback, g.UsingFallback = p.Status, p.Detail, p.Families, p.Servers, p.Fallback, p.UsingFallback
-	g.Members, g.Anycast, g.Uptime, g.LB, g.LBOwn = p.Members, p.Anycast, p.Uptime, p.LB, p.LBOwn
+	g.Members, g.Anycast, g.Uptime, g.LB, g.LBOwn, g.ECS = p.Members, p.Anycast, p.Uptime, p.LB, p.LBOwn, p.ECS
 	// the serving node's own entry is "local" to it, not to this node: nobody is this node here, or the
 	// page would put the controller mark (and the star) on the node it is open on
 	g.Members = make([]CanvasMember, len(p.Members))

@@ -15,7 +15,7 @@ import (
 
 var mgmtGETs = []string{
 	"/api/versions", "/api/versions/get?id=1", "/api/versions/diff?a=1&b=2", "/api/versions/download?id=current",
-	"/api/tls", "/api/cluster", "/api/update", "/api/update/history", "/api/log", "/api/qstats?from=1h", "/api/whois?lookup=example.com", "/api/host?from=1h", "/api/hostlookup?lookup=127.0.0.1", "/api/log?level=warn&q=x&since=1h&n=10",
+	"/api/tls", "/api/cluster", "/api/update", "/api/update/history", "/api/log", "/api/qstats?from=1h", "/api/whois?domain=example.com", "/api/host?from=1h", "/api/dnsupdates", "/api/log?level=warn&q=x&since=1h&n=10",
 }
 
 var mgmtPOSTs = []string{

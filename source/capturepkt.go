@@ -173,9 +173,15 @@ func summarizeIP(pi pktInfo, data []byte) string {
 			}
 		}
 		line := fmt.Sprintf("%s %s.%d > %s.%d%s, length %d", name, pi.src, pi.sport, pi.dst, pi.dport, flags, total)
-		if pi.proto == 17 && (pi.sport == 123 || pi.dport == 123) {
+		if pi.sport == 53 || pi.dport == 53 {
 			if pl := data[min(len(data), pi.l4+hdr):]; len(pl) > 0 {
-				if d := ntpSummary(pl); d != "" {
+				if pi.proto == 6 {
+					if len(pl) < 2 {
+						return line
+					}
+					pl = pl[2:] // the DNS message follows a two-byte length
+				}
+				if d := dnsSummary(pl); d != "" {
 					line += " " + d
 				}
 			}
@@ -237,25 +243,29 @@ func icmpText(pi pktInfo, data []byte, v6 bool) string {
 	return fmt.Sprintf(": type %d", typ)
 }
 
-// ntpModes are the names of the NTP packet modes.
-var ntpModes = [8]string{"reserved", "symmetric active", "symmetric passive", "client", "server", "broadcast", "control", "private"}
-
-// ntpSummary says what an NTP packet is, in a few words: "NTPv4 client" or "NTPv4 server stratum 2 ref 10.0.0.1".
-func ntpSummary(b []byte) string {
-	p, ok := parseNTP(b)
+// dnsSummary says what a DNS message is, in a few words: "DNS A? example.com" or "DNS NOERROR 2 ans".
+func dnsSummary(b []byte) string {
+	h, ok := parseHeader(b)
 	if !ok {
 		return ""
 	}
-	s := "NTPv" + strconv.Itoa(int(p.Version)) + " " + ntpModes[p.Mode&7]
-	if p.Mode != ntpModeServer {
-		return s
+	if !h.qr {
+		if name, qt, ok := questionOf(b); ok {
+			return "DNS " + qtypeName(qt) + "? " + name
+		}
+		return "DNS query"
 	}
-	if p.Stratum == 0 {
-		return s + " kiss-o'-death " + refIDString(0, p.RefID)
+	rc := []string{"NOERROR", "FORMERR", "SERVFAIL", "NXDOMAIN", "NOTIMP", "REFUSED"}
+	r := "rcode " + strconv.Itoa(h.rcode)
+	if h.rcode < len(rc) {
+		r = rc[h.rcode]
 	}
-	s += " stratum " + strconv.Itoa(int(p.Stratum)) + " ref " + refIDString(p.Stratum, p.RefID)
-	if p.Leap == ntpLeapUnsynch {
-		s += " [unsynchronised]"
+	s := "DNS " + r + " " + strconv.Itoa(h.ancount) + " ans"
+	if h.tc {
+		s += " [TC]"
+	}
+	if name, qt, ok := questionOf(b); ok {
+		s += " " + qtypeName(qt) + " " + name
 	}
 	return s
 }
@@ -280,7 +290,7 @@ func tcpFlags(b byte) string {
 //
 // host A.B.C.D | src host … | dst host …      net CIDR | src net … | dst net …
 // port N | src port N | dst port N | portrange A-B      ether host|src|dst MAC
-// ip | ip6 | arp | icmp | icmp6 | tcp | udp | ntp (port 123)
+// ip | ip6 | arp | icmp | icmp6 | tcp | udp | dns (port 53)
 // a protocol before host/net/port narrows it ("tcp port 53", "ip6 host …"); and / or / not / ( ) combine.
 
 type capFilter struct{ root capExpr }
@@ -465,8 +475,8 @@ func (p *capParser) parsePrimary() (capExpr, error) {
 			return nil, fmt.Errorf("filter: a ( has no )")
 		}
 		return e, nil
-	case t == "ntp":
-		return capFn(func(pi *pktInfo) bool { return pi.hasPorts && (pi.sport == 123 || pi.dport == 123) }), nil
+	case t == "dns":
+		return capFn(func(pi *pktInfo) bool { return pi.hasPorts && (pi.sport == 53 || pi.dport == 53) }), nil
 	case t == "ether":
 		dir := "host"
 		if n := p.peek(); n == "src" || n == "dst" || n == "host" {
@@ -501,7 +511,7 @@ func (p *capParser) parsePrimary() (capExpr, error) {
 		p.i--
 		return p.parseAddrPrim()
 	}
-	return nil, fmt.Errorf("filter: don't know %q (try host, net, port, tcp, udp, icmp, arp, ip, ip6, ntp, ether, and, or, not)", t)
+	return nil, fmt.Errorf("filter: don't know %q (try host, net, port, tcp, udp, icmp, arp, ip, ip6, dns, ether, and, or, not)", t)
 }
 
 // parseAddrPrim reads [src|dst] host|net|port|portrange VALUE.

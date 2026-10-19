@@ -10,12 +10,13 @@ import (
 	"time"
 )
 
-// guardRig has a statistics collector and a host collector holding 30 days of data, and a guard
+// guardRig has a statistics collector, a host collector and a cache holding 30 days of data, and a guard
 // whose memory reading is scripted.
 type guardRig struct {
 	g     *memGuard
 	q     *QStats
 	h     *HostStats
+	c     *respCache
 	now   time.Time
 	reads []float64
 	nread int
@@ -32,14 +33,22 @@ func newGuardRig(t *testing.T, reads ...float64) *guardRig {
 	for i := 0; i < 30*4; i++ {
 		ts := now.Add(-30 * 24 * time.Hour).Add(time.Duration(i) * 6 * time.Hour)
 		*qcur, *hcur = ts, ts
-		q.Record(cl, "10.0."+strconv.Itoa(i/200)+"."+strconv.Itoa(i%200)+":123", 4, outAnswered)
+		q.Record(cl, "n"+strconv.Itoa(i)+".example", 1, false, 0)
 		rd.cpuTotal += 100 // a sample only counts once there is a CPU delta to compare with
 		rd.cpuBusy += 10
 		h.Sample()
 	}
 	*qcur, *hcur = now, now
-	r.q, r.h = q, h
-	r.g = &memGuard{limit: 85, now: func() time.Time { return now }, free: func() { r.freed++ }, settle: 0}
+	c, _ := newTestCache(1000, 3600)
+	c.now = func() time.Time { return now }
+	for i := 0; i < 100; i++ {
+		qq := cacheQuery("c"+strconv.Itoa(i)+".example", 1, nil)
+		k, _ := c.keyFor(qq, false, cl, false, 24, 56)
+		c.put(k, mkResp(qq, 0, [][]byte{aRR("c"+strconv.Itoa(i)+".example", 3000)}, nil, nil))
+	}
+	r.q, r.h, r.c = q, h, c
+	r.g = &memGuard{limit: 85, now: func() time.Time { return now }, free: func() { r.freed++ }, settle: 0,
+		caches: func() []*respCache { return []*respCache{c} }}
 	r.g.info.Limit = 85
 	r.g.usage = func() (float64, error) {
 		v := r.reads[len(r.reads)-1]
@@ -56,7 +65,7 @@ func newGuardRig(t *testing.T, reads ...float64) *guardRig {
 func TestMemGuardDoesNothingBelowTheLimit(t *testing.T) {
 	r := newGuardRig(t, 84.9)
 	before := r.q.oldest()
-	if r.g.check() || r.q.oldest() != before || r.freed != 0 || r.g.Info().Trims != 0 {
+	if r.g.check() || r.q.oldest() != before || r.c.Len() != 100 || r.freed != 0 || r.g.Info().Trims != 0 {
 		t.Fatal("trimmed below the limit")
 	}
 }
@@ -82,18 +91,32 @@ func TestMemGuardTrimsOldestFirstUntilUnderTheLimit(t *testing.T) {
 	if !r.h.oldest().After(hOldest0) {
 		t.Fatal("host history not trimmed")
 	}
+	if r.c.Len() >= 100 || r.c.Len() < 70 {
+		t.Fatalf("cache has %d entries after 3 rounds of a tenth (want about 73)", r.c.Len())
+	}
 	// the newest data is untouched
 	res := r.q.Query(r.now.Add(-24*time.Hour), r.now, QFilter{})
 	if res.Sums.Total == 0 {
 		t.Fatal("the newest data was dropped")
 	}
 	old := r.q.Query(oldest0, oldest0.Add(24*time.Hour), QFilter{})
-	if old.Sums.Total != 0 || len(old.Servers) != 0 {
+	if old.Sums.Total != 0 || len(old.Domains) != 0 {
 		t.Fatalf("the oldest day is still there: %+v", old.Sums)
 	}
 	info := r.g.Info()
 	if info.Trims != 1 || info.Last != r.now.Unix() || info.LastNote == "" || info.Limit != 85 {
 		t.Fatalf("info %+v", info)
+	}
+	// the least recently used cache entries went first: touch c99, trim, c99 survives while c0 is gone
+	qq := cacheQuery("c99.example", 1, nil)
+	k, _ := r.c.keyFor(qq, false, netip.MustParseAddr("192.0.2.5"), false, 24, 56)
+	if r.c.get(k, qq) == nil {
+		t.Fatal("c99 should still be cached")
+	}
+	q0 := cacheQuery("c0.example", 1, nil)
+	k0, _ := r.c.keyFor(q0, false, netip.MustParseAddr("192.0.2.5"), false, 24, 56)
+	if r.c.get(k0, q0) != nil {
+		t.Fatal("the least recently used entry should have been dropped first")
 	}
 }
 
@@ -113,7 +136,7 @@ func TestMemGuardNothingLeftToDrop(t *testing.T) {
 	h, _, _ := fakeHost(time.Now())
 	swapStats(t, q, h)
 	freed := 0
-	g := &memGuard{limit: 85, now: time.Now, free: func() { freed++ },
+	g := &memGuard{limit: 85, now: time.Now, free: func() { freed++ }, caches: func() []*respCache { return nil },
 		usage: func() (float64, error) { return 99, nil }}
 	if g.check() || freed != 0 || g.Info().Trims != 0 {
 		t.Fatal("with nothing to drop it must not claim a trim")
@@ -134,9 +157,13 @@ func TestMemGuardWhileCollectorsAreBusy(t *testing.T) {
 					return
 				default:
 				}
-				r.q.Record(netip.MustParseAddr("192.0.2.9"), "10.5.0."+strconv.Itoa(n%50)+":123", 4, outAnswered)
+				r.q.Record(netip.MustParseAddr("192.0.2.9"), "busy"+strconv.Itoa(n%50)+".example", 1, false, 0)
 				r.q.Query(r.now.Add(-time.Hour), r.now, QFilter{})
 				r.h.Query(r.now.Add(-time.Hour), r.now)
+				qq := cacheQuery("x"+strconv.Itoa(n%30)+".example", 1, nil)
+				if k, ok := r.c.keyFor(qq, false, netip.MustParseAddr("192.0.2.9"), false, 24, 56); ok && r.c.get(k, qq) == nil {
+					r.c.put(k, mkResp(qq, 0, [][]byte{aRR("x.example", 300)}, nil, nil))
+				}
 			}
 		}(i)
 	}
@@ -214,19 +241,19 @@ func TestMemGuardKeepsTheNewestHour(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		ts := now.Add(-time.Duration(50-i) * time.Minute)
 		*qcur, *hcur = ts, ts
-		q.Record(netip.MustParseAddr("192.0.2.5"), srvA, 4, outAnswered)
+		q.Record(netip.MustParseAddr("192.0.2.5"), "recent.example", 1, false, 0)
 		rd.cpuTotal += 100
 		rd.cpuBusy += 10
 		h.Sample()
 	}
 	*qcur, *hcur = now, now
 	swapStats(t, q, h)
-	g := &memGuard{limit: 85, now: func() time.Time { return now }, free: func() {},
+	g := &memGuard{limit: 85, now: func() time.Time { return now }, free: func() {}, caches: func() []*respCache { return nil },
 		usage: func() (float64, error) { return 99, nil }}
 	if g.check() {
 		t.Fatal("it dropped history younger than an hour")
 	}
-	if r := q.Query(now.Add(-time.Hour), now, QFilter{}); r.Sums.Total != 50 || len(r.Servers) != 1 {
+	if r := q.Query(now.Add(-time.Hour), now, QFilter{}); r.Sums.Total != 50 || len(r.Domains) != 1 {
 		t.Fatalf("recent statistics lost: %+v", r.Sums)
 	}
 	if r := h.Query(now.Add(-time.Hour), now); r.CPU[len(r.CPU)-2] < 0 && r.CPU[len(r.CPU)-3] < 0 {

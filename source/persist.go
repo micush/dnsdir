@@ -11,13 +11,13 @@ import (
 	"time"
 )
 
-// Persistent statistics.  The request statistics (Monitor ▸ Statistics) and the host statistics (Monitor ▸
-// Host) live in memory while ntpdir runs, and are saved to
+// Persistent statistics.  The query statistics (Monitor ▸ Statistics), the host statistics (Monitor ▸
+// Host) and the list of recent dynamic updates live in memory while dnsdir runs, and are saved to
 // <state-dir>/stats.json.gz every persistEvery and when the daemon stops, then read back at start-up, so
 // a restart or an update no longer empties the 30 days.  The file is a gzip stream of JSON values (a header,
-// then records: the minute counters, one record per upstream server's per-minute history, one record per top-list slot, the host minutes) and is
+// then records: the minute counters, one record per upstream server's per-minute history, one record per top-list slot, the host minutes, the recent updates) and is
 // written to a temporary file and renamed, so a crash leaves the old one.  It is private to root (0600): it
-// holds client addresses and the names they asked for.  Delete the file (with ntpdir stopped) to forget it all.
+// holds client addresses and the names they asked for.  Delete the file (with dnsdir stopped) to forget it all.
 // Time the daemon was down shows as a gap.  Each node has its own file; nothing is shared in a cluster.
 
 const (
@@ -28,20 +28,22 @@ const (
 )
 
 type pHeader struct {
-	Format    int   `json:"ntpdir_stats"`
+	Format    int   `json:"dnsdir_stats"`
 	Saved     int64 `json:"saved"`
 	QSStart   int64 `json:"qs_start"`
 	HostStart int64 `json:"host_start"`
 }
 
 type pKind struct {
-	Clients  map[string]uint32            `json:"c,omitempty"`
-	Servers  map[string]uint32            `json:"s,omitempty"`
-	Versions map[string]uint32            `json:"v,omitempty"`
-	Pairs    map[string]map[string]uint32 `json:"p,omitempty"`
-	NPairs   int                          `json:"np,omitempty"`
-	V4       uint32                       `json:"v4,omitempty"`
-	V6       uint32                       `json:"v6,omitempty"`
+	Clients map[string]uint32            `json:"c,omitempty"`
+	Domains map[string]uint32            `json:"d,omitempty"`
+	Types   map[string]uint32            `json:"t,omitempty"`
+	Pairs   map[string]map[string]uint32 `json:"p,omitempty"`
+	NPairs  int                          `json:"np,omitempty"`
+	UDP     uint32                       `json:"u,omitempty"`
+	TCP     uint32                       `json:"tc,omitempty"`
+	// Split is UDP and TCP counted by the client's IP version (qsKind.proto), absent in a file of an older version
+	Split []uint32 `json:"ps,omitempty"`
 }
 
 type pHostRow struct {
@@ -52,15 +54,16 @@ type pHostRow struct {
 
 // pRec is one value of the stream; K says which fields are used.
 type pRec struct {
-	K      string       `json:"k"` // hdr, mins, fine, coarse, host, mounts, srv
+	K      string       `json:"k"` // hdr, mins, fine, coarse, host, mounts
 	Hdr    *pHeader     `json:"hdr,omitempty"`
-	Mins   [][6]uint32  `json:"mins,omitempty"` // stamp, total, answered, failed, kod, refused
+	Mins   [][11]uint32 `json:"mins,omitempty"` // stamp, total, noerror, servfail, nxdomain, refused, other, updates, updfail, cache hits, cache misses (older files have 9 numbers)
 	Stamp  int64        `json:"s,omitempty"`    // slot period of a top-list record
-	Top    []pKind      `json:"top,omitempty"`  // one per outcome (qcCount)
+	Top    []pKind      `json:"top,omitempty"`  // one per answer kind (qcCount)
 	Host   []pHostRow   `json:"host,omitempty"`
 	Mounts []string     `json:"mounts,omitempty"`
+	Upd    []UpdateLog  `json:"upd,omitempty"` // the recent dynamic updates, oldest first
 	Srv    string       `json:"srv,omitempty"` // K "srv": the upstream server address whose minutes follow
-	SrvMin [][10]uint64 `json:"sm,omitempty"`  // minute, ok<<32|fail, probOK<<32|probFail, latency sum (µs), latency count, worst latency (µs), offset sum (µs), offset count, up samples, down samples
+	SrvMin [][9]uint64  `json:"sm,omitempty"`  // minute, ok<<32|fail, probOK<<32|probFail, latency sum (µs), latency count, worst latency (µs), cache hits, up samples, down samples (older files have 7 numbers)
 }
 
 // ── saving ──
@@ -68,14 +71,14 @@ type pRec struct {
 func (s *QStats) persistTo(emit func(pRec) error) error {
 	s.flush()
 	s.mu.Lock()
-	mins := make([][6]uint32, 0, 1024)
+	mins := make([][11]uint32, 0, 1024)
 	oldest := s.now().Add(-qsRetain).Unix() / 60
 	for i := range s.mins {
 		m := &s.mins[i]
-		if m.stamp <= oldest || m.total == 0 {
+		if m.stamp <= oldest || m.total+m.chit+m.cmiss == 0 {
 			continue
 		}
-		mins = append(mins, [6]uint32{uint32(m.stamp), m.total, m.answered, m.failed, m.kod, m.refd})
+		mins = append(mins, [11]uint32{uint32(m.stamp), m.total, m.noerror, m.servfail, m.nxdomain, m.refuse, m.other, m.updates, m.updfail, m.chit, m.cmiss})
 	}
 	qsStart := s.start.Unix()
 	s.mu.Unlock()
@@ -101,7 +104,10 @@ func (s *QStats) persistTo(emit func(pRec) error) error {
 					continue
 				}
 				used = true
-				rec.Top[ci] = pKind{Clients: copyU32(k.clients), Servers: copyU32(k.servers), Versions: copyU32(k.versions), V4: k.v4, V6: k.v6}
+				rec.Top[ci] = pKind{Clients: copyU32(k.clients), Domains: copyU32(k.domains), Types: copyU32(k.types), UDP: k.udp, TCP: k.tcp}
+				if k.proto != ([4]uint32{}) {
+					rec.Top[ci].Split = append([]uint32(nil), k.proto[:]...)
+				}
 			}
 			s.mu.Unlock()
 			if !used {
@@ -150,7 +156,7 @@ func (h *HostStats) persistTo(emit func(pRec) error) error {
 // copied under its own lock a slice at a time and encoded outside it.
 //
 // The file is compressed at gzip's fastest level: the JSON shrinks well even so, and the save is a burst of CPU on
-// a node that is serving clients.  A save made by the five-minute timer does not fsync before the rename (the
+// a node that is answering queries.  A save made by the five-minute timer does not fsync before the rename (the
 // next one is five minutes away, and the rename keeps the old file whole if the machine dies first); the saves
 // before a stop, a restart or an update do.
 func savePersisted(dir string) error { return savePersistedOpt(dir, true) }
@@ -187,6 +193,9 @@ func savePersistedOpt(dir string, durable bool) error {
 	}
 	qstats.pairs.saveOpen()
 	if err := hoststats.persistTo(emit); err != nil {
+		return err
+	}
+	if err := emit(pRec{K: "upd", Upd: updlog.snapshot()}); err != nil {
 		return err
 	}
 	if err := srvhist.persistTo(emit); err != nil {
@@ -256,6 +265,8 @@ func loadPersisted(dir string) (int, error) {
 			n += qstats.restore(r)
 		case "host", "mounts":
 			n += hoststats.restore(r)
+		case "upd":
+			n += updlog.restore(r.Upd)
 		case "srv":
 			n += srvhist.restore(r)
 		}
@@ -278,7 +289,7 @@ func (s *QStats) restore(r pRec) int {
 			if m <= nowMin-qsMinSlots || m > nowMin+1 {
 				continue
 			}
-			s.mins[m%qsMinSlots] = qsMin{stamp: m, total: v[1], answered: v[2], failed: v[3], kod: v[4], refd: v[5]}
+			s.mins[m%qsMinSlots] = qsMin{stamp: m, total: v[1], noerror: v[2], servfail: v[3], nxdomain: v[4], refuse: v[5], other: v[6], updates: v[7], updfail: v[8], chit: v[9], cmiss: v[10]}
 			n++
 		}
 		return n
@@ -288,7 +299,7 @@ func (s *QStats) restore(r pRec) int {
 			slots, span = s.coarse[:], qsCoarseSpan
 		}
 		p := r.Stamp
-		if p <= nowMin/span-int64(len(slots)) || p > nowMin/span+1 || len(r.Top) == 0 || len(r.Top) > qcCount {
+		if p <= nowMin/span-int64(len(slots)) || p > nowMin/span+1 || len(r.Top) == 0 || len(r.Top) > qcCount { // an older file has fewer kinds
 			return 0
 		}
 		tp := qsTop{stamp: p}
@@ -298,13 +309,16 @@ func (s *QStats) restore(r pRec) int {
 				continue
 			}
 			q := &tp.c[ci]
-			q.clients, q.servers, q.versions = k.Clients, k.Servers, k.Versions
-			q.v4, q.v6 = k.V4, k.V6
-			if q.servers == nil {
-				q.servers = map[string]uint32{}
+			q.clients, q.domains, q.types = k.Clients, k.Domains, k.Types
+			q.udp, q.tcp = k.UDP, k.TCP
+			if len(k.Split) == len(q.proto) {
+				copy(q.proto[:], k.Split)
 			}
-			if q.versions == nil {
-				q.versions = map[string]uint32{}
+			if q.domains == nil {
+				q.domains = map[string]uint32{}
+			}
+			if q.types == nil {
+				q.types = map[string]uint32{}
 			}
 		}
 		// pairs saved by an older version become the files of their units (a newer one keeps them there to begin with)
@@ -350,7 +364,7 @@ func (h *HostStats) restore(r pRec) int {
 }
 
 // startPersistence loads the saved statistics and keeps saving them until stop is closed.  The returned
-// function stops the saver and writes the file one last time; call it once the NTP frontends have stopped.
+// function stops the saver and writes the file one last time; call it once the DNS frontends have stopped.
 func startPersistence(dir string, stop <-chan struct{}) (final func()) {
 	qstats.pairs.setDir(filepath.Join(dir, "pairs"))
 	if n, err := loadPersisted(dir); err != nil {

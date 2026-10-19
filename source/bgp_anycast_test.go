@@ -67,15 +67,15 @@ func TestAnycastBGPStatus(t *testing.T) {
 // when this node does not manage BGP.
 func TestMarkAnycastBGPColour(t *testing.T) {
 	og := anycastGateFn
-	anycastGateFn = func(*BGPConfig, string) string { return "" } // the colour is for the moment before the gate's next tick
+	anycastGateFn = func(*BGPConfig, string) string { return "" }
 	t.Cleanup(func() { anycastGateFn = og })
 	hookLo(t)
-	up := newFakeNTP(t)
+	up := newFakeDNS(t)
 	g := defaultGroup()
-	g.Interface = "ntpdirnone0"
-	d := testNTPCfg(up.addr)
+	g.Interface = "dnsdirnone0"
+	d := testDNSCfg(up.addr)
 	d.ListenPort = freeUDPPort(t)
-	g.NTP, g.ExtraVIPs = &d, []string{"127.0.0.9"}
+	g.DNSProxy, g.DNS, g.ExtraVIPs = true, &d, []string{"127.0.0.9"}
 	dc := newDaemonConfig()
 	dc.Groups = []GroupConfig{g}
 	s := NewSupervisor(context.Background(), dc)
@@ -120,5 +120,17 @@ func TestMarkAnycastBGPColour(t *testing.T) {
 	s.mu.Unlock()
 	if got := look("Established"); got != "bad" {
 		t.Errorf("BGP disabled: %q, want bad", got)
+	}
+}
+
+func TestAnycastBGPGateWords(t *testing.T) {
+	if anycastBGPGate(nil, "192.0.2.1") == "" {
+		t.Error("no BGP configured must close the gate")
+	}
+	if anycastBGPGate(&BGPConfig{ASN: 65000, Disabled: true}, "192.0.2.1") == "" {
+		t.Error("disabled BGP must close the gate")
+	}
+	if anycastBGPGate(&BGPConfig{ASN: 65000}, "192.0.2.1") == "" {
+		t.Error("no neighbor must close the gate")
 	}
 }

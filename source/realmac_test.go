@@ -24,7 +24,7 @@ func rmEngine(t *testing.T, real bool) *Engine {
 	cfg.Interface, cfg.RealMACs = "dgwtest0", real
 	cfg.VIP4, cfg.VIP6 = "192.0.2.9/24", "2001:db8::9/64"
 	cfg.LBMethod = lbFailover
-	e := NewEngine(cfg, afIPv4, func() NTPConfig { return defaultNTP() }, func() *Pool { return nil })
+	e := NewEngine(cfg, afIPv4, func() DNSConfig { return defaultDNS() }, func() *Pool { return nil })
 	e.running, e.myIP, e.afnID, e.state = true, "192.0.2.1", 1, stateActive
 	now := time.Now()
 	e.peers = map[string]*Peer{
@@ -274,7 +274,7 @@ func TestRealMACModeCreatesNoVirtualMACs(t *testing.T) {
 	if idx(lines, 0, "addr del", "dev lo") >= 0 {
 		t.Fatalf("the controller took the VIP off lo: %v", lines)
 	}
-	if !e.ntpLoAdded {
+	if !e.dnsLoAdded {
 		t.Fatal("not recorded as on lo")
 	}
 	time.Sleep(30 * time.Millisecond)
@@ -291,8 +291,8 @@ func TestRealMACModeCreatesNoVirtualMACs(t *testing.T) {
 	}
 	// stopping it puts the VIP off lo
 	log.reset()
-	e.teardownNTPLocked()
-	if idx(log.snapshot(), 0, "addr del", "192.0.2.9/32", "dev lo") < 0 || e.ntpLoAdded {
+	e.teardownDNSLocked()
+	if idx(log.snapshot(), 0, "addr del", "192.0.2.9/32", "dev lo") < 0 || e.dnsLoAdded {
 		t.Fatalf("teardown: %v", log.snapshot())
 	}
 }

@@ -1,46 +1,47 @@
 #!/usr/bin/env bash
-# AnyTime NTP Director installer / upgrader.
+# AnyName DNS Director installer / upgrader.
 #
-# Builds AnyTime from the source tree this script sits in and installs it as a
+# Builds AnyName from the source tree this script sits in and installs it as a
 # systemd service. Supports Ubuntu, Debian, Fedora, RHEL, Rocky, Alma, Arch and
-# Manjaro (and derivatives that declare them in ID_LIKE).  If AnyTime is already
+# Manjaro (and derivatives that declare them in ID_LIKE).  If AnyName is already
 # installed it is upgraded in place: config, certificate, group membership and
 # PAM service file are kept, the previous binary is saved, and the upgrade is
 # rolled back automatically if the new version fails to start.
 #
 #   sudo ./install.sh [options]        see --help
 #
-# Test hooks (not for normal use): NTPDIR_OS_RELEASE, NTPDIR_SYSTEMCTL,
-# NTPDIR_FORCE_SYSTEMD, NTPDIR_ASSUME_MISSING, NTPDIR_FORCE_GO_DOWNLOAD,
-# NTPDIR_GO_BASE_URL, NTPDIR_SETTLE, NTPDIR_CHRONY_CONF, NTPDIR_CHRONY_SOURCEDIR, NTPDIR_CHRONY_CONFDIR.
+# Test hooks (not for normal use): DNSDIR_OS_RELEASE, DNSDIR_SYSTEMCTL,
+# DNSDIR_FORCE_SYSTEMD, DNSDIR_ASSUME_MISSING, DNSDIR_FORCE_GO_DOWNLOAD,
+# DNSDIR_GO_BASE_URL, DNSDIR_SETTLE.
 
 set -euo pipefail
 umask 022
 
 # ── fixed layout (the daemon's own defaults) ─────────────────────────────────
 BIN_DIR=/usr/local/sbin
-BIN=$BIN_DIR/ntpdir
-SHARE=/usr/local/share/ntpdir
+BIN=$BIN_DIR/dnsdir
+SHARE=/usr/local/share/dnsdir
 MANIFEST=$SHARE/install.manifest
 LEGACY_CONF_DIR=/etc/liras   # where releases before v15 kept the config
-UNIT_NAME=ntpdir.service
+OLD_BIN=$BIN_DIR/ddgw        # releases before v367 were called ddgw
+OLD_SHARE=/usr/local/share/ddgw
+OLD_UNIT_NAME=ddgw.service
+UNIT_NAME=dnsdir.service
 UNIT=/etc/systemd/system/$UNIT_NAME
-PAM_FILE=/etc/pam.d/ntpdir
-NM_FILE=/etc/NetworkManager/conf.d/90-ntpdir-unmanaged.conf
-GROUP=ntpdir
-CHRONY_BEGIN='# >>> ntpdir (managed block, removed by ntpdir-uninstall) >>>'
-CHRONY_END='# <<< ntpdir <<<'
-GUI_PORT=12380
-CLUSTER_PORT=12381
-STATE_DIR=/var/lib/ntpdir
-CONF_DIR=$STATE_DIR   # the config lives with everything else ntpdir keeps
+PAM_FILE=/etc/pam.d/dnsdir
+NM_FILE=/etc/NetworkManager/conf.d/90-dnsdir-unmanaged.conf
+GROUP=dnsdir
+GUI_PORT=53853
+CLUSTER_PORT=53854
+STATE_DIR=/var/lib/dnsdir
+CONF_DIR=$STATE_DIR   # the config lives with everything else dnsdir keeps
 
 GO_MIN=1.24
 GO_VERSION=1.24.7
-GO_BASE=${NTPDIR_GO_BASE_URL:-https://go.dev/dl}
-SYSTEMCTL=${NTPDIR_SYSTEMCTL:-systemctl}
-OS_RELEASE=${NTPDIR_OS_RELEASE:-/etc/os-release}
-SETTLE=${NTPDIR_SETTLE:-3}
+GO_BASE=${DNSDIR_GO_BASE_URL:-https://go.dev/dl}
+SYSTEMCTL=${DNSDIR_SYSTEMCTL:-systemctl}
+OS_RELEASE=${DNSDIR_OS_RELEASE:-/etc/os-release}
+SETTLE=${DNSDIR_SETTLE:-3}
 
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
@@ -53,7 +54,7 @@ die()  { printf '%serror:%s %s\n' "$R" "$N" "$*" >&2; exit 1; }
 
 usage() {
   cat <<EOF
-AnyTime NTP Director installer
+AnyName DNS Director installer
 
 Usage: sudo ./install.sh [options]
 
@@ -131,7 +132,7 @@ write_file() {
 sha() { sha256sum "$1" | awk '{print $1}'; }
 
 # Treat a tool/header as missing when the test hook says so.
-assumed_missing() { [[ ",${NTPDIR_ASSUME_MISSING:-}," == *",$1,"* ]]; }
+assumed_missing() { [[ ",${DNSDIR_ASSUME_MISSING:-}," == *",$1,"* ]]; }
 
 # ── root ─────────────────────────────────────────────────────────────────────
 if [ "$(id -u)" -ne 0 ] && [ "$DRY" = 0 ]; then
@@ -143,7 +144,7 @@ if [ "$(id -u)" -ne 0 ] && [ "$DRY" = 0 ]; then
 fi
 
 [ -f "$SRC/source/go.mod" ] && [ -f "$SRC/source/VERSION" ] && [ -f "$SRC/source/main.go" ] ||
-  die "run this script from the top of the AnyTime tree (source/go.mod, source/VERSION and source/main.go not found next to it)"
+  die "run this script from the top of the AnyName tree (source/go.mod, source/VERSION and source/main.go not found next to it)"
 NEW_VER=$(tr -d '[:space:]' <"$SRC/source/VERSION")
 [[ $NEW_VER =~ ^[0-9]+$ ]] || die "bad VERSION file: '$NEW_VER'"
 
@@ -172,26 +173,29 @@ case $FAMILY in
   arch)   PM=pacman;;
 esac
 
-if { [ -d /run/systemd/system ] && have "$SYSTEMCTL"; } || [ -n "${NTPDIR_FORCE_SYSTEMD:-}" ]; then
+if { [ -d /run/systemd/system ] && have "$SYSTEMCTL"; } || [ -n "${DNSDIR_FORCE_SYSTEMD:-}" ]; then
   HAVE_SYSTEMD=1
 else
   HAVE_SYSTEMD=0
 fi
 
-step "AnyTime v$NEW_VER on $OS_NAME ($FAMILY family, package manager: $PM)"
+step "AnyName v$NEW_VER on $OS_NAME ($FAMILY family, package manager: $PM)"
 [ "$DRY" = 1 ] && info "dry run: nothing will be changed"
 
 # ── existing installation? ───────────────────────────────────────────────────
 OLD_VER=""; MODE=fresh
 if [ -x "$BIN" ]; then
-  OLD_VER=$("$BIN" --version 2>/dev/null | sed -n 's/^ntpdir v\([0-9][0-9]*\).*/\1/p' | head -1 || true)
+  OLD_VER=$("$BIN" --version 2>/dev/null | sed -n 's/^dnsdir v\([0-9][0-9]*\).*/\1/p' | head -1 || true)
   OLD_VER=${OLD_VER:-0}   # present but too old to report a version
+elif [ -x "$OLD_BIN" ]; then   # an install from before v367, when this was called ddgw
+  OLD_VER=$("$OLD_BIN" --version 2>/dev/null | sed -n 's/^ddgw v\([0-9][0-9]*\).*/\1/p' | head -1 || true)
+  OLD_VER=${OLD_VER:-0}
 fi
 if [ -n "$OLD_VER" ]; then
   if [ "$OLD_VER" -lt "$NEW_VER" ]; then
     MODE=upgrade; info "installed: v$OLD_VER → upgrading to v$NEW_VER"
   elif [ "$OLD_VER" -eq "$NEW_VER" ] && [ "$FORCE" = 0 ]; then
-    info "AnyTime v$OLD_VER is already installed and up to date (use --force to reinstall/repair)."
+    info "AnyName v$OLD_VER is already installed and up to date (use --force to reinstall/repair)."
     exit 0
   elif [ "$OLD_VER" -gt "$NEW_VER" ] && [ "$FORCE" = 0 ]; then
     die "installed v$OLD_VER is newer than this source (v$NEW_VER); use --force to downgrade"
@@ -201,9 +205,9 @@ if [ -n "$OLD_VER" ]; then
 else
   info "no existing installation found: fresh install"
 fi
-OTHER=$(command -v ntpdir 2>/dev/null || true)
+OTHER=$(command -v dnsdir 2>/dev/null || true)
 if [ -n "$OTHER" ] && [ "$OTHER" != "$BIN" ]; then
-  warn "another ntpdir exists at $OTHER and may shadow $BIN in PATH"
+  warn "another dnsdir exists at $OTHER and may shadow $BIN in PATH"
 fi
 
 # values remembered from a previous install (so upgrades keep them)
@@ -226,7 +230,7 @@ fi
 TMP=""
 cleanup() { [ -n "$TMP" ] && rm -rf "$TMP"; }
 trap cleanup EXIT
-TMP=$(mktemp -d /var/tmp/ntpdir-build.XXXXXX)
+TMP=$(mktemp -d /var/tmp/dnsdir-build.XXXXXX)
 
 pkg_install() {
   [ $# -gt 0 ] || return 0
@@ -292,131 +296,12 @@ install_deps() {
   fi
 }
 
-# chrony is what answers NTP clients (on every address of this node, including a gateway's shared address) and
-# keeps this node's own clock.  ntpdir tests the configured upstream servers and writes the healthy ones into
-# a source directory chrony watches (sourcedir) and the client settings into a conf directory (confdir), so
-# chrony 4.0 or newer is required.  The installer adds a marked block to chrony's config that the uninstaller
-# removes again, and switches off the servers chrony shipped with (the distribution's pool lines and
-# sources.d files), each marked so uninstall puts them back: until servers are defined in ntpdir this node has
-# no time source.
-have_chronyd() { ! assumed_missing chrony && { have chronyd || [ -x /usr/sbin/chronyd ]; }; }
-install_chrony() {
-  if have_chronyd; then info "chrony already present"; return 0; fi
-  info "installing chrony (it answers NTP clients and keeps this node's clock)"
-  pkg_install chrony
-  if [ "$DRY" = 0 ]; then have_chronyd || die "chrony still missing after installing it"; fi
-}
-
-chrony_conf_path() {
-  if [ -n "${NTPDIR_CHRONY_CONF:-}" ]; then echo "$NTPDIR_CHRONY_CONF"; return; fi
-  if [ "$FAMILY" = debian ]; then echo /etc/chrony/chrony.conf; else echo /etc/chrony.conf; fi
-}
-chrony_unit() { if [ "$FAMILY" = debian ]; then echo chrony.service; else echo chronyd.service; fi; }
-chrony_sourcedir() { echo "${NTPDIR_CHRONY_SOURCEDIR:-/etc/chrony/ntpdir.sources.d}"; }
-chrony_confdir() { echo "${NTPDIR_CHRONY_CONFDIR:-/etc/chrony/ntpdir.conf.d}"; }
-CHRONY_OFF='#ntpdir-off# '
-
-# chrony_version prints "major.minor" of the installed chronyd ("" when it cannot be told)
-chrony_version() {
-  local c v
-  c=$(command -v chronyd 2>/dev/null || true); [ -n "$c" ] || { [ -x /usr/sbin/chronyd ] && c=/usr/sbin/chronyd; }
-  [ -n "$c" ] || return 0
-  v=$("$c" --version 2>/dev/null | sed -n 's/.*version \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n1)
-  echo "$v"
-}
-
-# can_set_clock: true when this machine may set the system clock (CAP_SYS_TIME, bit 25).  A container usually may not, and
-# systemd then skips chrony's unit ("start condition unmet"), so nothing answers NTP.  NTPDIR_NO_SYS_TIME=1/0 forces the answer.
-can_set_clock() {
-  case "${NTPDIR_NO_SYS_TIME:-}" in 1) return 1;; 0) return 0;; esac
-  local f cap
-  for f in /proc/self/status /proc/1/status; do
-    cap=$(awk '/^CapEff:|^CapBnd:/{print $2}' "$f" 2>/dev/null)
-    for cap in $cap; do [ $(( (0x$cap >> 25) & 1 )) = 1 ] || return 1; done
-  done
-  return 0
-}
-# unit_skipped: systemd decided not to start the chrony unit because a start condition failed (what a container does)
-unit_skipped() {
-  [ "$HAVE_SYSTEMD" = 1 ] || return 1
-  case "${NTPDIR_UNIT_SKIPPED:-}" in 1) return 0;; 0) return 1;; esac
-  [ "$("$SYSTEMCTL" show -p ConditionResult --value "$(chrony_unit)" 2>/dev/null)" = no ]
-}
-chrony_dropin_dir() { echo "${NTPDIR_CHRONY_DROPIN_DIR:-/etc/systemd/system/$(chrony_unit).d}"; }
-# chrony without clock control (-x): it still tracks its sources and answers clients; the clock comes from the host
-configure_chrony_container() {
-  can_set_clock && ! unit_skipped && return 0
-  local d f opts bin; d=$(chrony_dropin_dir); f="$d/ntpdir.conf"
-  bin=$(command -v chronyd 2>/dev/null || echo /usr/sbin/chronyd)
-  if [ "$FAMILY" = debian ]; then opts='$DAEMON_OPTS'; else opts='$OPTIONS'; fi
-  warn "this machine cannot set the system clock (a container?): chrony runs with -x, so its time comes from the host; keep the host synchronised"
-  if [ "$DRY" = 1 ]; then info "[dry-run] write $f (chronyd -x)"; return 0; fi
-  mkdir -p "$d"
-  printf '%s\n' "# Written by ntpdir: chrony cannot set the clock here, so it runs with -x." "[Unit]" "ConditionCapability=" "ConditionVirtualization=" "[Service]" "ExecStart=" "ExecStart=!$bin -x $opts" >"$f"
-  [ "$HAVE_SYSTEMD" = 1 ] && run "$SYSTEMCTL" daemon-reload >/dev/null 2>&1 || true
-  CHRONY_DROPIN=1
-}
-
-configure_chrony() {
-  CHRONY_CONF=$(chrony_conf_path); CHRONY_BLOCK=0
-  if ! have_chronyd && [ "$DRY" = 0 ]; then
-    warn "chrony is not installed (--skip-deps?); this node cannot answer NTP clients. Install chrony 4.0 or newer and re-run the installer."
-    return 0
-  fi
-  local ver major
-  ver=$(chrony_version)
-  major=${ver%%.*}
-  if [ -n "$major" ] && [ "$major" -lt 4 ] 2>/dev/null; then
-    die "chrony $ver is too old: ntpdir needs chrony 4.0 or newer (sourcedir). Upgrade chrony and run the installer again."
-  fi
-  local sd cdir body
-  sd=$(chrony_sourcedir); cdir=$(chrony_confdir)
-  body="# ntpdir writes the healthy upstream servers to $sd/ntpdir.sources"$'\n'
-  body+="# and the client settings (port, allow, ratelimit) to $cdir/ntpdir.conf"$'\n'
-  body+="sourcedir $sd"$'\n'"confdir $cdir"
-  if [ ! -f "$CHRONY_CONF" ]; then
-    if [ "$DRY" = 1 ]; then info "[dry-run] would add the ntpdir block to $CHRONY_CONF: ${body//$'\n'/ | }"; CHRONY_BLOCK=1; return 0; fi
-    warn "$CHRONY_CONF not found; chrony was not configured"
-    return 0
-  fi
-  if [ "$DRY" = 0 ]; then
-    mkdir -p "$sd" "$cdir"; chmod 0755 "$sd" "$cdir"
-  fi
-  # the servers chrony came with are switched off (marked, so uninstall restores them)
-  local mode new res off=0 f
-  mode=$(stat -c %a "$CHRONY_CONF" 2>/dev/null || echo 644)
-  new=$(awk -v b="$CHRONY_BEGIN" -v e="$CHRONY_END" -v m="$CHRONY_OFF" '
-    $0==b{skip=1} !skip{ if ($0 ~ /^[[:space:]]*(pool|server|peer)[[:space:]]/) print m $0; else print } $0==e{skip=0}' "$CHRONY_CONF")
-  [ "$(printf '%s\n' "$new" | grep -c "^$CHRONY_OFF")" -gt "$(grep -c "^$CHRONY_OFF" "$CHRONY_CONF" || true)" ] && off=1
-  new=$(printf '%s\n%s\n%s\n%s\n' "$new" "$CHRONY_BEGIN" "$body" "$CHRONY_END")
-  res=$(printf '%s\n' "$new" | write_file "$CHRONY_CONF" "$mode")
-  CHRONY_BLOCK=1
-  # distribution source files (Ubuntu: /etc/chrony/sources.d/*.sources) are moved aside the same way
-  for f in "$(dirname "$CHRONY_CONF")"/sources.d/*.sources; do
-    [ -f "$f" ] || continue
-    if [ "$DRY" = 1 ]; then info "[dry-run] would switch off $f"; else mv -f "$f" "$f.ntpdir-off"; fi
-    off=1; res=updated
-  done
-  info "chrony: $CHRONY_CONF $res (sourcedir $sd, confdir $cdir)"
-  [ "$off" = 1 ] && warn "chrony's own servers were switched off; define NTP servers in ntpdir (Topology or Configure ▸ NTP) or this node has no time source"
-  CHRONY_DROPIN=0; configure_chrony_container
-  if [ "$HAVE_SYSTEMD" = 1 ]; then
-    run "$SYSTEMCTL" enable "$(chrony_unit)" >/dev/null 2>&1 || warn "could not enable $(chrony_unit)"
-    if [ "$res" != unchanged ] || [ "$CHRONY_DROPIN" = 1 ] || ! "$SYSTEMCTL" is-active --quiet "$(chrony_unit)" 2>/dev/null; then
-      run "$SYSTEMCTL" restart "$(chrony_unit)" || warn "could not (re)start $(chrony_unit)"
-    fi
-    if [ "$CHRONY_DROPIN" = 0 ] && [ "$DRY" = 0 ] && unit_skipped; then
-      configure_chrony_container && run "$SYSTEMCTL" restart "$(chrony_unit)" || warn "could not (re)start $(chrony_unit)"
-    fi
-  fi
-}
-
 # FRR is what the BGP page configures (anycast addresses announced to routers).
-# It is installed here so the page works at once, but ntpdir does not touch FRR
+# It is installed here so the page works at once, but dnsdir does not touch FRR
 # until a local AS number is set, so an install on a host that never uses BGP is
 # unchanged.  A failure to install it is only a warning: everything else works.
 install_frr() {
-  if ! assumed_missing frr && { have vtysh || [ -x /usr/lib/frr/bgpd ]; }; then
+  if ! assumed_missing frr && { have vtysh || [ -x /usr/lib/frr/bgpd ] || [ -x /usr/libexec/frr/bgpd ]; }; then
     info "FRR already present"
   else
     info "installing FRR (used by the BGP page; idle until a local AS is set there)"
@@ -432,12 +317,13 @@ install_frr() {
     fi
     [ "$DRY" = 1 ] || have vtysh || warn "FRR installed but 'vtysh' is not on the PATH"
   fi
-  # FRR's reload (how ntpdir applies a changed BGP setting without dropping the sessions)
-  # needs frr-reload.py, which Debian ships in a separate package;
-  # on the RPM distributions and Arch it is part of frr.  Without it ntpdir has to restart FRR for every change.
+  # FRR's reload (how dnsdir applies a changed BGP setting without dropping the sessions)
+  # needs frr-reload.py, which Debian ships in a separate package (frr-pythontools, in
+  # /usr/lib/frr); on the RHEL family, Fedora and Arch it is part of frr (/usr/libexec/frr
+  # on the RPM ones).  Without it dnsdir has to restart FRR for every change.
   if [ "$FAMILY" = debian ] && { assumed_missing frr-reload || { [ ! -e /usr/lib/frr/frr-reload.py ] && [ ! -e /usr/libexec/frr/frr-reload.py ]; }; }; then
     info "installing frr-pythontools (lets FRR reload a changed config without dropping BGP sessions)"
-    (pkg_install frr-pythontools) || warn "frr-pythontools could not be installed; AnyTime will restart FRR (briefly dropping BGP sessions) when the BGP setting changes."
+    (pkg_install frr-pythontools) || warn "frr-pythontools could not be installed; AnyName will restart FRR (briefly dropping BGP sessions) when the BGP setting changes."
   fi
   return 0
 }
@@ -453,7 +339,7 @@ install_nmap() {
   return 0
 }
 
-# snmpd answers SNMP while a community string is set (Configure ▸ SNMP); ntpdir writes /etc/snmp/snmpd.conf and switches the
+# snmpd answers SNMP while a community string is set (Configure ▸ SNMP); dnsdir writes /etc/snmp/snmpd.conf and switches the
 # service on and off by itself.  A package that starts snmpd as soon as it is installed (Debian) must not leave it running with its
 # own default configuration, so a freshly installed snmpd is switched off here: with no community string SNMP is off.
 # Only that feature needs it, so a failure is a warning.
@@ -504,7 +390,7 @@ find_go() {
     go_ok "$OPT_GO" || die "$OPT_GO is not a Go >= $GO_MIN"
     GO=$OPT_GO; return 0
   fi
-  [ -n "${NTPDIR_FORCE_GO_DOWNLOAD:-}" ] && return 1
+  [ -n "${DNSDIR_FORCE_GO_DOWNLOAD:-}" ] && return 1
   for c in "$(command -v go 2>/dev/null || true)" /usr/local/go/bin/go /usr/lib/go/bin/go /usr/lib/golang/bin/go /snap/bin/go /usr/lib/go-*/bin/go "$SHARE/go/bin/go"; do
     [ -n "$c" ] && go_ok "$c" && { GO=$c; return 0; }
   done
@@ -548,7 +434,7 @@ pkg_version_ok() { # pkg_version_ok VERSION-STRING -> 0 if >= GO_MIN
 }
 try_distro_go() {
   local p cand
-  [ -z "${NTPDIR_FORCE_GO_DOWNLOAD:-}" ] || return 1
+  [ -z "${DNSDIR_FORCE_GO_DOWNLOAD:-}" ] || return 1
   case $FAMILY in
     debian) set -- golang-1.25-go golang-1.24-go golang-go;;
     fedora|rhel) set -- golang;;
@@ -578,7 +464,6 @@ if [ "$SKIP_DEPS" = 1 ]; then
   [ -f /usr/include/security/pam_appl.h ] || die "--skip-deps given but PAM headers (security/pam_appl.h) are missing"
 else
   install_deps
-  install_chrony
   install_frr
   install_nmap
   install_nettools
@@ -589,23 +474,53 @@ if find_go; then info "using $GO ($("$GO" version | awk '{print $3}'))"
 elif [ "$SKIP_DEPS" = 0 ] && [ -z "$OPT_GO" ] && try_distro_go && [ "$DRY" = 0 ]; then
   find_go; info "using $GO ($("$GO" version | awk '{print $3}'))"
 else
-  [ "$DRY" = 1 ] && [ "$SKIP_DEPS" = 0 ] && [ -z "$OPT_GO" ] && [ -z "${NTPDIR_FORCE_GO_DOWNLOAD:-}" ] && info "[dry-run] (if the package gives no Go >= $GO_MIN, the official toolchain is downloaded instead)"
+  [ "$DRY" = 1 ] && [ "$SKIP_DEPS" = 0 ] && [ -z "$OPT_GO" ] && [ -z "${DNSDIR_FORCE_GO_DOWNLOAD:-}" ] && info "[dry-run] (if the package gives no Go >= $GO_MIN, the official toolchain is downloaded instead)"
   download_go
 fi
 
 # ── build (before touching the installed system) ─────────────────────────────
-step "Building AnyTime v$NEW_VER (with PAM)"
-NEWBIN=$TMP/ntpdir
+step "Building AnyName v$NEW_VER (with PAM)"
+NEWBIN=$TMP/dnsdir
 if [ "$DRY" = 1 ]; then
-  info "[dry-run] CGO_ENABLED=1 $GO build -trimpath -o ntpdir ."
+  info "[dry-run] CGO_ENABLED=1 $GO build -trimpath -o dnsdir ."
 else
   ( cd "$SRC/source" &&
     GOTOOLCHAIN=local CGO_ENABLED=1 GOCACHE="$TMP/gocache" GOPATH="$TMP/gopath" GOFLAGS=-mod=mod \
     "$GO" build -trimpath -ldflags='-s -w' -o "$NEWBIN" . ) ||
     die "build failed — the installed version (if any) was not touched"
   grep -aq 'libpam\.so' "$NEWBIN" || die "built binary has no PAM support (cgo disabled?) — web GUI logins would not work"
-  [ "$("$NEWBIN" --version)" = "ntpdir v$NEW_VER" ] || die "built binary reports '$("$NEWBIN" --version)', expected 'ntpdir v$NEW_VER'"
+  [ "$("$NEWBIN" --version)" = "dnsdir v$NEW_VER" ] || die "built binary reports '$("$NEWBIN" --version)', expected 'dnsdir v$NEW_VER'"
   info "built $(du -h "$NEWBIN" | cut -f1) binary, PAM linked"
+fi
+
+# an install from before v367 was called ddgw: stop and remove the old service, binary and
+# helper link, move its files, and let the new binary move the state, the PAM service, the GUI
+# group (renamed, so its members stay) and the NetworkManager/FRR files before they are created
+# again below.  Everything is moved, never overwritten.
+if [ -x "$OLD_BIN" ] || [ -d "$OLD_SHARE" ] || [ -f "/etc/systemd/system/$OLD_UNIT_NAME" ] || [ -d /var/lib/ddgw ]; then
+  step "Moving the old ddgw install to dnsdir"
+  if [ "$HAVE_SYSTEMD" = 1 ] && [ -f "/etc/systemd/system/$OLD_UNIT_NAME" ]; then
+    run "$SYSTEMCTL" stop "$OLD_UNIT_NAME" >/dev/null 2>&1 || true
+    run "$SYSTEMCTL" disable "$OLD_UNIT_NAME" >/dev/null 2>&1 || true
+    run rm -f "/etc/systemd/system/$OLD_UNIT_NAME"
+    run "$SYSTEMCTL" daemon-reload || true
+    run "$SYSTEMCTL" reset-failed "$OLD_UNIT_NAME" >/dev/null 2>&1 || true
+  fi
+  run rm -f "$OLD_BIN" "$OLD_BIN.new" "$BIN_DIR/ddgw-uninstall"
+  if [ -d "$OLD_SHARE" ] && [ ! -e "$SHARE" ]; then
+    run mv "$OLD_SHARE" "$SHARE"
+    if [ "$DRY" = 0 ]; then
+      [ -f "$SHARE/ddgw.prev" ] && mv -f "$SHARE/ddgw.prev" "$SHARE/dnsdir.prev"
+      [ -f "$SHARE/ddgw.conf.example" ] && mv -f "$SHARE/ddgw.conf.example" "$SHARE/dnsdir.conf.example"
+      [ -f "$SHARE/install.manifest" ] && sed -i 's/ddgw/dnsdir/g' "$SHARE/install.manifest"
+    fi
+  fi
+  if [ "$DRY" = 1 ]; then
+    info "[dry-run] move /var/lib/ddgw, /etc/pam.d/ddgw and the group ddgw to the dnsdir names"
+  else
+    mkdir -p "$SHARE"
+    "$NEWBIN" --migrate-old-install || warn "could not move everything from the old ddgw install (see above)"
+  fi
 fi
 
 # ── install files ────────────────────────────────────────────────────────────
@@ -616,28 +531,31 @@ run install -d -m 0700 "$STATE_DIR"   # config, history, cluster identity, certi
 # an install from before v15 kept its config in /etc/liras: move it over (never
 # overwrite a config that is already here; each old file is removed once its copy
 # is in place, and /etc/liras goes when it is empty)
-if [ -f "$LEGACY_CONF_DIR/ntpdir.conf" ] && [ ! -f "$CONF_DIR/ntpdir.conf" ]; then
+if [ -f "$LEGACY_CONF_DIR/ddgw.conf" ] && [ ! -f "$CONF_DIR/dnsdir.conf" ]; then
   if [ "$DRY" = 1 ]; then
-    info "[dry-run] move $LEGACY_CONF_DIR/ntpdir.conf (and ntpdir-web.crt/.key) to $CONF_DIR"
+    info "[dry-run] move $LEGACY_CONF_DIR/ddgw.conf (and ddgw-web.crt/.key) to $CONF_DIR"
   else
-    for f in ntpdir.conf ntpdir-web.crt ntpdir-web.key; do
-      if [ -f "$LEGACY_CONF_DIR/$f" ] && [ ! -e "$CONF_DIR/$f" ]; then
-        cp -p "$LEGACY_CONF_DIR/$f" "$CONF_DIR/$f" && chmod 0600 "$CONF_DIR/$f" &&
-          cmp -s "$LEGACY_CONF_DIR/$f" "$CONF_DIR/$f" && rm -f "$LEGACY_CONF_DIR/$f"
+    for f in conf web.crt web.key; do
+      if [ -f "$LEGACY_CONF_DIR/ddgw.$f" ] || [ -f "$LEGACY_CONF_DIR/ddgw-$f" ]; then
+        if [ "$f" = conf ]; then from="$LEGACY_CONF_DIR/ddgw.conf"; to="$CONF_DIR/dnsdir.conf"
+        else from="$LEGACY_CONF_DIR/ddgw-$f"; to="$CONF_DIR/dnsdir-$f"; fi
+        if [ ! -e "$to" ]; then
+          cp -p "$from" "$to" && chmod 0600 "$to" && cmp -s "$from" "$to" && rm -f "$from"
+        fi
       fi
     done
     rmdir "$LEGACY_CONF_DIR" 2>/dev/null || true
     info "moved your configuration from $LEGACY_CONF_DIR to $CONF_DIR"
   fi
 fi
-run rm -f /run/liras/ntpdir.sock   # control socket of an older release
+run rm -f /run/liras/ddgw.sock   # control socket of an older release
 
 # keep the previous binary for rollback, then replace atomically
 HAD_BIN=0
 if [ -x "$BIN" ]; then
   HAD_BIN=1
-  run cp -p "$BIN" "$SHARE/ntpdir.prev"
-  info "previous binary saved to $SHARE/ntpdir.prev"
+  run cp -p "$BIN" "$SHARE/dnsdir.prev"
+  info "previous binary saved to $SHARE/dnsdir.prev"
 fi
 run install -m 0755 "$NEWBIN" "$BIN.new"
 run mv -f "$BIN.new" "$BIN"
@@ -659,7 +577,7 @@ elif [ "$GO" = "$SHARE/go/bin/go" ]; then
 fi
 
 # docs, examples, and the uninstaller (so removal works without the source tree)
-run install -m 0644 "$SRC/source/ntpdir.conf.example" "$SHARE/ntpdir.conf.example"
+run install -m 0644 "$SRC/source/dnsdir.conf.example" "$SHARE/dnsdir.conf.example"
 for f in README.md CHANGELOG.md LICENSE; do
   src="$SRC/docs/$f"; [ "$f" = CHANGELOG.md ] || src="$SRC/$f"
   [ -f "$src" ] && run install -m 0644 "$src" "$SHARE/$f"
@@ -667,7 +585,7 @@ done
 run install -m 0644 "$SRC/source/VERSION" "$SHARE/VERSION"
 if [ -f "$SRC/uninstall.sh" ]; then
   run install -m 0755 "$SRC/uninstall.sh" "$SHARE/uninstall.sh"
-  run ln -sf "$SHARE/uninstall.sh" "$BIN_DIR/ntpdir-uninstall"
+  run ln -sf "$SHARE/uninstall.sh" "$BIN_DIR/dnsdir-uninstall"
 fi
 
 # group
@@ -693,22 +611,22 @@ step "PAM service $PAM_FILE"
 case $FAMILY in
   debian)
     PAM_STACK=common-auth
-    PAM_BODY='# /etc/pam.d/ntpdir — installed by ntpdir install.sh
-# Password check for the ntpdir web GUI. Group membership is enforced by ntpdir.
+    PAM_BODY='# /etc/pam.d/dnsdir — installed by dnsdir install.sh
+# Password check for the dnsdir web GUI. Group membership is enforced by dnsdir.
 @include common-auth
 @include common-account';;
   fedora|rhel)
     PAM_STACK=system-auth
     PAM_BODY='#%PAM-1.0
-# /etc/pam.d/ntpdir — installed by ntpdir install.sh
-# Password check for the ntpdir web GUI. Group membership is enforced by ntpdir.
+# /etc/pam.d/dnsdir — installed by dnsdir install.sh
+# Password check for the dnsdir web GUI. Group membership is enforced by dnsdir.
 auth       substack     system-auth
 account    include      system-auth';;
   arch)
     PAM_STACK=system-auth
     PAM_BODY='#%PAM-1.0
-# /etc/pam.d/ntpdir — installed by ntpdir install.sh
-# Password check for the ntpdir web GUI. Group membership is enforced by ntpdir.
+# /etc/pam.d/dnsdir — installed by dnsdir install.sh
+# Password check for the dnsdir web GUI. Group membership is enforced by dnsdir.
 auth       include      system-auth
 account    include      system-auth';;
 esac
@@ -729,25 +647,21 @@ fi
 # NetworkManager: keep it away from the virtual MAC interfaces
 if [ -d /etc/NetworkManager ] && { [ "$HAVE_SYSTEMD" = 0 ] || "$SYSTEMCTL" is-active --quiet NetworkManager 2>/dev/null || [ -d /etc/NetworkManager/conf.d ]; }; then
   mkdir -p /etc/NetworkManager/conf.d 2>/dev/null || true
-  res=$(printf '%s\n' '# installed by ntpdir: the gateway creates macvlan interfaces named ntpdir<group>.<slot>;' \
+  res=$(printf '%s\n' '# installed by dnsdir: the gateway creates macvlan interfaces named dnsdir<group>.<slot>;' \
                       '# NetworkManager must not try to configure them.' \
-                      '[keyfile]' 'unmanaged-devices=interface-name:ntpdir*' | write_file "$NM_FILE" 0644)
+                      '[keyfile]' 'unmanaged-devices=interface-name:dnsdir*' | write_file "$NM_FILE" 0644)
   if [ "$res" != unchanged ]; then
-    NM_CREATED=1; info "NetworkManager: marked ntpdir* interfaces unmanaged ($res)"
+    NM_CREATED=1; info "NetworkManager: marked dnsdir* interfaces unmanaged ($res)"
     [ "$HAVE_SYSTEMD" = 1 ] && run "$SYSTEMCTL" reload NetworkManager >/dev/null 2>&1 || true
   fi
 fi
-
-# chrony: answers NTP clients; ntpdir feeds it sources and client settings
-step "chrony"
-configure_chrony
 
 # SELinux labels (RHEL family)
 if have restorecon; then run restorecon -F "$BIN" "$PAM_FILE" "$SHARE" >/dev/null 2>&1 || true; fi
 
 # ── systemd unit ─────────────────────────────────────────────────────────────
 UNIT_BODY="[Unit]
-Description=ntpdir - NTP Distributed Gateway
+Description=dnsdir - DNS Distributed Gateway
 Documentation=file://$SHARE/README.md
 After=network-online.target
 Wants=network-online.target
@@ -755,7 +669,7 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-ExecStart=$BIN --config $CONF_DIR/ntpdir.conf
+ExecStart=$BIN --config $CONF_DIR/dnsdir.conf
 Restart=always
 RestartSec=2
 TimeoutStopSec=15
@@ -778,24 +692,24 @@ if [ "$HAVE_SYSTEMD" = 1 ]; then
   if [ "$MODE" != fresh ] && [ "$WAS_ACTIVE" = 0 ]; then start_wanted=0; fi
 
   if [ "$start_wanted" = 1 ]; then
-    if [ "$WAS_ACTIVE" = 1 ]; then run "$SYSTEMCTL" restart "$UNIT_NAME" || true; else run "$SYSTEMCTL" start "$UNIT_NAME" || true; fi   # a unit that fails to start is caught by the is-active check below
+    if [ "$WAS_ACTIVE" = 1 ]; then run "$SYSTEMCTL" restart "$UNIT_NAME"; else run "$SYSTEMCTL" start "$UNIT_NAME"; fi
     if [ "$DRY" = 0 ]; then
       sleep "$SETTLE"
       if ! "$SYSTEMCTL" is-active --quiet "$UNIT_NAME"; then
-        errmsg="ntpdir v$NEW_VER failed to start"
-        if [ "$HAD_BIN" = 1 ] && [ -x "$SHARE/ntpdir.prev" ]; then
+        errmsg="dnsdir v$NEW_VER failed to start"
+        if [ "$HAD_BIN" = 1 ] && [ -x "$SHARE/dnsdir.prev" ]; then
           warn "$errmsg — rolling back to the previous binary"
-          cp -p "$SHARE/ntpdir.prev" "$BIN.new" && mv -f "$BIN.new" "$BIN"
+          cp -p "$SHARE/dnsdir.prev" "$BIN.new" && mv -f "$BIN.new" "$BIN"
           [ "${OLD_VER:-0}" != 0 ] && echo "$OLD_VER" >"$SHARE/VERSION"
           "$SYSTEMCTL" restart "$UNIT_NAME" || true
           sleep "$SETTLE"
           ROLLED_BACK=1
           if "$SYSTEMCTL" is-active --quiet "$UNIT_NAME"; then
-            die "$errmsg; the previous version was restored and is running. See: journalctl -u ntpdir -n 50"
+            die "$errmsg; the previous version was restored and is running. See: journalctl -u dnsdir -n 50"
           fi
-          die "$errmsg and the restored previous version is not running either. See: journalctl -u ntpdir -n 50"
+          die "$errmsg and the restored previous version is not running either. See: journalctl -u dnsdir -n 50"
         fi
-        die "$errmsg. See: journalctl -u ntpdir -n 50"
+        die "$errmsg. See: journalctl -u dnsdir -n 50"
       fi
       info "service is running"
     fi
@@ -804,7 +718,7 @@ if [ "$HAVE_SYSTEMD" = 1 ]; then
   fi
 else
   step "systemd"
-  warn "systemd is not running here — unit file not installed. Start it yourself: $BIN --config $CONF_DIR/ntpdir.conf"
+  warn "systemd is not running here — unit file not installed. Start it yourself: $BIN --config $CONF_DIR/dnsdir.conf"
 fi
 
 # ── manifest ─────────────────────────────────────────────────────────────────
@@ -825,20 +739,18 @@ if [ "$DRY" = 0 ]; then
     echo "GROUP_CREATED=$GROUP_CREATED"
     echo "CONF_DIR=$CONF_DIR"
     echo "STATE_DIR=$STATE_DIR"
-    echo "CHRONY_CONF=$CHRONY_CONF"
-    echo "CHRONY_BLOCK=$CHRONY_BLOCK"
     echo "GO_KEPT=$GO_KEPT"
   } >"$MANIFEST"
   chmod 0644 "$MANIFEST"
 fi
 
 # ── summary ──────────────────────────────────────────────────────────────────
-step "Done: AnyTime v$NEW_VER ($MODE)"
+step "Done: AnyName v$NEW_VER ($MODE)"
 HOST=$(hostname -f 2>/dev/null || hostname)
-if [ ! -f "$CONF_DIR/ntpdir.conf" ]; then
-  info "no config yet ($CONF_DIR/ntpdir.conf): the daemon runs with no gateway groups until you create one."
+if [ ! -f "$CONF_DIR/dnsdir.conf" ]; then
+  info "no config yet ($CONF_DIR/dnsdir.conf): the daemon runs with no gateway groups until you create one."
   info "  - in the web GUI: https://$HOST:$GUI_PORT  → Configuration"
-  info "  - or by hand: cp $SHARE/ntpdir.conf.example $CONF_DIR/ntpdir.conf && chmod 600 $CONF_DIR/ntpdir.conf  (edits apply live)"
+  info "  - or by hand: cp $SHARE/dnsdir.conf.example $CONF_DIR/dnsdir.conf && chmod 600 $CONF_DIR/dnsdir.conf  (edits apply live)"
 fi
 # The user who ran the installer (the one behind sudo, or root itself) can log in to the GUI.
 INVOKER="${SUDO_USER:-${DOAS_USER:-}}"
@@ -851,13 +763,13 @@ if [ -z "$(getent group "$GROUP" | cut -d: -f4)" ] && [ "$DRY" != 1 ]; then
 fi
 info "web GUI: https://$HOST:$GUI_PORT (self-signed certificate until you set web.cert_file/key_file)"
 if have firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then
-  info "firewalld is active; open what you need, e.g.: firewall-cmd --permanent --add-port=$GUI_PORT/tcp --add-port=$CLUSTER_PORT/tcp --add-service=ntp && firewall-cmd --reload"
+  info "firewalld is active; open what you need, e.g.: firewall-cmd --permanent --add-port=$GUI_PORT/tcp --add-port=$CLUSTER_PORT/tcp --add-service=dns && firewall-cmd --reload"
 elif have ufw && ufw status 2>/dev/null | grep -q '^Status: active'; then
-  info "ufw is active; open what you need, e.g.: ufw allow $GUI_PORT/tcp && ufw allow $CLUSTER_PORT/tcp && ufw allow 123/udp && ufw allow 12382/udp"
+  info "ufw is active; open what you need, e.g.: ufw allow $GUI_PORT/tcp && ufw allow $CLUSTER_PORT/tcp && ufw allow 53 && ufw allow 4729/udp"
 else
-  info "ports used: GUI tcp/$GUI_PORT, cluster tcp/$CLUSTER_PORT (only if clustering is on), NTP (chrony) udp/123, gateway protocol udp/12382 (open them if a firewall is active)"
+  info "ports used: GUI tcp/$GUI_PORT, cluster tcp/$CLUSTER_PORT (only if clustering is on), DNS proxy udp+tcp/53, gateway protocol udp/4729 (open them if a firewall is active)"
 fi
-info "status: ntpdir --show-gateways | ntpdir --show-ntp     logs: journalctl -u ntpdir -f"
-info "uninstall: sudo ntpdir-uninstall   (add --purge to remove config and certificate too)"
+info "status: dnsdir --show-gateways | dnsdir --show-dns     logs: journalctl -u dnsdir -f"
+info "uninstall: sudo dnsdir-uninstall   (add --purge to remove config and certificate too)"
 [ "$ROLLED_BACK" = 1 ] && warn "rolled back"
 exit 0

@@ -114,7 +114,7 @@ func TestKeepMatching(t *testing.T) {
 		t.Error("(others) must not match")
 	}
 	f := QFilter{}.withMatch("  10.1. ", "ExAmple")
-	if f.CMatch != "10.1." || f.SMatch != "example" {
+	if f.CMatch != "10.1." || f.DMatch != "example" {
 		t.Errorf("%+v", f)
 	}
 }
@@ -139,7 +139,7 @@ func TestKeepMatchingClientsByHostName(t *testing.T) {
 }
 
 func TestClientNames(t *testing.T) {
-	d := defaultNTP()
+	d := defaultDNS()
 	d.ClientNames = map[string]string{" 10.1.1.1 ": "  Ann's laptop ", "::ffff:10.1.1.2": "x", "10.1.1.3": "   "}
 	if err := d.validateClientNames(); err != nil {
 		t.Fatal(err)
@@ -152,7 +152,7 @@ func TestClientNames(t *testing.T) {
 		"long":           {"10.1.1.1": strings.Repeat("a", maxClientNameLen+1)},
 		"control":        {"10.1.1.1": "a\nb"},
 	} {
-		e := defaultNTP()
+		e := defaultDNS()
 		e.ClientNames = m
 		if err := e.validateClientNames(); err == nil {
 			t.Errorf("%s: accepted", name)

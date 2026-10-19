@@ -10,10 +10,10 @@ import (
 	"time"
 )
 
-// A per-server history of how an upstream server has answered: each minute, how many live requests it answered and
-// failed, how many probes passed and failed, the latency of the answers (average and worst) and the offset its
-// probes found.  It is kept per server address, not per pool, so it survives a pool being rebuilt (any change to a
-// gateway's NTP settings does that) and is what the Topology page's "Statistics…" graphs and `ntpdir --server-stats` show.
+// A per-server history of how an upstream server has answered: each minute, how many live queries it answered and
+// failed, how many probe queries passed and failed, and the latency of the answers (average and worst).  It is
+// kept per server address, not per pool, so it survives a pool being rebuilt (any change to a gateway's DNS
+// settings does that) and is what the Topology page's "Statistics…" graphs and `dnsdir --server-stats` show.
 // Kept 7 days; persist.go saves it with the other statistics (stats.json.gz), so a restart keeps it and shows the
 // time the daemon was down as a gap.
 //
@@ -35,23 +35,20 @@ type srvSlot struct {
 	LatSum  uint64 // microseconds, over LatN answers
 	LatN    uint32
 	LatMaxU uint32 // microseconds
-	OffSum  int64  // microseconds, over OffN probes: the server's clock minus this node's
-	OffN    uint32
+	Hit     uint32 // gateways: queries answered from the cache
 	Up      uint32 // gateways: availability samples that found it working
 	Down    uint32 // gateways: … and that found it failing
 }
 
 type srvSeries struct {
 	ok, fail, prOK, prFail atomic.Uint32 // this minute so far
-	up, down               atomic.Uint32 // gateways: availability samples
+	hit, up, down          atomic.Uint32 // gateways: cache hits, availability samples
 	tick                   atomic.Uint32 // picks the answers whose latency is sampled
 
 	mu     sync.Mutex
 	latSum uint64
 	latN   uint32
 	latMax uint32
-	offSum int64
-	offN   uint32
 	slots  []srvSlot
 }
 
@@ -98,15 +95,10 @@ func (s *srvSeries) addPrFail() {
 	}
 }
 
-// off folds the offset a probe found into the minute under way.
-func (s *srvSeries) off(d time.Duration) {
-	if s == nil {
-		return
+func (s *srvSeries) addHit() {
+	if s != nil {
+		s.hit.Add(1)
 	}
-	s.mu.Lock()
-	s.offSum += d.Microseconds()
-	s.offN++
-	s.mu.Unlock()
 }
 
 // avail notes one availability sample of a gateway.
@@ -125,8 +117,11 @@ func (s *srvSeries) avail(up bool) {
 // thousands of queries a second neither reads the clock nor takes the lock for each of them.
 func (s *srvSeries) sampled() bool { return s != nil && s.tick.Add(1)&7 == 0 }
 
-// The key of a gateway's history; a server's is its address.
+// Keys other than a server's address: one gateway, and one monitored domain on one server.
 func gwKey(gid int) string { return "gw:" + strconv.Itoa(gid) }
+func domKey(addr, name, typ string) string {
+	return "dom:" + addr + "|" + strings.ToLower(strings.TrimSuffix(name, ".")) + "|" + strings.ToUpper(typ)
+}
 
 type srvHistory struct {
 	mu    sync.Mutex
@@ -163,24 +158,22 @@ func (s *srvSeries) take(reset bool) srvSlot {
 	var sl srvSlot
 	if reset {
 		sl.OK, sl.Fail, sl.PrOK, sl.PrFail = s.ok.Swap(0), s.fail.Swap(0), s.prOK.Swap(0), s.prFail.Swap(0)
-		sl.Up, sl.Down = s.up.Swap(0), s.down.Swap(0)
+		sl.Hit, sl.Up, sl.Down = s.hit.Swap(0), s.up.Swap(0), s.down.Swap(0)
 	} else {
 		sl.OK, sl.Fail, sl.PrOK, sl.PrFail = s.ok.Load(), s.fail.Load(), s.prOK.Load(), s.prFail.Load()
-		sl.Up, sl.Down = s.up.Load(), s.down.Load()
+		sl.Hit, sl.Up, sl.Down = s.hit.Load(), s.up.Load(), s.down.Load()
 	}
 	s.mu.Lock()
 	sl.LatSum, sl.LatN, sl.LatMaxU = s.latSum, s.latN, s.latMax
-	sl.OffSum, sl.OffN = s.offSum, s.offN
 	if reset {
 		s.latSum, s.latN, s.latMax = 0, 0, 0
-		s.offSum, s.offN = 0, 0
 	}
 	s.mu.Unlock()
 	return sl
 }
 
 func (sl srvSlot) empty() bool {
-	return sl.OK == 0 && sl.Fail == 0 && sl.PrOK == 0 && sl.PrFail == 0 && sl.LatN == 0 && sl.OffN == 0 && sl.Up == 0 && sl.Down == 0
+	return sl.OK == 0 && sl.Fail == 0 && sl.PrOK == 0 && sl.PrFail == 0 && sl.LatN == 0 && sl.Hit == 0 && sl.Up == 0 && sl.Down == 0
 }
 
 // flush closes the minute that has just ended: every server that did anything in it gets a slot.
@@ -224,12 +217,12 @@ func (h *srvHistory) persistTo(emit func(pRec) error) error {
 	for _, a := range addrs {
 		s := all[a]
 		s.mu.Lock()
-		rows := make([][10]uint64, 0, len(s.slots))
+		rows := make([][9]uint64, 0, len(s.slots))
 		for _, sl := range s.slots {
 			if sl.Min <= oldest {
 				continue
 			}
-			rows = append(rows, [10]uint64{uint64(sl.Min), uint64(sl.OK)<<32 | uint64(sl.Fail), uint64(sl.PrOK)<<32 | uint64(sl.PrFail), sl.LatSum, uint64(sl.LatN), uint64(sl.LatMaxU), uint64(sl.OffSum), uint64(sl.OffN), uint64(sl.Up), uint64(sl.Down)})
+			rows = append(rows, [9]uint64{uint64(sl.Min), uint64(sl.OK)<<32 | uint64(sl.Fail), uint64(sl.PrOK)<<32 | uint64(sl.PrFail), sl.LatSum, uint64(sl.LatN), uint64(sl.LatMaxU), uint64(sl.Hit), uint64(sl.Up), uint64(sl.Down)})
 		}
 		s.mu.Unlock()
 		if len(rows) == 0 {
@@ -261,7 +254,7 @@ func (h *srvHistory) restore(r pRec) int {
 		if m <= now-srvHistKeep || m > now || have[m] {
 			continue
 		}
-		s.slots = append(s.slots, srvSlot{Min: m, OK: uint32(v[1] >> 32), Fail: uint32(v[1]), PrOK: uint32(v[2] >> 32), PrFail: uint32(v[2]), LatSum: v[3], LatN: uint32(v[4]), LatMaxU: uint32(v[5]), OffSum: int64(v[6]), OffN: uint32(v[7]), Up: uint32(v[8]), Down: uint32(v[9])})
+		s.slots = append(s.slots, srvSlot{Min: m, OK: uint32(v[1] >> 32), Fail: uint32(v[1]), PrOK: uint32(v[2] >> 32), PrFail: uint32(v[2]), LatSum: v[3], LatN: uint32(v[4]), LatMaxU: uint32(v[5]), Hit: uint32(v[6]), Up: uint32(v[7]), Down: uint32(v[8])})
 		n++
 	}
 	sort.Slice(s.slots, func(i, j int) bool { return s.slots[i].Min < s.slots[j].Min })
@@ -271,35 +264,35 @@ func (h *srvHistory) restore(r pRec) int {
 // ServerStatsResult is what the Topology page and --server-stats show: equal-length series over buckets of Step seconds
 // starting at Start; a value below 0 is "no data in that bucket".
 type ServerStatsResult struct {
-	Addr      string     `json:"addr"`
-	Known     bool       `json:"known"` // the daemon has recorded something for this server
-	From      int64      `json:"from"`
-	To        int64      `json:"to"`
-	Start     int64      `json:"start"`
-	Step      int        `json:"step"`
-	Latency   []float64  `json:"latency"`              // average ms
-	LatMax    []float64  `json:"latency_max"`          // worst ms
-	Loss      []float64  `json:"loss"`                 // servers: % of the probes that failed; gateways: of the client requests
-	QueryLoss []float64  `json:"query_loss,omitempty"` // servers: % of the client requests sent to it that failed (timeouts, kiss-o'-death)
-	Queries   []float64  `json:"queries"`              // live requests answered or failed
-	QPS       []float64  `json:"qps"`                  // gateways: requests per second
-	Offset    []*float64 `json:"offset_ms"`            // servers: the average offset its probes found, in ms (null: no probe)
-	Avail     []float64  `json:"avail"`                // gateways: % of the availability samples that found it working
+	Addr      string    `json:"addr"`
+	Known     bool      `json:"known"` // the daemon has recorded something for this server
+	From      int64     `json:"from"`
+	To        int64     `json:"to"`
+	Start     int64     `json:"start"`
+	Step      int       `json:"step"`
+	Latency   []float64 `json:"latency"`              // average ms
+	LatMax    []float64 `json:"latency_max"`          // worst ms
+	Loss      []float64 `json:"loss"`                 // servers: % of the probe queries that failed; gateways: of the client queries; domains: of the probes
+	QueryLoss []float64 `json:"query_loss,omitempty"` // servers: % of the client queries sent to it that failed (timeouts, SERVFAIL, REFUSED)
+	Queries   []float64 `json:"queries"`              // live queries answered or failed
+	QPS       []float64 `json:"qps"`                  // gateways: queries per second
+	HitQPS    []float64 `json:"hit_qps"`              // gateways: of which answered from the cache
+	Avail     []float64 `json:"avail"`                // gateways: % of the availability samples that found it working
 	// over the whole range
-	Answered     uint64   `json:"answered"`
-	Failed       uint64   `json:"failed"`
-	ProbesOK     uint64   `json:"probes_ok"`
-	ProbesBad    uint64   `json:"probes_failed"`
-	AvgMS        float64  `json:"avg_ms"`
-	MaxMS        float64  `json:"max_ms"`
-	LossPct      float64  `json:"loss_pct"`
-	QueryLossPct float64  `json:"query_loss_pct,omitempty"` // servers: over the whole range, as QueryLoss
-	AvgOffsetMS  *float64 `json:"avg_offset_ms"`            // servers: the average offset over the range (null: no probe)
-	AvailPct     float64  `json:"avail_pct"`                // gateways: availability over the range, -1 when never sampled
-	Kind         string   `json:"kind"`                     // server | gateway
-	Nodes        int      `json:"nodes"`                    // how many nodes' history this is (a gateway's is every reachable node's)
-	NodesOff     int      `json:"nodes_off"`                // cluster nodes that could not be asked
-	ViaCluster   bool     `json:"via_cluster,omitempty"`    // a server's or domain's: this node has no history of it, these are the other nodes' (Nodes of them)
+	Answered     uint64  `json:"answered"`
+	Failed       uint64  `json:"failed"`
+	ProbesOK     uint64  `json:"probes_ok"`
+	ProbesBad    uint64  `json:"probes_failed"`
+	AvgMS        float64 `json:"avg_ms"`
+	MaxMS        float64 `json:"max_ms"`
+	LossPct      float64 `json:"loss_pct"`
+	QueryLossPct float64 `json:"query_loss_pct,omitempty"` // servers: over the whole range, as QueryLoss
+	Hits         uint64  `json:"hits"`                     // gateways: answered from the cache
+	AvailPct     float64 `json:"avail_pct"`                // gateways: availability over the range, -1 when never sampled
+	Kind         string  `json:"kind"`                     // server | gateway | domain
+	Nodes        int     `json:"nodes"`                    // how many nodes' history this is (a gateway's is every reachable node's)
+	NodesOff     int     `json:"nodes_off"`                // cluster nodes that could not be asked
+	ViaCluster   bool    `json:"via_cluster,omitempty"`    // a server's or domain's: this node has no history of it, these are the other nodes' (Nodes of them)
 }
 
 // srvAcc is the sum of what one history key recorded over a bucket (or a whole range).
@@ -308,8 +301,7 @@ type srvAcc struct {
 	Fail   uint64 `json:"fail"`
 	PrOK   uint64 `json:"pr_ok"`
 	PrFail uint64 `json:"pr_fail"`
-	OffSum int64  `json:"off_sum"`
-	OffN   uint32 `json:"off_n"`
+	Hit    uint64 `json:"hit"`
 	Up     uint64 `json:"up"`
 	Down   uint64 `json:"down"`
 	LatSum uint64 `json:"lat_sum"`
@@ -322,8 +314,7 @@ func (a *srvAcc) add(o srvAcc) {
 	a.Fail += o.Fail
 	a.PrOK += o.PrOK
 	a.PrFail += o.PrFail
-	a.OffSum += o.OffSum
-	a.OffN += o.OffN
+	a.Hit += o.Hit
 	a.Up += o.Up
 	a.Down += o.Down
 	a.LatSum += o.LatSum
@@ -391,7 +382,7 @@ func (h *srvHistory) Raw(key string, from, to time.Time) (srvRaw, error) {
 			continue
 		}
 		r.B[int((t-start)/int64(step))].add(srvAcc{OK: uint64(sl.OK), Fail: uint64(sl.Fail), PrOK: uint64(sl.PrOK), PrFail: uint64(sl.PrFail),
-			OffSum: sl.OffSum, OffN: sl.OffN, Up: uint64(sl.Up), Down: uint64(sl.Down), LatSum: sl.LatSum, LatN: sl.LatN, LatMax: sl.LatMaxU})
+			Hit: uint64(sl.Hit), Up: uint64(sl.Up), Down: uint64(sl.Down), LatSum: sl.LatSum, LatN: sl.LatN, LatMax: sl.LatMaxU})
 	}
 	return r, nil
 }
@@ -414,11 +405,11 @@ func (r srvRaw) Stats() ServerStatsResult {
 	n, step := len(r.B), r.Step
 	out := ServerStatsResult{Addr: r.Key, Known: r.Known, From: r.From, To: r.To, Start: r.Start, Step: step,
 		Latency: make([]float64, n), LatMax: make([]float64, n), Loss: make([]float64, n), Queries: make([]float64, n),
-		QPS: make([]float64, n), Offset: make([]*float64, n), Avail: make([]float64, n), AvailPct: -1, Kind: kindOf(r.Key), Nodes: 1}
+		QPS: make([]float64, n), HitQPS: make([]float64, n), Avail: make([]float64, n), AvailPct: -1, Kind: kindOf(r.Key), Nodes: 1}
 	var total srvAcc
 	srv := out.Kind == "server"
 	loss := func(a srvAcc) float64 {
-		if srv { // a server's loss is its probes': client requests that time out on it say little about its health
+		if srv { // a server's loss is its probes': client queries that time out on it say little about its health
 			if t := a.PrOK + a.PrFail; t > 0 {
 				return float64(a.PrFail) * 100 / float64(t)
 			}
@@ -440,13 +431,9 @@ func (r srvRaw) Stats() ServerStatsResult {
 	}
 	for i, b := range r.B {
 		total.add(b)
-		out.Latency[i], out.LatMax[i], out.Loss[i], out.Queries[i], out.QPS[i], out.Avail[i] = -1, -1, loss(b), -1, -1, -1
+		out.Latency[i], out.LatMax[i], out.Loss[i], out.Queries[i], out.QPS[i], out.HitQPS[i], out.Avail[i] = -1, -1, loss(b), -1, -1, -1, -1
 		if b.Up+b.Down > 0 {
 			out.Avail[i] = round2(float64(b.Up) * 100 / float64(b.Up+b.Down))
-		}
-		if b.OffN > 0 {
-			v := round2(float64(b.OffSum) / float64(b.OffN) / 1000)
-			out.Offset[i] = &v
 		}
 		if b.LatN > 0 {
 			out.Latency[i] = round2(float64(b.LatSum) / float64(b.LatN) / 1000)
@@ -455,6 +442,7 @@ func (r srvRaw) Stats() ServerStatsResult {
 		if b.OK+b.Fail > 0 {
 			out.Queries[i] = float64(b.OK + b.Fail)
 			out.QPS[i] = round2(float64(b.OK+b.Fail) / float64(step))
+			out.HitQPS[i] = round2(float64(b.Hit) / float64(step))
 		}
 		if out.Loss[i] >= 0 {
 			out.Loss[i] = round2(out.Loss[i])
@@ -479,10 +467,7 @@ func (r srvRaw) Stats() ServerStatsResult {
 			out.QueryLossPct = round2(l)
 		}
 	}
-	if total.OffN > 0 {
-		v := round2(float64(total.OffSum) / float64(total.OffN) / 1000)
-		out.AvgOffsetMS = &v
-	}
+	out.Hits = total.Hit
 	if total.Up+total.Down > 0 {
 		out.AvailPct = round2(float64(total.Up) * 100 / float64(total.Up+total.Down))
 	}
@@ -503,6 +488,8 @@ func kindOf(key string) string {
 	switch {
 	case strings.HasPrefix(key, "gw:"):
 		return "gateway"
+	case strings.HasPrefix(key, "dom:"):
+		return "domain"
 	}
 	return "server"
 }

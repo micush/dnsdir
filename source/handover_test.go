@@ -95,7 +95,7 @@ func TestStepDownIsInPlace(t *testing.T) {
 	log := recordCmds(t)
 	b.mu.Lock()
 	b.stepDownToLocked("10.0.0.202")
-	st, slot, vip, lo := b.state, b.afnID, b.vipSlot, b.ntpLoAdded
+	st, slot, vip, lo := b.state, b.afnID, b.vipSlot, b.dnsLoAdded
 	b.mu.Unlock()
 	lines := log.snapshot()
 	t.Logf("commands:\n  %s", strings.Join(lines, "\n  "))

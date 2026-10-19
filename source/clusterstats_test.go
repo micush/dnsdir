@@ -23,19 +23,19 @@ func infosOf(names ...string) []ClusterNodeInfo {
 
 func TestMergeQStatsAddsSeriesSumsAndLists(t *testing.T) {
 	a := &QStatsResult{Start: 600, Step: 60, From: 600, To: 780, Since: 100,
-		Total: []uint64{1, 2, 3}, Answered: []uint64{1, 2, 2}, Failed: []uint64{0, 0, 0}, KoD: []uint64{0, 0, 1}, Refused: []uint64{0, 0, 0},
-		Sums:     QStatsSums{Total: 6, Answered: 5, KoD: 1, Clients: 3},
-		Guard:    MemGuardInfo{Limit: 90, Trims: 1, Last: 50, LastNote: "a"},
-		Versions: []NameCount{{Name: "NTPv4", Count: 5}, {Name: "NTPv3", Count: 1}}, Families: []NameCount{{Name: "IPv4", Count: 6}},
+		Total: []uint64{1, 2, 3}, NoError: []uint64{1, 2, 3}, ServFail: []uint64{0, 0, 0}, NXDomain: []uint64{0, 0, 0}, Refused: []uint64{0, 0, 0}, Other: []uint64{0, 0, 0}, Updates: []uint64{0, 1, 0},
+		Sums:  QStatsSums{Total: 6, NoError: 6, Updates: 1, CacheHit: 4, CacheMis: 1, Clients: 3},
+		Guard: MemGuardInfo{Limit: 90, Trims: 1, Last: 50, LastNote: "a"},
+		Types: []NameCount{{Name: "A", Count: 5}, {Name: "AAAA", Count: 1}}, Protos: []NameCount{{Name: "UDP", Count: 6}},
 		Clients: []NameCount{{Name: "10.0.0.1", Count: 4, Host: "pc1."}, {Name: "10.0.0.2", Count: 2}, {Name: qsOthers, Count: 0}},
-		Servers: []NameCount{{Name: srvA, Count: 6}}}
+		Domains: []NameCount{{Name: "x.example", Count: 6}}}
 	b := &QStatsResult{Start: 660, Step: 60, From: 660, To: 900, Since: 200,
-		Total: []uint64{10, 20, 30, 40}, Answered: []uint64{9, 20, 30, 40}, Failed: []uint64{1, 0, 0, 0}, KoD: []uint64{0, 0, 0, 0}, Refused: []uint64{0, 0, 0, 0},
-		Sums:     QStatsSums{Total: 100, Answered: 99, Failed: 1, Clients: 5},
-		Guard:    MemGuardInfo{Limit: 80, Trims: 2, Last: 70, LastNote: "b"},
-		Versions: []NameCount{{Name: "NTPv4", Count: 70}, {Name: "other", Count: 30}}, Families: []NameCount{{Name: "IPv6", Count: 20}, {Name: "IPv4", Count: 80}},
+		Total: []uint64{10, 20, 30, 40}, NoError: []uint64{9, 20, 30, 40}, ServFail: []uint64{1, 0, 0, 0}, NXDomain: []uint64{0, 0, 0, 0}, Refused: []uint64{0, 0, 0, 0}, Other: []uint64{0, 0, 0, 0}, Updates: []uint64{0, 0, 0, 0},
+		Sums:  QStatsSums{Total: 100, NoError: 99, ServFail: 1, CacheHit: 10, CacheMis: 10, Clients: 5},
+		Guard: MemGuardInfo{Limit: 80, Trims: 2, Last: 70, LastNote: "b"},
+		Types: []NameCount{{Name: "A", Count: 70}, {Name: "TXT", Count: 30}}, Protos: []NameCount{{Name: "TCP", Count: 20}, {Name: "UDP", Count: 80}},
 		Clients: []NameCount{{Name: "10.0.0.2", Count: 50, Hosts: []string{"pc2.", "pc2b."}}, {Name: "10.0.0.3", Count: 50}, {Name: qsOthers, Count: 3}},
-		Servers: []NameCount{{Name: srvB, Count: 60}, {Name: srvA, Count: 40}}}
+		Domains: []NameCount{{Name: "y.example", Count: 60}, {Name: "x.example", Count: 40}}}
 	r := mergeQStats([]clusterPart[QStatsResult]{qpart("A", a), qpart("B", b)}, infosOf("A", "B"))
 
 	if r.Start != 600 || r.Step != 60 || len(r.Total) != 5 {
@@ -44,14 +44,14 @@ func TestMergeQStatsAddsSeriesSumsAndLists(t *testing.T) {
 	if want := []uint64{1, 12, 23, 30, 40}; !reflect.DeepEqual(r.Total, want) {
 		t.Fatalf("total series %v, want %v (aligned by time, not by index)", r.Total, want)
 	}
-	if want := []uint64{1, 11, 22, 30, 40}; !reflect.DeepEqual(r.Answered, want) {
-		t.Fatalf("answered series %v, want %v", r.Answered, want)
+	if want := []uint64{1, 11, 23, 30, 40}; !reflect.DeepEqual(r.NoError, want) {
+		t.Fatalf("no-error series %v, want %v", r.NoError, want)
 	}
-	if r.KoD[2] != 1 {
-		t.Fatalf("kod %v", r.KoD)
+	if r.Updates[1] != 1 {
+		t.Fatalf("updates %v", r.Updates)
 	}
 	s := r.Sums
-	if s.Total != 106 || s.Answered != 104 || s.Failed != 1 || s.KoD != 1 {
+	if s.Total != 106 || s.NoError != 105 || s.ServFail != 1 || s.Updates != 1 || s.CacheHit != 14 || s.CacheMis != 11 {
 		t.Fatalf("sums %+v", s)
 	}
 	if r.Since != 200 || r.From != 600 || r.To != 900 {
@@ -61,18 +61,18 @@ func TestMergeQStatsAddsSeriesSumsAndLists(t *testing.T) {
 		t.Fatalf("guard %+v", r.Guard)
 	}
 	// lists: by name, biggest first, "(others)" last, reverse-DNS names kept
-	if len(r.Versions) != 3 || r.Versions[0].Name != "NTPv4" || r.Versions[0].Count != 75 || r.Versions[1].Name != "other" {
-		t.Fatalf("versions %+v", r.Versions)
+	if len(r.Types) != 3 || r.Types[0].Name != "A" || r.Types[0].Count != 75 || r.Types[1].Name != "TXT" {
+		t.Fatalf("types %+v", r.Types)
 	}
-	if len(r.Families) != 2 || r.Families[0].Name != "IPv4" || r.Families[0].Count != 86 || r.Families[1].Name != "IPv6" || r.Families[1].Count != 20 {
-		t.Fatalf("families %+v", r.Families)
+	if len(r.Protos) != 2 || r.Protos[0].Name != "UDP" || r.Protos[0].Count != 86 || r.Protos[1].Name != "TCP" || r.Protos[1].Count != 20 {
+		t.Fatalf("protocols %+v", r.Protos)
 	}
 	c := r.Clients
 	if len(c) != 4 || c[0].Name != "10.0.0.2" || c[0].Count != 52 || len(c[0].Hosts) != 2 || c[1].Name != "10.0.0.3" || c[2].Name != "10.0.0.1" || c[2].Host != "pc1." || c[3].Name != qsOthers || c[3].Count != 3 {
 		t.Fatalf("clients %+v", c)
 	}
-	if d := r.Servers; len(d) != 2 || d[0].Name != srvB || d[0].Count != 60 || d[1].Name != srvA || d[1].Count != 46 {
-		t.Fatalf("servers %+v", d)
+	if d := r.Domains; len(d) != 2 || d[0].Name != "y.example" || d[1].Name != "x.example" || d[1].Count != 46 {
+		t.Fatalf("domains %+v", d)
 	}
 	// distinct clients cannot be added: at least the busiest node's and the ones listed (10.0.0.1, .2, .3)
 	if s.Clients != 5 {
@@ -85,24 +85,24 @@ func TestMergeQStatsAddsSeriesSumsAndLists(t *testing.T) {
 
 func TestMergeQStatsKeepsOnlyTheTopOfALongList(t *testing.T) {
 	mk := func(prefix string) *QStatsResult {
-		r := &QStatsResult{Start: 0, Step: 60, Total: []uint64{0}, Answered: []uint64{0}, Failed: []uint64{0}, KoD: []uint64{0}, Refused: []uint64{0}}
+		r := &QStatsResult{Start: 0, Step: 60, Total: []uint64{0}, NoError: []uint64{0}, ServFail: []uint64{0}, NXDomain: []uint64{0}, Refused: []uint64{0}, Other: []uint64{0}, Updates: []uint64{0}}
 		for i := 0; i < qsKeepResult; i++ {
-			r.Servers = append(r.Servers, NameCount{Name: fmt.Sprintf("%s%03d:123", prefix, i), Count: uint64(1000 - i)})
+			r.Domains = append(r.Domains, NameCount{Name: fmt.Sprintf("%s%03d.example", prefix, i), Count: uint64(1000 - i)})
 		}
 		return r
 	}
 	r := mergeQStats([]clusterPart[QStatsResult]{qpart("A", mk("a")), qpart("B", mk("b"))}, infosOf("A", "B"))
-	if len(r.Servers) != qsKeepResult {
-		t.Fatalf("%d servers kept, want %d", len(r.Servers), qsKeepResult)
+	if len(r.Domains) != qsKeepResult {
+		t.Fatalf("%d domains kept, want %d", len(r.Domains), qsKeepResult)
 	}
-	if r.Servers[0].Count != 1000 || r.Servers[len(r.Servers)-1].Count < 1000-qsKeepResult/2 {
-		t.Fatalf("the wrong ones were kept: %+v ... %+v", r.Servers[0], r.Servers[len(r.Servers)-1])
+	if r.Domains[0].Count != 1000 || r.Domains[len(r.Domains)-1].Count < 1000-qsKeepResult/2 {
+		t.Fatalf("the wrong ones were kept: %+v ... %+v", r.Domains[0], r.Domains[len(r.Domains)-1])
 	}
 }
 
 func TestMergeQStatsLeavesOutAnotherResolution(t *testing.T) {
 	mk := func(step int, v uint64) *QStatsResult {
-		return &QStatsResult{Start: 0, Step: step, Total: []uint64{v}, Answered: []uint64{v}, Failed: []uint64{0}, KoD: []uint64{0}, Refused: []uint64{0}, Sums: QStatsSums{Total: v}}
+		return &QStatsResult{Start: 0, Step: step, Total: []uint64{v}, NoError: []uint64{v}, ServFail: []uint64{0}, NXDomain: []uint64{0}, Refused: []uint64{0}, Other: []uint64{0}, Updates: []uint64{0}, Sums: QStatsSums{Total: v}}
 	}
 	infos := infosOf("A", "B", "C")
 	r := mergeQStats([]clusterPart[QStatsResult]{qpart("A", mk(60, 1)), qpart("B", mk(60, 2)), qpart("C", mk(600, 100))}, infos)
@@ -219,7 +219,7 @@ func TestClusterQStatsAndHostThroughTheRelay(t *testing.T) {
 	withWeb(t, a)
 	withWeb(t, b)
 	for i := 0; i < 40; i++ {
-		qstats.Record(netip.MustParseAddr("192.0.2.77"), srvA, 4, outAnswered)
+		qstats.Record(netip.MustParseAddr("192.0.2.77"), "relay.example", 1, false, 0)
 	}
 	hoststats.Sample()
 	args, _ := json.Marshal(map[string]string{"from": "1h"})
@@ -312,5 +312,29 @@ func TestClusterNodesWithOneHostNameAreNamedByAddress(t *testing.T) {
 	nodes := got.(*QStatsResult).Cluster.Nodes
 	if len(nodes) != 2 || nodes[0].Name == nodes[1].Name {
 		t.Fatalf("nodes %+v", nodes)
+	}
+}
+
+func TestMergeQStatsKeepsTheTransportSplit(t *testing.T) {
+	mk := func(p ...NameCount) *QStatsResult {
+		return &QStatsResult{Start: 600, Step: 60, From: 600, To: 660, Since: 100, Total: []uint64{1}, NoError: []uint64{1}, ServFail: []uint64{0},
+			NXDomain: []uint64{0}, Refused: []uint64{0}, Other: []uint64{0}, Updates: []uint64{0}, Protos: p}
+	}
+	a := mk(NameCount{Name: "UDP \u00b7 IPv4", Count: 10}, NameCount{Name: "TCP \u00b7 IPv6", Count: 1})
+	b := mk(NameCount{Name: "UDP \u00b7 IPv4", Count: 5}, NameCount{Name: "UDP \u00b7 IPv6", Count: 2})
+	old := mk(NameCount{Name: "UDP", Count: 7}, NameCount{Name: "TCP", Count: 3}) // a node on an older version
+	r := mergeQStats([]clusterPart[QStatsResult]{qpart("A", a), qpart("B", b), qpart("C", old)}, infosOf("A", "B", "C"))
+	got := map[string]uint64{}
+	var names []string
+	for _, p := range r.Protos {
+		got[p.Name] = p.Count
+		names = append(names, p.Name)
+	}
+	want := map[string]uint64{"UDP \u00b7 IPv4": 15, "UDP \u00b7 IPv6": 2, "UDP": 7, "TCP \u00b7 IPv6": 1, "TCP": 3}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("cluster transport %v, want %v", got, want)
+	}
+	if names[0] != "UDP \u00b7 IPv4" || names[len(names)-1] != "TCP" {
+		t.Fatalf("order %v", names)
 	}
 }

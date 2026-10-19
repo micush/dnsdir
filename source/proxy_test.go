@@ -13,11 +13,11 @@ import (
 func TestProxyAllowed(t *testing.T) {
 	ok := []struct{ m, p string }{
 		{"GET", "/api/canvas"}, {"PUT", "/api/config"}, {"GET", "/api/versions/diff?a=1&b=2"},
-		{"POST", "/api/tls/install"}, {"GET", "/api/versions"}, {"POST", "/api/assert-agc"}, {"GET", "/api/ntp"},
+		{"POST", "/api/tls/install"}, {"GET", "/api/versions"}, {"POST", "/api/assert-agc"}, {"GET", "/api/dns"},
 		// the Cluster and Upgrade pages follow the picked node too
 		{"GET", "/api/cluster"}, {"POST", "/api/cluster/leave"}, {"POST", "/api/cluster/promote"},
 		{"GET", "/api/update"}, {"POST", "/api/update/apply"}, {"POST", "/api/update/upload"}, {"POST", "/api/update/push"},
-		{"GET", "/api/power"}, {"POST", "/api/power"}, {"GET", "/api/nodepause"}, {"POST", "/api/nodepause"}, {"GET", "/api/log?level=warn&q=x"}, {"GET", "/api/qstats?from=1d"}, {"GET", "/api/whois?lookup=example.com"}, {"GET", "/api/host?from=1d"}, {"GET", "/api/hostlookup?lookup=127.0.0.1"},
+		{"GET", "/api/power"}, {"POST", "/api/power"}, {"GET", "/api/nodepause"}, {"POST", "/api/nodepause"}, {"GET", "/api/log?level=warn&q=x"}, {"GET", "/api/qstats?from=1d"}, {"GET", "/api/whois?domain=example.com"}, {"GET", "/api/host?from=1d"}, {"GET", "/api/dnsupdates"},
 	}
 	for _, c := range ok {
 		if err := proxyAllowed(c.m, c.p); err != nil {
@@ -102,7 +102,7 @@ func TestProxyHandlerRunsAsViaUser(t *testing.T) {
 func TestProxyAcceptsRawUploads(t *testing.T) {
 	e := newWebEnv(t)
 	e.login("alice", "pw")
-	r := e.do("POST", "/api/proxy?node=10.0.0.9:12381&path=/api/update/upload", nil, withAuth(e, true), func(q *http.Request) {
+	r := e.do("POST", "/api/proxy?node=10.0.0.9:53854&path=/api/update/upload", nil, withAuth(e, true), func(q *http.Request) {
 		q.Header.Set("Content-Type", "application/octet-stream")
 		q.Body = io.NopCloser(bytes.NewReader([]byte("not a real archive")))
 		q.ContentLength = 18

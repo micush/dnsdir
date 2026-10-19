@@ -15,9 +15,9 @@ import (
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const (
-	multicast4  = "224.1.3.123"
-	multicast6  = "ff02::1:123"
-	dgwPort     = 12382
+	multicast4  = "224.1.3.7"
+	multicast6  = "ff02::1:307"
+	dgwPort     = 4729
 	dgwVersion  = 3
 	packetMagic = 0xD1B0
 	hmacLen     = 32

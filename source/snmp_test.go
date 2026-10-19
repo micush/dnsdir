@@ -183,7 +183,7 @@ func TestSNMPCommunitiesAreRedactedInSupportBundles(t *testing.T) {
 
 func TestSNMPConfigHistoryHidesTheStrings(t *testing.T) {
 	a, b := newDaemonConfig(), newDaemonConfig()
-	b.NTP.SNMPCommunities = []string{"verysecret"}
+	b.DNS.SNMPCommunities = []string{"verysecret"}
 	b.SNMP = &SNMPConfig{Location: "lab"}
 	var text string
 	for _, s := range configSections(a, b) {
@@ -196,12 +196,12 @@ func TestSNMPConfigHistoryHidesTheStrings(t *testing.T) {
 
 func TestSNMPCommunitiesAndContactAreSharedLocationIsNot(t *testing.T) {
 	a := newDaemonConfig()
-	a.NTP.SNMPCommunities = []string{"public", "ro2"}
-	a.NTP.SNMPContact = "noc@example.com"
+	a.DNS.SNMPCommunities = []string{"public", "ro2"}
+	a.DNS.SNMPContact = "noc@example.com"
 	a.SNMP = &SNMPConfig{Location: "rack A"}
 	sh := sharedOf(a)
-	if len(sh.NTP.SNMPCommunities) != 2 || sh.NTP.SNMPContact != "noc@example.com" {
-		t.Fatalf("not replicated: %+v", sh.NTP)
+	if len(sh.DNS.SNMPCommunities) != 2 || sh.DNS.SNMPContact != "noc@example.com" {
+		t.Fatalf("not replicated: %+v", sh.DNS)
 	}
 	b := newDaemonConfig()
 	b.SNMP = &SNMPConfig{Location: "rack B"}
@@ -213,7 +213,7 @@ func TestSNMPCommunitiesAndContactAreSharedLocationIsNot(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 	// emptying on the primary empties the replica
-	a.NTP.SNMPCommunities = nil
+	a.DNS.SNMPCommunities = nil
 	if _, err := mergeShared(b, sharedOf(a), nil); err != nil {
 		t.Fatal(err)
 	}
@@ -222,20 +222,9 @@ func TestSNMPCommunitiesAndContactAreSharedLocationIsNot(t *testing.T) {
 	}
 }
 
-func TestV49LocalSNMPCommunitiesMoveToTheSharedSettings(t *testing.T) {
-	dc := newDaemonConfig()
-	dc.SNMP = &SNMPConfig{Communities: []string{"public"}, Contact: "noc", Location: "lab"}
-	if err := dc.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	if len(dc.NTP.SNMPCommunities) != 1 || dc.NTP.SNMPContact != "noc" || dc.SNMP == nil || dc.SNMP.Location != "lab" || len(dc.SNMP.Communities) != 0 {
-		t.Fatalf("%+v %+v", dc.NTP, dc.SNMP)
-	}
-}
-
 func TestSharedSNMPCommunitiesAreValidated(t *testing.T) {
 	dc := newDaemonConfig()
-	dc.NTP.SNMPCommunities = []string{"bad one"}
+	dc.DNS.SNMPCommunities = []string{"bad one"}
 	if err := dc.Validate(); err == nil {
 		t.Fatal("a community with a space should be refused")
 	}

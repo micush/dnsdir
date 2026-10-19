@@ -32,13 +32,13 @@ func (m *Mgmt) SchedSet(t SchedTask, actor string) (SchedTask, error) {
 		return t, errors.New("auto-update is on, so the online update runs on one node: choose that node under Runs on, or turn auto-update off")
 	}
 	replaced := false
-	for i := range dc.NTP.Schedule {
-		if dc.NTP.Schedule[i].ID == t.ID {
-			dc.NTP.Schedule[i], replaced = t, true
+	for i := range dc.DNS.Schedule {
+		if dc.DNS.Schedule[i].ID == t.ID {
+			dc.DNS.Schedule[i], replaced = t, true
 		}
 	}
 	if !replaced {
-		dc.NTP.Schedule = append(dc.NTP.Schedule, t)
+		dc.DNS.Schedule = append(dc.DNS.Schedule, t)
 	}
 	verb := "added"
 	if replaced {
@@ -60,7 +60,7 @@ func (m *Mgmt) SchedDel(id, actor string) error {
 	}
 	var keep []SchedTask
 	name := ""
-	for _, t := range dc.NTP.Schedule {
+	for _, t := range dc.DNS.Schedule {
 		if t.ID == id {
 			name = t.Name
 			continue
@@ -70,6 +70,6 @@ func (m *Mgmt) SchedDel(id, actor string) error {
 	if name == "" {
 		return errors.New("no such task")
 	}
-	dc.NTP.Schedule = keep
+	dc.DNS.Schedule = keep
 	return m.PutConfig(dc, actor, fmt.Sprintf("Scheduled task %q deleted", name))
 }

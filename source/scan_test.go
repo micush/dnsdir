@@ -118,7 +118,7 @@ func TestScanWithoutNmap(t *testing.T) {
 func TestQStatsClear(t *testing.T) {
 	s := NewQStats()
 	for i := 0; i < 50; i++ {
-		s.Record(netip.MustParseAddr("10.1.1.1"), "10.9.9.1:123", 4, outAnswered)
+		s.Record(netip.MustParseAddr("10.1.1.1"), "example.com", 1, false, 0)
 	}
 	now := time.Now()
 	if r := s.Query(now.Add(-time.Hour), now.Add(time.Minute), QFilter{}); r.Sums.Total != 50 {
@@ -126,10 +126,10 @@ func TestQStatsClear(t *testing.T) {
 	}
 	s.Clear()
 	r := s.Query(now.Add(-time.Hour), now.Add(time.Minute), QFilter{})
-	if r.Sums.Total != 0 || len(r.Clients) != 0 || len(r.Servers) != 0 {
+	if r.Sums.Total != 0 || len(r.Clients) != 0 || len(r.Domains) != 0 {
 		t.Fatalf("after: %+v", r.Sums)
 	}
-	s.Record(netip.MustParseAddr("10.1.1.2"), "10.9.9.1:123", 4, outAnswered)
+	s.Record(netip.MustParseAddr("10.1.1.2"), "example.org", 1, false, 0)
 	if r := s.Query(now.Add(-time.Hour), now.Add(time.Minute), QFilter{}); r.Sums.Total != 1 {
 		t.Fatalf("counting again: %d", r.Sums.Total)
 	}

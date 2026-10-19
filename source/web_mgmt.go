@@ -24,7 +24,6 @@ func (w *WebServer) mgmtRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/versions/download", w.authed(w.handleVersionDownload))
 	mux.HandleFunc("POST /api/versions/upload", w.authed(w.handleVersionUpload))
 	// certificate
-	mux.HandleFunc("GET /api/snmp", w.authed(w.op("snmp.status", nil)))
 	mux.HandleFunc("GET /api/tls", w.authed(w.op("tls.status", nil)))
 	mux.HandleFunc("POST /api/tls/install", w.authed(w.op("tls.install", nil)))
 	mux.HandleFunc("POST /api/tls/csr", w.authed(w.op("tls.csr", nil)))
@@ -42,33 +41,40 @@ func (w *WebServer) mgmtRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/cluster/sync", w.authed(w.op("cluster.sync", nil)))
 	w.registerCapture(mux)
 	// updates
+	mux.HandleFunc("GET /api/snmp", w.authed(w.op("snmp.status", nil)))
 	mux.HandleFunc("GET /api/bgp", w.authed(w.op("bgp.status", nil)))
 	mux.HandleFunc("PUT /api/bgp", w.authed(w.op("bgp.set", nil)))
 	mux.HandleFunc("POST /api/bgp/operate", w.authed(w.op("bgp.operate", nil)))
 	mux.HandleFunc("GET /api/log", w.authed(w.op("log.view", []string{"level", "q", "since", "n"})))
+	mux.HandleFunc("GET /api/dnsupdates", w.authed(w.op("dnsupdates.get", nil)))
 	mux.HandleFunc("GET /api/host", w.authed(w.op("host.get", []string{"from", "to"})))
-	mux.HandleFunc("GET /api/serverstats", w.authed(w.op("ntp.serverstats", []string{"addr", "from", "to"})))
-	mux.HandleFunc("GET /api/time", w.authed(w.op("time.now", nil)))
-	mux.HandleFunc("GET /api/dnslookup/full", w.authed(w.op("dns.lookup.full", []string{"lookup"})))
+	mux.HandleFunc("GET /api/serverstats", w.authed(w.op("dns.serverstats", []string{"addr", "from", "to"})))
+	mux.HandleFunc("GET /api/dnslookup", w.authed(w.op("dns.lookup", []string{"lookup"})))
+	mux.HandleFunc("GET /api/whois", w.authed(w.op("whois.get", []string{"domain"})))
+	mux.HandleFunc("GET /api/qstats", w.authed(w.op("qstats.get", []string{"from", "to", "rcode", "client", "domain", "cmatch", "dmatch"})))
+	mux.HandleFunc("POST /api/qstats/clear", w.authed(w.op("qstats.clear", nil)))
+	mux.HandleFunc("POST /api/clusterstats/clear", w.authed(w.op("qstats.clear.cluster", nil)))
+	mux.HandleFunc("POST /api/scan", w.authed(w.op("scan.start", nil)))
+	mux.HandleFunc("POST /api/regname", w.authed(w.op("clientname.register", nil)))
+	mux.HandleFunc("GET /api/scan", w.authed(w.op("scan.get", []string{"client"})))
 	mux.HandleFunc("GET /api/schedule", w.authed(w.op("schedule.status", nil)))
 	mux.HandleFunc("POST /api/schedule/task", w.authed(w.op("schedule.set", nil)))
 	mux.HandleFunc("POST /api/schedule/delete", w.authed(w.op("schedule.del", nil)))
 	mux.HandleFunc("POST /api/schedule/run", w.authed(w.op("schedule.run", nil)))
-	mux.HandleFunc("GET /api/hostlookup", w.authed(w.op("host.lookup", []string{"lookup"})))
-	mux.HandleFunc("GET /api/whois", w.authed(w.op("whois.get", []string{"lookup"})))
-	mux.HandleFunc("GET /api/qstats", w.authed(w.op("qstats.get", []string{"from", "to", "outcome", "client", "server", "cmatch", "smatch"})))
-	mux.HandleFunc("POST /api/qstats/clear", w.authed(w.op("qstats.clear", nil)))
-	mux.HandleFunc("POST /api/clusterstats/clear", w.authed(w.op("qstats.clear.cluster", nil)))
-	mux.HandleFunc("POST /api/scan", w.authed(w.op("scan.start", nil)))
-	mux.HandleFunc("GET /api/scan", w.authed(w.op("scan.get", []string{"client"})))
+	mux.HandleFunc("GET /api/dnslookup/full", w.authed(w.op("dns.lookup.full", []string{"lookup"})))
+	// a flush goes to every node: this one asks the others, which are asked on the second route (this node only)
+	mux.HandleFunc("POST /api/cache/flush", w.authed(w.op("cache.flush.cluster", nil)))
+	mux.HandleFunc("POST /api/cache/flush-node", w.authed(w.op("cache.flush", nil)))
+	mux.HandleFunc("POST /api/cache/clear", w.authed(w.op("cache.clear.cluster", nil)))
+	mux.HandleFunc("POST /api/cache/clear-node", w.authed(w.op("cache.clear", nil)))
 	mux.HandleFunc("POST /api/nettool", w.authed(w.op("nettool.start", nil)))
 	mux.HandleFunc("GET /api/nettool", w.authed(w.op("nettool.get", []string{"kind", "client"})))
 	// the whole cluster's numbers added together (not relayable: the node asked does the asking of the others)
-	mux.HandleFunc("GET /api/clusterstats", w.authed(w.op("qstats.cluster", []string{"gw", "from", "to", "outcome", "client", "server", "cmatch", "smatch"})))
+	mux.HandleFunc("GET /api/clusterstats", w.authed(w.op("qstats.cluster", []string{"gw", "from", "to", "rcode", "client", "domain", "cmatch", "dmatch"})))
 	mux.HandleFunc("GET /api/clusterhost", w.authed(w.op("host.cluster", []string{"gw", "from", "to"})))
 	mux.HandleFunc("GET /api/nodepause", w.authed(w.op("node.status", nil)))
 	mux.HandleFunc("POST /api/nodepause", w.authed(w.op("node.pause", nil)))
-	mux.HandleFunc("POST /api/noderename", w.authed(w.op("node.rename", nil)))
+	mux.HandleFunc("POST /api/host/rename", w.authed(w.op("host.rename", nil)))
 	mux.HandleFunc("GET /api/users", w.authed(w.op("users.list", nil)))
 	mux.HandleFunc("POST /api/users/add", w.authed(w.op("users.add", nil)))
 	mux.HandleFunc("POST /api/users/password", w.authed(w.op("users.password", nil)))
@@ -87,6 +93,7 @@ func (w *WebServer) mgmtRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/update/cancel", w.authed(w.op("update.cancel", nil)))
 	mux.HandleFunc("POST /api/update/auto", w.authed(w.op("update.auto", nil)))
 	mux.HandleFunc("POST /api/update/repo", w.authed(w.op("update.repo", nil)))
+	mux.HandleFunc("POST /api/cluster/failover", w.authed(w.op("cluster.failover", nil)))
 }
 
 // op adapts a Mgmt.Op command to an HTTP handler.  GET handlers take their
@@ -109,7 +116,7 @@ func (w *WebServer) op(cmd string, query []string) func(http.ResponseWriter, *ht
 			}
 			args = body
 		}
-		if cmd == "versions.restore" || cmd == "cluster.promote" || cmd == "cluster.leave" || cmd == "cluster.join" || cmd == "update.apply" || cmd == "power.do" || cmd == "node.pause" || cmd == "node.rename" || cmd == "schedule.run" || cmd == "schedule.set" || cmd == "schedule.del" || cmd == "qstats.clear" || cmd == "qstats.clear.cluster" || strings.HasPrefix(cmd, "users.") && cmd != "users.list" {
+		if cmd == "versions.restore" || cmd == "cluster.promote" || cmd == "cluster.leave" || cmd == "cluster.join" || cmd == "update.apply" || cmd == "power.do" || cmd == "node.pause" || cmd == "host.rename" || cmd == "qstats.clear" || cmd == "qstats.clear.cluster" || strings.HasPrefix(cmd, "users.") && cmd != "users.list" {
 			warnf("web: %q ran %s (from %s)", s.user, cmd, clientIP(r))
 		}
 		data, err := w.mg.Op(cmd, args, s.user)
@@ -143,7 +150,7 @@ func (w *WebServer) handleVersionDownload(rw http.ResponseWriter, r *http.Reques
 		jsonError(rw, code, err.Error())
 		return
 	}
-	name := "ntpdir-config-" + meta.ID + ".json"
+	name := "dnsdir-config-" + meta.ID + ".json"
 	rw.Header().Set("Content-Type", "application/json")
 	rw.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 	rw.Write(append([]byte(cfg), '\n'))

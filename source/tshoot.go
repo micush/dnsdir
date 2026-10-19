@@ -26,7 +26,7 @@ import (
 // something does not work, in one .tgz that can be attached to a ticket.  Read-only; secrets are removed before anything
 // is put in it, and the bundle lists what it holds and what could not be collected.
 //
-//	ntpdir-tshoot-<time>.tgz
+//	dnsdir-tshoot-<time>.tgz
 //	  README.txt           what is in it, which nodes answered, what was removed
 //	  <node>/…             one folder per node (see tshootNode)
 
@@ -41,7 +41,7 @@ const (
 )
 
 // A key whose value is a secret: passwords, the gateway key, tokens, join codes, private keys.
-var tshootSecretKey = regexp.MustCompile(`(?i)(^|_)(pass|passwd|password|secret|token|key|psk|private|cookie|csrf|code|auth|community|communities|keys)($|_)`)
+var tshootSecretKey = regexp.MustCompile(`(?i)(^|_)(pass|passwd|password|secret|token|key|psk|private|cookie|csrf|code|auth|community|communities)($|_)`)
 
 // A secret written in free text (an FRR configuration, a command's output).
 var tshootSecretText = regexp.MustCompile(`(?i)\b(password|passwd|secret|md5|community|key|auth-key)([ =:]+)(?:[0-9] )?(\S+)`)
@@ -218,67 +218,59 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 	do(func() {
 		dc, _, err := m.LiveConfig()
 		if err != nil {
-			b.fail("ntpdir/config.json", err)
+			b.fail("dnsdir/config.json", err)
 			return
 		}
-		b.putJSON("ntpdir/config.json", dc)
+		b.putJSON("dnsdir/config.json", dc)
 	})
-	do(func() { b.putJSON("ntpdir/config-versions.json", m.VersionsList()) })
-	do(func() {
-		b.putJSON("ntpdir/chrony.json", map[string]any{"state": chrony.readState(), "server_stats": readServerStats()})
-		if out, err := chronyc("sources", "-n", "-a"); err == nil {
-			b.put("ntpdir/chrony-sources.txt", out)
-		}
-		if out, err := chronyc("-n", "sourcestats", "-a"); err == nil {
-			b.put("ntpdir/chrony-sourcestats.txt", out)
-		}
-	})
+	do(func() { b.putJSON("dnsdir/config-versions.json", m.VersionsList()) })
+	do(func() { b.putJSON("dnsdir/dns-forward-failures.json", recentFwdFailures()) })
 	do(func() { // who asked for what in the last ten minutes (top clients and domains, types, transports)
 		now := time.Now()
-		b.putJSON("ntpdir/ntp-queries-last-10-min.json", qstats.Query(now.Add(-10*time.Minute), now, QFilter{}))
+		b.putJSON("dnsdir/dns-queries-last-10-min.json", qstats.Query(now.Add(-10*time.Minute), now, QFilter{}))
 	})
 	do(func() {
 		if m.cl != nil && m.cl.Enabled() {
-			b.putJSON("ntpdir/cluster.json", m.cl.View())
+			b.putJSON("dnsdir/cluster.json", m.cl.View())
 		} else {
-			b.put("ntpdir/cluster.json", []byte("{\"clustered\": false}\n"))
+			b.put("dnsdir/cluster.json", []byte("{\"clustered\": false}\n"))
 		}
 	})
 	do(func() {
 		st, err := m.BGPStatus()
 		if err != nil {
-			b.fail("ntpdir/bgp.json", err)
+			b.fail("dnsdir/bgp.json", err)
 			return
 		}
-		b.putJSON("ntpdir/bgp.json", st)
+		b.putJSON("dnsdir/bgp.json", st)
 	})
 	do(func() {
 		if m.anycastFn != nil {
-			b.putJSON("ntpdir/anycast.json", m.anycastFn())
+			b.putJSON("dnsdir/anycast.json", m.anycastFn())
 		}
 	})
 	do(func() {
 		if m.gwFn != nil {
-			b.putJSON("ntpdir/gateways-reported-to-the-cluster.json", m.localGateways())
+			b.putJSON("dnsdir/gateways-reported-to-the-cluster.json", m.localGateways())
 		}
 	})
-	do(func() { b.putJSON("ntpdir/update.json", m.UpdateStatus()) })
-	do(func() { b.putJSON("ntpdir/update-history.json", m.upd.History(30)) })
-	do(func() { b.putJSON("ntpdir/virtual-mac-tests.json", vmacAll()) })
+	do(func() { b.putJSON("dnsdir/update.json", m.UpdateStatus()) })
+	do(func() { b.putJSON("dnsdir/update-history.json", m.upd.History(30)) })
+	do(func() { b.putJSON("dnsdir/virtual-mac-tests.json", vmacAll()) })
 	do(func() {
-		b.putJSON("ntpdir/host-last-hour.json", hoststats.Query(time.Now().Add(-time.Hour), time.Now()))
+		b.putJSON("dnsdir/host-last-hour.json", hoststats.Query(time.Now().Add(-time.Hour), time.Now()))
 	})
 	do(func() {
 		if m.tshootFn != nil {
 			for name, v := range m.tshootFn() {
-				b.putJSON("ntpdir/"+name+".json", v)
+				b.putJSON("dnsdir/"+name+".json", v)
 			}
 		}
 	})
 	do(func() {
 		res, err := ReadLog(LogQuery{Limit: tshootLogLines})
 		if err != nil {
-			b.fail("ntpdir/log.txt", err)
+			b.fail("dnsdir/log.txt", err)
 			return
 		}
 		var sb strings.Builder
@@ -286,14 +278,14 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 			sb.WriteString(l.Raw)
 			sb.WriteByte('\n')
 		}
-		b.putText("ntpdir/log.txt", sb.String())
+		b.putText("dnsdir/log.txt", sb.String())
 	})
 
 	// the machine
 	do(func() {
 		var sb strings.Builder
 		host, _ := os.Hostname()
-		fmt.Fprintf(&sb, "collected %s\nhost %s\nntpdir v%s\ngo %s %s/%s\nstate dir %s\nconfig %s\n\n", time.Now().Format(time.RFC3339), host, version(), runtime.Version(), runtime.GOOS, runtime.GOARCH, m.stateDir, m.confPath)
+		fmt.Fprintf(&sb, "collected %s\nhost %s\ndnsdir v%s\ngo %s %s/%s\nstate dir %s\nconfig %s\n\n", time.Now().Format(time.RFC3339), host, version(), runtime.Version(), runtime.GOOS, runtime.GOARCH, m.stateDir, m.confPath)
 		sb.WriteString("# uname -a\n" + tshootRun("uname", "-a"))
 		sb.WriteString("\n# /etc/os-release\n" + tshootFile("/etc/os-release"))
 		sb.WriteString("\n# virtualization\n" + tshootRun("systemd-detect-virt"))
@@ -304,26 +296,11 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 		b.putText("system/system.txt", sb.String())
 	})
 	do(func() {
-		b.putText("system/services.txt", "# systemctl status ntpdir frr\n"+tshootRun("systemctl", "status", "ntpdir", "frr", "--no-pager", "-l"))
+		b.putText("system/services.txt", "# systemctl status dnsdir frr\n"+tshootRun("systemctl", "status", "dnsdir", "frr", "--no-pager", "-l"))
 	})
+	do(func() { b.putText("dnsdir/goroutines.txt", goroutineDump()) })
 	do(func() {
-		u := "chrony"
-		if _, err := os.Stat("/usr/lib/systemd/system/chronyd.service"); err == nil {
-			u = "chronyd"
-		} else if _, err := os.Stat("/lib/systemd/system/chronyd.service"); err == nil {
-			u = "chronyd"
-		}
-		var sb strings.Builder
-		sb.WriteString("# systemctl status " + u + "\n" + tshootRun("systemctl", "status", u, "--no-pager", "-l"))
-		sb.WriteString("\n# systemctl cat " + u + " (the unit and its drop-ins)\n" + tshootRun("systemctl", "cat", u, "--no-pager"))
-		sb.WriteString("\n# journalctl -u " + u + " -n 100\n" + tshootRun("journalctl", "-u", u, "-n", "100", "--no-pager"))
-		sb.WriteString("\n# who holds udp/123\n" + tshootRun("ss", "-ulnp", "sport", "=", ":123"))
-		sb.WriteString("\n# chronyc tracking\n" + tshootRun("chronyc", "tracking"))
-		b.putText("system/chrony-service.txt", sb.String())
-	})
-	do(func() { b.putText("ntpdir/goroutines.txt", goroutineDump()) })
-	do(func() {
-		b.putText("system/journal-ntpdir.txt", tshootRun("journalctl", "-u", "ntpdir", "-n", "1500", "--no-pager"))
+		b.putText("system/journal-dnsdir.txt", tshootRun("journalctl", "-u", "dnsdir", "-n", "1500", "--no-pager"))
 	})
 	do(func() {
 		s := tshootRun("dmesg")
@@ -411,7 +388,7 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 	sort.Strings(names)
 	host, _ := os.Hostname()
 	var rd strings.Builder
-	fmt.Fprintf(&rd, "Troubleshooting bundle of %s, ntpdir v%s, collected %s.\n", host, version(), time.Now().Format(time.RFC3339))
+	fmt.Fprintf(&rd, "Troubleshooting bundle of %s, dnsdir v%s, collected %s.\n", host, version(), time.Now().Format(time.RFC3339))
 	fmt.Fprintf(&rd, "%d secrets were removed (passwords, the gateway key, tokens, join codes, private keys).\n\nFiles:\n", b.removed)
 	for _, n := range names {
 		fmt.Fprintf(&rd, "  %-45s %d bytes\n", n, len(b.files[n]))
@@ -436,11 +413,11 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 		if len(tgz) <= tshootNodeMax {
 			return tgz, nil
 		}
-		lg := files["ntpdir/log.txt"]
+		lg := files["dnsdir/log.txt"]
 		if len(lg) < 64<<10 {
 			return nil, fmt.Errorf("the bundle is %d bytes, more than the %d the cluster channel carries", len(tgz), tshootNodeMax)
 		}
-		files["ntpdir/log.txt"] = append([]byte("(older lines cut to fit)\n"), lg[len(lg)/2:]...)
+		files["dnsdir/log.txt"] = append([]byte("(older lines cut to fit)\n"), lg[len(lg)/2:]...)
 	}
 }
 
@@ -624,7 +601,7 @@ func (w *WebServer) handleTshootDownload(rw http.ResponseWriter, r *http.Request
 	}
 	host, _ := hostnameShort()
 	rw.Header().Set("Content-Type", "application/gzip")
-	rw.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", "ntpdir-tshoot-"+host+"-"+time.Now().Format("20060102-150405")+".tgz"))
+	rw.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", "dnsdir-tshoot-"+host+"-"+time.Now().Format("20060102-150405")+".tgz"))
 	rw.Write(b)
 }
 

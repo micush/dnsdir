@@ -24,7 +24,11 @@ import (
 
 // peerServerName is the one name every node identity certificate carries
 // (cluster.go); the URL host is never used, the dial goes to the peer's address.
-const peerServerName = "ntpdir-node"
+//
+// It is protocol identity and stays "ddgw-node": every identity certificate already issued carries
+// exactly this name, and a node verifies its peer against it, so renaming it would make nodes
+// of the new name and the old one (and every existing cluster) refuse each other.
+const peerServerName = "ddgw-node"
 
 var errPeerIdentity = errors.New("peer identity does not match the pinned fingerprint")
 
@@ -69,7 +73,7 @@ func learnPinnedCert(ctx context.Context, addr, fp string) (*x509.Certificate, e
 }
 
 // peerLookupTimeout bounds a name lookup for a peer. Nodes are usually reached by name, and the name is often
-// served by this very daemon's NTP gateway: with that gateway paused or restarting on every node the lookup
+// served by this very daemon's DNS gateway: with that gateway paused or restarting on every node the lookup
 // has nobody to ask, and waiting for it would make every peer look "not answering" for as long as the gateway
 // is down, though the peers themselves are fine.
 const peerLookupTimeout = 2 * time.Second
@@ -164,7 +168,7 @@ func dialPinnedAs(ctx context.Context, addr, fp string, me *tls.Certificate) (ne
 }
 
 // pinnedClient is an HTTP client for the peer at addr with fingerprint fp.
-// Requests are made to https://ntpdir-node/...; the connection goes to addr.
+// Requests are made to https://ddgw-node/...; the connection goes to addr.
 func pinnedClient(addr, fp string, timeout time.Duration) *http.Client {
 	return pinnedClientAs(addr, fp, timeout, nil)
 }

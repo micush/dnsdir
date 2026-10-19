@@ -1,25 +1,43 @@
 package main
 
 import (
+	"fmt"
 	"sort"
 	"time"
 )
 
 // Automatic failover: when the primary has been unreachable for failoverAfter and a strict majority of the members agree, the
 // best replica promotes itself.  A replica cut off from the others never has a majority, so it never promotes; one candidate
-// is chosen by a rule every member computes alike.  It is not a setting: it is on from three members.
+// is chosen by a rule every member computes alike.  The setting is "" (automatic: on from three members), "on" or "off".
 var failoverAfter = 5 * time.Minute
 
-// failoverEnabled says whether failover is in force: always automatic, and on from three members (with two there is no
-// majority, so only an administrator can promote).
-func failoverEnabled(members int) bool { return members >= 3 }
+func normalizeFailover(in string) (string, error) {
+	switch in {
+	case "", "auto", "automatic", "default":
+		return "", nil
+	case "on", "off":
+		return in, nil
+	}
+	return "", fmt.Errorf("failover must be auto, on or off")
+}
 
-// pickFailover chooses the replica that takes over when the primary is gone: reachable (this node counts), not installing an
+// failoverEnabled says whether failover is in force: "on" and "off" are as set, automatic is on from three members.
+func failoverEnabled(mode string, members int) bool {
+	switch mode {
+	case "on":
+		return true
+	case "off":
+		return false
+	}
+	return members >= 3
+}
+
+// pickFailover chooses the replica that takes over when the primary is gone: reachable (this node counts), not paused, not installing an
 // update or with one failed; the newest shared settings, then the newest version, then the lowest address.  "" when none.
 func pickFailover(peers []PeerView, primaryAddr string) string {
 	var c []PeerView
 	for _, p := range peers {
-		if p.Addr == primaryAddr || p.IsPrimary || !p.Reachable || p.Updating || p.UpdateFailed != "" {
+		if p.Addr == primaryAddr || p.IsPrimary || !p.Reachable || p.NodePaused || p.Updating || p.UpdateFailed != "" {
 			continue
 		}
 		c = append(c, p)
@@ -76,7 +94,7 @@ func (c *Cluster) failoverTick() {
 	down := time.Since(c.primaryDownSince)
 	c.mu.Unlock()
 	members := len(snap.Peers) + 1
-	if !failoverEnabled(members) || down < failoverAfter {
+	if !failoverEnabled(c.mg.upd.Intent().Failover, members) || down < failoverAfter {
 		return
 	}
 	votes := 1

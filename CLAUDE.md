@@ -1,9 +1,8 @@
 # Instructions for Claude working on this project
 
-AnyTime NTP Director (`ntpdir`) is a Go daemon: the Distributed Gateway Load Balancing Protocol (VIP
-shared by an AGC and AFNs through per-node virtual MACs) plus chrony, which answers
-NTP clients on every node; ntpdir tests the upstream servers and writes the healthy ones to chrony's `sourcedir`
-(client settings to its `confdir`). The installer sets chrony (4.0+) up. This file is a
+dnsdir (DNS Distributed Gateway) is a Go daemon: the Distributed Gateway Load Balancing Protocol (VIP
+shared by an AGC and AFNs through per-node virtual MACs) plus a DNS proxy that
+serves the VIP and forwards to the fastest healthy upstream. This file is a
 standing instruction from the project owner so it doesn't need repeating each
 conversation. If you (Claude) are asked to change this project, follow the
 process below without being told to.
@@ -12,7 +11,7 @@ process below without being told to.
 
 1. **Do the requested work** (code, docs, config, whatever was asked).
 **Layout.** The tarball has `README.md` and `LICENSE` at the top, `docs/` (CHANGELOG.md), `source/` (the Go
-module: `go.mod`, every `*.go`, `webui/`, `testdata/`, `ntpdir.conf.example`, and `VERSION`,
+module: `go.mod`, every `*.go`, `webui/`, `testdata/`, `dnsdir.conf.example`, and `VERSION`,
 which must sit next to the Go files because `version.go` embeds it), `contrib/`, `install.sh`,
 `get.sh` (the `curl | bash` web installer: fetches the latest tag from GitHub and runs its `install.sh`; keep it working with the tag/layout rules here),
 `uninstall.sh`, `QUICKSTART.md` (a GUI-first getting-started guide; keep it true when the GUI changes) and this file. All Go commands below run in `source/`; paths in this
@@ -22,16 +21,16 @@ file such as `webui/` and `testdata/` are under `source/`, and the CHANGELOG is 
 
 2. **Build and test before packaging, not after.** From `source/` run
    `gofmt -l .` (must print nothing), `go build -o /dev/null .` (a bare `go build ./...`
-   drops a `ntpdir` binary in the repo root — delete it if it appears), `go vet ./...` and
+   drops a `dnsdir` binary in the repo root — delete it if it appears), `go vet ./...` and
    `go test -race -count=1 ./...`. Don't skip straight to packaging on a
    change that could plausibly have broken something. Beyond the unit tests:
-   - **Touched the chrony sources, the pool or client settings?** Also do a live run with a real private `chronyd -x` (`NTPDIR_CHRONY_SOURCEDIR`, `NTPDIR_CHRONY_CONFDIR`, `NTPDIR_CHRONYC_ARGS="-h SOCKDIR/sock"`, `NTPDIR_SYSTEMCTL` shim; the socket dir must be mode 750) and stub NTP servers, and check that a dead, slow or falseticker server leaves `chronyc sources`. Also do a manual smoke run:
+   - **Touched the DNS proxy, pool or frontend?** Also do a manual smoke run:
      a config on `lo` (`"interface": "lo"`, a `127.0.0.x/8` VIP,
      `"neighbors": ["127.0.0.2"]` for unicast mode,
-     `listen_port` above 1024), two or three throwaway UDP NTP responders (stub servers answering a mode-4 packet
-     with different delays), then send an NTP request to the VIP, kill the fastest upstream and check
+     `listen_port` above 1024), two or three throwaway UDP DNS responders with
+     different delays, then query the VIP, kill the fastest upstream and check
      failover, edit the config (atomic rename) to check hot reload, and check
-     `ntpdir --show-ntp`. Use a scratch dir; don't `pkill -f` a pattern that also
+     `dnsdir --show-dns`. Use a scratch dir; don't `pkill -f` a pattern that also
      matches your own shell command line.
    - **Touched the wire format (`wire.go`)?** The golden vectors in
      `testdata/*.hex` are the reference encoding and the Go encoder
@@ -45,10 +44,10 @@ file such as `webui/` and `testdata/` are under `source/`, and the CHANGELOG is 
         expiry, config validation). Never weaken an auth/CSRF/lockout test to
         make it pass.
      2. **Real PAM check** (needs `libpam0g-dev`; `apt-get install` works in
-        the sandbox): `groupadd ntpdir`, two users via `useradd` (one in the
-        group, one not), `cp contrib/pam.d/ntpdir.debian /etc/pam.d/ntpdir`, run
+        the sandbox): `groupadd dnsdir`, two users via `useradd` (one in the
+        group, one not), `cp contrib/pam.d/dnsdir.debian /etc/pam.d/dnsdir`, run
         the daemon with a scratch config, then `curl -sk` the login on
-        `https://127.0.0.1:12380`: the member gets in; wrong password, a valid
+        `https://127.0.0.1:53853`: the member gets in; wrong password, a valid
         user outside the group, and root are all refused with the same
         message. Remove the test users/group afterwards.
      3. **UI**: `node --check webui/app.js` at minimum. For real logic, write a
@@ -70,9 +69,9 @@ file such as `webui/` and `testdata/` are under `source/`, and the CHANGELOG is 
     `mgmt.go`, `ops.go`, `cli.go`, `web_mgmt.go`)?** The in-process tests are
     necessary but were not enough: a live run found six real bugs they missed.
     So also run **two or three real daemons** from one scratch dir each
-    (`--config ./ntpdir.conf --state-dir ./state --status-socket ./s.sock`,
+    (`--config ./dnsdir.conf --state-dir ./state --status-socket ./s.sock`,
     `"groups": []` keeps it idle, give each distinct `web.listen`/`cluster.listen`/
-    `cluster.self` on 127.0.0.1 and a different `ntp.listen_port`, plus a
+    `cluster.self` on 127.0.0.1 and a different `dns.listen_port`, plus a
     throwaway PAM user as in the web check) and drive them through the CLI and
     the HTTPS API: join (`--yes --cluster-join`), a shared edit on a replica
     (must reach the primary and every node while per-node fields stay local),
@@ -82,29 +81,29 @@ file such as `webui/` and `testdata/` are under `source/`, and the CHANGELOG is 
     build, re-exec and reach `guard.json` state `ok` (about 20 s per node; the
     build needs go, gcc and the PAM headers). Use *relative* paths for
     `--state-dir`/`--config` once: that once broke the build. The daemons share
-    one `ntpdir` binary here, so the update rebuilds the file they all run — use
+    one `dnsdir` binary here, so the update rebuilds the file they all run — use
     a copy per node if that matters. Afterwards kill them, `ip link del
-    ntpdir1.1` (a config with no `groups` key still creates a default group and a macvlan; `"groups": []` is really empty),
-    remove the PAM user/group/`/etc/pam.d/ntpdir`. In the UI, look at the
+    dnsdir1.1` (a config with no `groups` key still creates a default group and a macvlan; `"groups": []` is really empty),
+    remove the PAM user/group/`/etc/pam.d/dnsdir`. In the UI, look at the
     History/Certificate/Cluster/Updates tabs against a live daemon in
     Chromium (light and dark) and click through them: jsdom missed a null list
     and a nested-array render bug that Chromium showed immediately. JSON lists
     the GUI maps over must serialise as `[]`, never `null`.
   - **Touched `install.sh` / `uninstall.sh`?** They run as root on other
      people's machines, so: `bash -n` + `shellcheck -x -S warning` clean; a
-     `--dry-run` per family using `NTPDIR_OS_RELEASE` with fake os-release files
+     `--dry-run` per family using `DNSDIR_OS_RELEASE` with fake os-release files
      (ubuntu, debian, linuxmint, fedora, rocky, almalinux, centos, arch,
      manjaro, endeavouros; alpine must be refused) plus
-     `NTPDIR_ASSUME_MISSING=gcc,pam,ip,tar,go,curl NTPDIR_FORCE_GO_DOWNLOAD=1`
+     `DNSDIR_ASSUME_MISSING=gcc,pam,ip,tar,go,curl DNSDIR_FORCE_GO_DOWNLOAD=1`
      (dnf needs a stub `dnf` in `PATH` on Debian-family sandboxes); then a real
-     run in the sandbox with a shim `systemctl` (`NTPDIR_SYSTEMCTL`,
-     `NTPDIR_FORCE_SYSTEMD=1`, `NTPDIR_SETTLE=0`): fresh install, same-version
+     run in the sandbox with a shim `systemctl` (`DNSDIR_SYSTEMCTL`,
+     `DNSDIR_FORCE_SYSTEMD=1`, `DNSDIR_SETTLE=0`): fresh install, same-version
      no-op, upgrade (copy the tree, bump its VERSION), forced-failure
      rollback, downgrade refusal, uninstall with and without `--purge`, a
      customised PAM file surviving. Test the Go download against a local
-     `python3 -m http.server` via `NTPDIR_GO_BASE_URL` (go.dev is unreachable
+     `python3 -m http.server` via `DNSDIR_GO_BASE_URL` (go.dev is unreachable
      from the sandbox), including a wrong-checksum refusal. Undo every sandbox
-     change afterwards (group, `/etc/pam.d/ntpdir`, `/var/lib/ntpdir`, `/run/ntpdir`, units).
+     change afterwards (group, `/etc/pam.d/dnsdir`, `/var/lib/dnsdir`, `/run/dnsdir`, units).
      Never let the uninstaller delete a config/cert without `--purge`, or a
      PAM file/group it didn't create.
    - **Touched the Users page (`users.go`, `users_cli.go`, `/api/users`)?** These run
@@ -118,9 +117,9 @@ file such as `webui/` and `testdata/` are under `source/`, and the CHANGELOG is 
      (`unshare -m`, `mount --bind etc2 /etc`), because on one host both would share one passwd file.
      Remove the test users, group and PAM file afterwards.
    - **Touched engine start-up, `startGroupWhenReadyLocked` or resume?** A gateway
-     that serves NTP must not join the election before its pool answers
+     that serves DNS must not join the election before its pool answers
      (`warmThenStart`); every path that starts engines for a group goes through
-     it. Live-check: pause, stop the stub NTP servers, resume — no `ntpdirN.M` link
+     it. Live-check: pause, stop the stub DNS servers, resume — no `dnsdirN.M` link
      and the circle says "starting" until the stubs return.
    - **Touched the node picker (`proxy.go`, `proxyPrefixes`, `LOCAL_API` in
      `app.js`, `/cluster/proxy`)?** A new `/api/` route is relayable only if its
@@ -135,7 +134,7 @@ file such as `webui/` and `testdata/` are under `source/`, and the CHANGELOG is 
    - **Touched the start gates (`startGroupWhenReadyLocked`, `onGatewaySubnet`)?**
      A gateway starts only when this node has an address in its VIP subnet (v4; v6 if it has a global v6 address)
      (grey "not running here" otherwise, never counted as serving) and then after
-     the NTP warm-up. Live-check with a VIP on a subnet eth0 is not in, then
+     the DNS warm-up. Live-check with a VIP on a subnet eth0 is not in, then
      `ip addr add` one and watch it start.
    - **Touched `power.go` / the Power page?** The tests fake `powerRun`/`powerStart`;
      for a live check put fake `shutdown`/`systemctl` scripts first in the daemon's
@@ -154,9 +153,9 @@ file such as `webui/` and `testdata/` are under `source/`, and the CHANGELOG is 
      independent of the election and must never restart a gateway (`restartDiffers`
      ignores them; `Reload` swaps them in place). Each is on `lo` with a 10 s lifetime
      renewed every 3 s, and is removed when the pool has no healthy server, the group
-     stops/pauses, or ntpdir stops. Live-check (the sandbox has no IPv6, so only v4):
+     stops/pauses, or dnsdir stops. Live-check (the sandbox has no IPv6, so only v4):
      `ip -4 addr show dev lo` shows it with `valid_lft 10sec`, a query to it is answered,
-     stopping the stub NTP servers withdraws it, `kill -9` removes it within ~10 s,
+     stopping the stub DNS servers withdraws it, `kill -9` removes it within ~10 s,
      SIGTERM at once; two clustered daemons (a gateway on a subnet the host is not
      on, so it only replicates) must agree after an edit on either.
    - **Touched BGP (`bgp.go`, `bgp_cli.go`, `VIEWS.anycast`/`VIEWS.anycastop`/`VIEWS.anycaststatus`)?** The settings are per node
@@ -168,23 +167,23 @@ file such as `webui/` and `testdata/` are under `source/`, and the CHANGELOG is 
      a network namespace running a peer `bgpd -n` (as user frr, config and run dir owned
      by frr), a gateway with an anycast address (a second FRR instance for the peer: `ip netns exec peer /usr/lib/frr/frrinit.sh start peer` with `/etc/frr/peer/{daemons,frr.conf,vtysh.conf}` owned by frr, `zebra`+`bgpd`+`bfdd` all on, and `no bgp ebgp-requires-policy` on the peer; BFD needs zebra). Check: session Established, BFD `up` at the peer, the peer
      receives the `/32`, a route the peer announces is NOT installed here, stopping the
-     stub NTP servers or `kill -9` withdraws it at the peer within ~10 s, clearing the AS (`--asn off`) removes the
+     stub DNS servers or `kill -9` withdraws it at the peer within ~10 s, clearing the AS (`--asn off`) removes the
      section and the marker (give it ~10 s). Restore `/etc/frr/frr.conf` and `daemons` afterwards (back them up
      first), remove the namespace and veth.
    - **Touched engine stop/leave or controller election?** A stopping controller
      sends `pktResign` and the best remaining node becomes controller at once and
      takes over the old controller's vMAC (`takeOverControllerSlotLocked`); update
      restarts wait for `waitUntilSafe`. Keep the tests in `engine_test.go` passing.
-   - **Touched the canvas (`canvas.go`, `VIEWS.topology`), per-group NTP pools
-     (`GroupConfig.NTP`, `Supervisor.refreshPool`) or the shared `NTPConfig` block?**
+   - **Touched the canvas (`canvas.go`, `VIEWS.topology`), per-group DNS pools
+     (`GroupConfig.DNS`, `Supervisor.refreshPool`) or `DNSConfig.ServerQueries`?**
      The colours are computed once, in `buildCanvas` (GUI and `--canvas` both
      use it) — never re-derive status in JavaScript. Anything a form or the
-     Settings page rebuilds from fields must carry `groups[].ntp` and
-     the top-level `ntp` fields through untouched (the page once could have dropped
+     Settings page rebuilds from fields must carry `groups[].dns` and
+     `dns.server_queries` through untouched (the page once could have dropped
      them). An explicit `"groups": []` must stay empty; only a *missing* key
      means the default group. Live-check in Chromium: draw a gateway with
-     servers (every edit saves at once — no Apply), watch the colours (use stub NTP servers on
-     127.0.0.2-4 that answer or send a kiss-o'-death), delete a server/gateway with
+     servers and domains (every edit saves at once — no Apply), watch the colours (use stub DNS servers on
+     127.0.0.2-4 that answer or SERVFAIL), delete a domain/server/gateway with
      the Delete key, then edit a field on the Settings page (it saves on its own — no
      Save/Apply button; check the file changed) and confirm the
      drawing is unchanged; two-node cluster: add on the primary, edit on a
@@ -197,7 +196,7 @@ file such as `webui/` and `testdata/` are under `source/`, and the CHANGELOG is 
 3. **Cross-compile every release**, not just once — a later change can
    silently break a platform nothing here runs. For each of `linux/amd64`,
    `linux/arm64`, `linux/arm`, `linux/386`, `linux/riscv64` run
-   `GOOS=<os> GOARCH=<arch> go build -o /dev/null .`. ntpdir is Linux-only
+   `GOOS=<os> GOARCH=<arch> go build -o /dev/null .`. dnsdir is Linux-only
    (macvlan, AF_PACKET, inotify); don't add other OSes. `linux/mips*` compiles
    but `SO_REUSEPORT` (hard-coded to 15 in `util.go`) is wrong there — don't
    list it as supported unless that constant is made per-arch first. If a new
@@ -214,19 +213,18 @@ file such as `webui/` and `testdata/` are under `source/`, and the CHANGELOG is 
    stays healthy.
 4. **Bump `VERSION`.** It's a single plain integer (no `v` prefix, no semver)
    at `source/VERSION`, embedded into the binary (`version.go`,
-   `ntpdir --version`). Increment it by exactly 1 (the numbering restarted at 1 for the NTP Director). `TestVersionIsPlainInteger`
+   `dnsdir --version`). Increment it by exactly 1. `TestVersionIsPlainInteger`
    fails if the file is malformed — fix the file, don't weaken the test.
 5. **Append a new entry to the top of `docs/CHANGELOG.md`**, immediately below the
    `# Changelog` header (and any `## [Unreleased]` line), in the style of the
-   existing entries (the history before v1 was removed on purpose; v1 is the first entry): `## [vN] - YYYY-MM-DD — <short summary>` where `N` is the
+   existing entries: `## [vN] - YYYY-MM-DD — <short summary>` where `N` is the
    new VERSION and the date is the date of the change, then `### Added` /
    `### Fixed` / `### Changed` sections as appropriate, plus `### Verified`
    and `### Not verified`. Say what changed, why, and exactly what was run.
    Do not rewrite or renumber older entries.
-   New gateways are numbered from 100 (`firstGroupID`); keep tests that build a config by hand on explicit group numbers.
-6. **Repackage the whole project into a `.tgz`** named `ntpdir_v<VERSION>.tgz`
-   with the project directory itself (`ntpdir/`) at the top of the archive, so it
-   re-extracts to `ntpdir/`. Source only: no built binaries, no scratch files,
+6. **Repackage the whole project into a `.tgz`** named `dnsdir_v<VERSION>.tgz`
+   with the project directory itself (`dnsdir/`) at the top of the archive, so it
+   re-extracts to `dnsdir/`. Source only: no built binaries, no scratch files,
    no `.tmp` leftovers (check `tar tzf` before handing it back).
 7. **Hand the `.tgz` back** as the deliverable. Don't just describe the
    changes — the person expects a fresh archive every time, without having to
@@ -267,10 +265,16 @@ README), so the version and changelog describe the final tree.
 - Dependencies: the project is stdlib-only on purpose (inotify, AF_PACKET and
   multicast use `syscall` directly). Don't add a module for something small;
   if one is truly warranted, say so in the changelog.
-- Name: the project is `ntpdir`. The wire protocol and packet magic are protocol
-  identity, not branding — they stay as they are. The default HMAC key is `"ntpdir"`
-  (it was `"dgw"` in the DNS Director; a config that sets a key explicitly is unaffected). Don't rename them as part of a
-  branding cleanup.
+- Name: the project is `dnsdir` (called `ddgw` before v367; the GitHub repo is `micush/dnsdir`).
+  The wire protocol, packet magic, the HMAC key of a gateway whose key is empty (`"dgw"`, `legacyGroupKey`; new gateways start with `"dnsdir"`, `defaultGroupKey`), the `00:1a:7c` virtual-MAC
+  prefix, the `ddgw-join-v1` join-code prefix, the `ddgw-cluster-v1` signature label, the `ddgw-node` certificate name (`peerServerName`) and the
+  `X-Ddgw-*` cluster headers are protocol identity, not branding — they stay as they are so
+  existing nodes keep interoperating. Don't rename them as part of a branding cleanup.
+  Old-name compatibility that must stay while ddgw nodes can still exist: `migrateOldInstall`
+  (`renamemigrate.go`, also run by `install.sh` through the hidden `--migrate-old-install`),
+  `canonicalConf` mapping the old config paths, the `module ddgw` words in a `go.mod` comment
+  and `--version` printing `ddgw vN` when the binary is named `ddgw-v…` (both are checked by
+  an updater from before the rename), and the old-name `ddgw` skip in `finishSource`.
 - Web GUI invariants (don't regress without saying so in the changelog):
   login = PAM success **and** membership of the configured group; one generic
   error for every login failure; sessions are random tokens in HttpOnly,
@@ -286,7 +290,7 @@ README), so the version and changelog describe the final tree.
   expire after an hour; promotion is always an explicit admin action (never
   automatic); only the primary applies shared-config changes; a GUI
   certificate change must not restart the listener or drop sessions; an update
-  never replaces the running binary without keeping `ntpdir.prev` and the boot
+  never replaces the running binary without keeping `dnsdir.prev` and the boot
   guard (auto rollback after repeated failed starts). The management layer
   stays independent of the AGC/AFN election.
 - Election ties compare IPs as text; this is part of the protocol. Don't "fix" that

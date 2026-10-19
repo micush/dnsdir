@@ -205,7 +205,7 @@ func (m *Mgmt) clusterQStatsGW(ctx context.Context, actor string, from, to time.
 		keep = gatewayNodes(g)
 	}
 	q := url.Values{"from": {strconv.FormatInt(from.Unix(), 10)}, "to": {strconv.FormatInt(to.Unix(), 10)},
-		"outcome": {f.Outcome}, "client": {f.Client}, "server": {f.Server}, "cmatch": {f.CMatch}, "smatch": {f.SMatch}}
+		"rcode": {f.Rcode}, "client": {f.Client}, "domain": {f.Domain}, "cmatch": {f.CMatch}, "dmatch": {f.DMatch}}
 	parts, infos := clusterGatherSel(ctx, m, proxyReq{User: actor, Method: "GET", Path: "/api/qstats?" + q.Encode()}, clusterStatsTimeout,
 		func() (*QStatsResult, error) { return qstats.Query(from, to, f), nil }, keep)
 	if len(parts) == 0 {
@@ -365,11 +365,12 @@ func mergeQStats(parts []clusterPart[QStatsResult], infos []ClusterNodeInfo) *QS
 		starts[i], lens[i] = p.R.Start, len(p.R.Total)
 	}
 	start, n := commonSpan(starts, lens, step)
-	r := &QStatsResult{Outcome: use[0].R.Outcome, Client: use[0].R.Client, Server: use[0].R.Server,
+	r := &QStatsResult{Rcode: use[0].R.Rcode, Client: use[0].R.Client, Domain: use[0].R.Domain,
 		Start: start, Step: step, From: use[0].R.From, To: use[0].R.To, Since: use[0].R.Since,
-		Total: make([]uint64, n), Answered: make([]uint64, n), Failed: make([]uint64, n), KoD: make([]uint64, n), Refused: make([]uint64, n),
-		Versions: []NameCount{}, Families: []NameCount{}, Clients: []NameCount{}, Servers: []NameCount{}}
-	versions, families, clients, servers := map[string]*NameCount{}, map[string]*NameCount{}, map[string]*NameCount{}, map[string]*NameCount{}
+		Total: make([]uint64, n), NoError: make([]uint64, n), ServFail: make([]uint64, n), NXDomain: make([]uint64, n),
+		Refused: make([]uint64, n), Other: make([]uint64, n), Updates: make([]uint64, n),
+		Types: []NameCount{}, Protos: []NameCount{}, Clients: []NameCount{}, Domains: []NameCount{}}
+	types, protos, clients, domains := map[string]*NameCount{}, map[string]*NameCount{}, map[string]*NameCount{}, map[string]*NameCount{}
 	maxClients := 0
 	for _, p := range use {
 		q := p.R
@@ -391,36 +392,40 @@ func mergeQStats(parts []clusterPart[QStatsResult], infos []ClusterNodeInfo) *QS
 			}
 		}
 		add(r.Total, q.Total)
-		add(r.Answered, q.Answered)
-		add(r.Failed, q.Failed)
-		add(r.KoD, q.KoD)
+		add(r.NoError, q.NoError)
+		add(r.ServFail, q.ServFail)
+		add(r.NXDomain, q.NXDomain)
 		add(r.Refused, q.Refused)
+		add(r.Other, q.Other)
+		add(r.Updates, q.Updates)
 		s := q.Sums
-		r.Sums.Total, r.Sums.Answered, r.Sums.Failed = r.Sums.Total+s.Total, r.Sums.Answered+s.Answered, r.Sums.Failed+s.Failed
-		r.Sums.KoD, r.Sums.Refused = r.Sums.KoD+s.KoD, r.Sums.Refused+s.Refused
+		r.Sums.Total, r.Sums.NoError, r.Sums.ServFail = r.Sums.Total+s.Total, r.Sums.NoError+s.NoError, r.Sums.ServFail+s.ServFail
+		r.Sums.NXDomain, r.Sums.Refused, r.Sums.Other = r.Sums.NXDomain+s.NXDomain, r.Sums.Refused+s.Refused, r.Sums.Other+s.Other
+		r.Sums.Updates, r.Sums.UpdFail = r.Sums.Updates+s.Updates, r.Sums.UpdFail+s.UpdFail
+		r.Sums.CacheHit, r.Sums.CacheMis = r.Sums.CacheHit+s.CacheHit, r.Sums.CacheMis+s.CacheMis
 		if s.Clients > maxClients {
 			maxClients = s.Clients
 		}
 		addGuard(&r.Guard, q.Guard)
-		addCounts(versions, q.Versions)
-		addCounts(families, q.Families)
+		addCounts(types, q.Types)
+		addCounts(protos, q.Protos)
 		addCounts(clients, q.Clients)
-		addCounts(servers, q.Servers)
+		addCounts(domains, q.Domains)
 	}
-	r.Versions = sortedCounts(versions, 0)
-	for _, name := range []string{"IPv4", "IPv6"} {
-		if e := families[name]; e != nil {
-			r.Families = append(r.Families, *e)
+	r.Types = sortedCounts(types, 0)
+	for _, name := range protoOrder {
+		if e := protos[name]; e != nil {
+			r.Protos = append(r.Protos, *e)
 		}
 	}
-	nc, nd := qsKeepResult, qsKeepResult // a picked client or server lists everything it has
-	if parts[0].R.Server != "" {
+	nc, nd := qsKeepResult, qsKeepResult // a picked client or domain lists everything it has
+	if parts[0].R.Domain != "" {
 		nc = qsKeepPicked
 	}
 	if parts[0].R.Client != "" {
 		nd = qsKeepPicked
 	}
-	r.Clients, r.Servers = sortedCounts(clients, nc), sortedCounts(servers, nd)
+	r.Clients, r.Domains = sortedCounts(clients, nc), sortedCounts(domains, nd)
 	seen := len(clients)
 	if _, ok := clients[qsOthers]; ok {
 		seen--

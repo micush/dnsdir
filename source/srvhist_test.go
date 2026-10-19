@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"testing"
 	"time"
 )
@@ -20,7 +22,7 @@ func seriesFor(h *srvHistory, addr string) *srvSeries {
 
 func TestServerHistoryRecordsAndSummarises(t *testing.T) {
 	h := newTestHistory()
-	s := seriesFor(h, "192.0.2.1:123")
+	s := seriesFor(h, "192.0.2.1:53")
 	base := time.Date(2026, 10, 3, 12, 0, 30, 0, time.UTC)
 	// minute 12:00: 100 answers, 1 failure, 5 probes (1 failed), latencies 1 ms and 3 ms
 	for i := 0; i < 100; i++ {
@@ -39,7 +41,7 @@ func TestServerHistoryRecordsAndSummarises(t *testing.T) {
 	if n := len(s.slots); n != 1 {
 		t.Fatalf("%d slots, want 1 (an idle minute leaves a gap)", n)
 	}
-	r, err := h.Query("192.0.2.1:123", base.Add(-30*time.Minute), base.Add(10*time.Minute))
+	r, err := h.Query("192.0.2.1:53", base.Add(-30*time.Minute), base.Add(10*time.Minute))
 	if err != nil || !r.Known {
 		t.Fatalf("query: %v known=%v", err, r.Known)
 	}
@@ -72,7 +74,7 @@ func TestServerHistoryRecordsAndSummarises(t *testing.T) {
 	}
 	// the minute under way is included
 	s.addOK()
-	if r2, _ := h.Query("192.0.2.1:123", time.Now().Add(-5*time.Minute), time.Now().Add(time.Minute)); r2.Answered != 1 {
+	if r2, _ := h.Query("192.0.2.1:53", time.Now().Add(-5*time.Minute), time.Now().Add(time.Minute)); r2.Answered != 1 {
 		t.Fatalf("the current minute must show: %+v", r2)
 	}
 }
@@ -128,14 +130,42 @@ func TestServerHistoryNilSafeAndShared(t *testing.T) {
 	s.addPrOK()
 	s.addPrFail()
 	s.lat(time.Millisecond) // a hand-made Server has no history: none of these may panic
-	if srvhist.series("shared:123") != srvhist.series("shared:123") {
+	if srvhist.series("shared:53") != srvhist.series("shared:53") {
 		t.Fatal("two pools listing one address must share its history")
+	}
+}
+
+// A real pool feeds the history: probes and live answers of a fake upstream show up, and a SERVFAIL counts as a loss.
+func TestPoolFeedsServerHistory(t *testing.T) {
+	up := newFakeDNS(t)
+	p := NewPool(testDNSCfg(up.addr))
+	p.ProbeNow(context.Background())
+	q, _ := buildQuery(7, "hist.example", "A")
+	for i := 0; i < 20; i++ {
+		if _, err := p.Forward(context.Background(), q, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r, _ := srvhist.Query(up.addr, time.Now().Add(-time.Minute), time.Now().Add(time.Minute))
+	if r.Answered < 20 || r.ProbesOK < 1 || r.LossPct != 0 || !r.Known {
+		t.Fatalf("history after traffic: %+v", r)
+	}
+	up.mode.Store(3) // SERVFAIL
+	cfg2 := testDNSCfg(up.addr)
+	cfg2.Cache = false
+	p2 := NewPool(cfg2)
+	p2.ProbeNow(context.Background())
+	before := r.Failed + r.ProbesBad
+	p2.Forward(context.Background(), q, false)
+	r2, _ := srvhist.Query(up.addr, time.Now().Add(-time.Minute), time.Now().Add(time.Minute))
+	if r2.Failed+r2.ProbesBad <= before || r2.LossPct <= 0 {
+		t.Fatalf("a server answering SERVFAIL must show loss: %+v", r2)
 	}
 }
 
 func TestServerHistoryPersistRoundTrip(t *testing.T) {
 	h := newTestHistory()
-	s := seriesFor(h, "192.0.2.9:123")
+	s := seriesFor(h, "192.0.2.9:53")
 	base := time.Now().Add(-10 * time.Minute)
 	for i := 0; i < 3; i++ {
 		for j := 0; j <= i; j++ {
@@ -164,7 +194,7 @@ func TestServerHistoryPersistRoundTrip(t *testing.T) {
 	if n := h2.restore(recs[0]); n != 0 {
 		t.Fatalf("restoring twice added %d", n)
 	}
-	a, b := h.m["192.0.2.9:123"].slots[1:], h2.m["192.0.2.9:123"].slots
+	a, b := h.m["192.0.2.9:53"].slots[1:], h2.m["192.0.2.9:53"].slots
 	if len(a) != len(b) {
 		t.Fatalf("%d vs %d", len(a), len(b))
 	}
@@ -181,7 +211,7 @@ func TestServerHistoryInStatsFile(t *testing.T) {
 	defer func() { srvhist = old }()
 	srvhist = newTestHistory()
 	srvhist.start.Do(func() {})
-	s := seriesFor(srvhist, "192.0.2.77:123")
+	s := seriesFor(srvhist, "192.0.2.77:53")
 	s.slots = []srvSlot{{Min: time.Now().Unix()/60 - 5, OK: 7, Fail: 1, LatSum: 9000, LatN: 3, LatMaxU: 5000}}
 	dir := t.TempDir()
 	if err := savePersisted(dir); err != nil {
@@ -192,14 +222,14 @@ func TestServerHistoryInStatsFile(t *testing.T) {
 	if _, err := loadPersisted(dir); err != nil {
 		t.Fatal(err)
 	}
-	got := srvhist.m["192.0.2.77:123"]
+	got := srvhist.m["192.0.2.77:53"]
 	if got == nil || len(got.slots) != 1 || got.slots[0].OK != 7 || got.slots[0].LatMaxU != 5000 {
 		t.Fatalf("not restored: %+v", got)
 	}
 }
 
-// A gateway's series: client answers and errors, availability samples; a server's: probes and the offset they found.
-func TestGatewayAndServerHistory(t *testing.T) {
+// A gateway's series: client answers and errors, cache hits, availability samples; a domain's: probes only.
+func TestGatewayAndDomainHistory(t *testing.T) {
 	h := newTestHistory()
 	gw := seriesFor(h, gwKey(7))
 	for i := 0; i < 90; i++ {
@@ -208,6 +238,9 @@ func TestGatewayAndServerHistory(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		gw.addFail()
 	}
+	for i := 0; i < 60; i++ {
+		gw.addHit()
+	}
 	for i := 0; i < 27; i++ {
 		gw.avail(true)
 	}
@@ -215,43 +248,41 @@ func TestGatewayAndServerHistory(t *testing.T) {
 		gw.avail(false)
 	}
 	gw.lat(2 * time.Millisecond)
-	sk := "192.0.2.1:123"
-	sv := seriesFor(h, sk)
-	sv.addPrOK()
-	sv.addPrOK()
-	sv.addPrFail()
-	sv.lat(4 * time.Millisecond)
-	sv.off(3 * time.Millisecond)
-	sv.off(5 * time.Millisecond)
+	dk := domKey("192.0.2.1:53", "Example.COM.", "a")
+	if dk != "dom:192.0.2.1:53|example.com|A" {
+		t.Fatalf("domain key %q", dk)
+	}
+	dm := seriesFor(h, dk)
+	dm.addPrOK()
+	dm.addPrOK()
+	dm.addPrFail()
+	dm.lat(4 * time.Millisecond)
 	base := time.Now()
 	h.flush(base.Add(time.Minute))
 	r, err := h.Query(gwKey(7), base.Add(-10*time.Minute), base.Add(5*time.Minute))
 	if err != nil || !r.Known || r.Kind != "gateway" {
 		t.Fatalf("gateway: %+v %v", r, err)
 	}
-	if r.Answered != 90 || r.Failed != 10 || r.LossPct != 10 || r.AvailPct != 90 || r.AvgMS != 2 {
+	if r.Answered != 90 || r.Failed != 10 || r.Hits != 60 || r.LossPct != 10 || r.AvailPct != 90 || r.AvgMS != 2 {
 		t.Fatalf("gateway totals: %+v", r)
 	}
-	var qps, av float64 = -1, -1
+	var qps, hit, av float64 = -1, -1, -1
 	for i := range r.QPS {
 		if r.QPS[i] >= 0 {
-			qps, av = r.QPS[i], r.Avail[i]
+			qps, hit, av = r.QPS[i], r.HitQPS[i], r.Avail[i]
 		}
 	}
-	if qps <= 0 || av != 90 {
-		t.Fatalf("buckets: qps %v avail %v", qps, av)
+	if qps <= 0 || hit <= 0 || hit >= qps || av != 90 {
+		t.Fatalf("buckets: qps %v hit %v avail %v", qps, hit, av)
 	}
-	d, _ := h.Query(sk, base.Add(-10*time.Minute), base.Add(5*time.Minute))
-	if !d.Known || d.Kind != "server" || d.ProbesOK != 2 || d.ProbesBad != 1 || d.LossPct < 33 || d.LossPct > 34 {
-		t.Fatalf("server: %+v", d)
+	d, _ := h.Query(dk, base.Add(-10*time.Minute), base.Add(5*time.Minute))
+	if !d.Known || d.Kind != "domain" || d.ProbesOK != 2 || d.ProbesBad != 1 || d.LossPct < 33 || d.LossPct > 34 {
+		t.Fatalf("domain: %+v", d)
 	}
-	if d.AvgOffsetMS == nil || *d.AvgOffsetMS != 4 {
-		t.Fatalf("offset: %v", d.AvgOffsetMS)
-	}
-	if u, _ := h.Query("192.0.2.200:123", base.Add(-time.Minute), base.Add(time.Minute)); u.Known || u.Kind != "server" || u.AvailPct != -1 {
+	if u, _ := h.Query("192.0.2.200:53", base.Add(-time.Minute), base.Add(time.Minute)); u.Known || u.Kind != "server" || u.AvailPct != -1 {
 		t.Fatalf("unknown key: %+v", u)
 	}
-	// the counters survive the stats file
+	// the new counters survive the stats file
 	var recs []pRec
 	h.persistTo(func(r pRec) error { recs = append(recs, r); return nil })
 	h2 := newTestHistory()
@@ -260,15 +291,41 @@ func TestGatewayAndServerHistory(t *testing.T) {
 		h2.restore(rc)
 	}
 	g2, _ := h2.Query(gwKey(7), base.Add(-10*time.Minute), base.Add(5*time.Minute))
-	if g2.Answered != 90 || g2.AvailPct != 90 {
+	if g2.Hits != 60 || g2.AvailPct != 90 {
 		t.Fatalf("restored gateway: %+v", g2)
-	}
-	s2, _ := h2.Query(sk, base.Add(-10*time.Minute), base.Add(5*time.Minute))
-	if s2.AvgOffsetMS == nil || *s2.AvgOffsetMS != 4 {
-		t.Fatalf("restored offset: %v", s2.AvgOffsetMS)
 	}
 }
 
+// The front end feeds its gateway's series: answers, SERVFAILs and cache hits.
+func TestFrontendFeedsGatewayHistory(t *testing.T) {
+	up := newFakeDNS(t)
+	cfg := testDNSCfg(up.addr)
+	p := NewPool(cfg)
+	p.ProbeNow(context.Background())
+	f := NewDNSFrontend(netip.MustParseAddr("127.0.0.1"), 0, func() *Pool { return p })
+	f.ctx, f.cancel = context.WithCancel(context.Background())
+	defer f.cancel()
+	s := &srvSeries{}
+	f.gw = s
+	q, _ := buildQuery(9, "gw.example", "A")
+	client := netip.MustParseAddr("127.0.0.1")
+	for i := 0; i < 16; i++ {
+		f.resolve(q, false, client)
+	}
+	sl := s.take(false)
+	if sl.OK != 16 || sl.Fail != 0 {
+		t.Fatalf("answers not counted: %+v", sl)
+	}
+	if p.cache != nil && sl.Hit < 10 {
+		t.Fatalf("cache hits not counted: %+v", sl)
+	}
+	if sl.LatN != 2 { // one answer in eight is timed
+		t.Fatalf("latency samples: %d", sl.LatN)
+	}
+}
+
+// Two nodes that each saw traffic in different minutes make one graph with no hole; averages are weighted by the samples,
+// the worst is the worst of both, counts add up, and a range that does not line up is refused.
 func TestGatewayHistoryMergesNodes(t *testing.T) {
 	ha, hb := newTestHistory(), newTestHistory()
 	a, b := seriesFor(ha, gwKey(7)), seriesFor(hb, gwKey(7))
@@ -337,8 +394,8 @@ func TestClusterHistHandler(t *testing.T) {
 	if code, r := ask(gwKey(9991)); code != 200 || !r.Known || len(r.B) == 0 || r.Key != gwKey(9991) {
 		t.Fatalf("gateway: %d %+v", code, r)
 	}
-	srvhist.series("192.0.2.1:123").addPrOK()
-	if code, r := ask("192.0.2.1:123"); code != 200 || !r.Known {
+	srvhist.series("192.0.2.1:53").addPrOK()
+	if code, r := ask("192.0.2.1:53"); code != 200 || !r.Known {
 		t.Errorf("a server's history is answered too: %d %+v", code, r)
 	}
 	if code, _ := ask(""); code != http.StatusBadRequest {

@@ -24,10 +24,10 @@ func rawPeerCall(t *testing.T, secret []byte, to *tnode, claim ClusterPeer, me *
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("X-Ntpdir-Peer", peerHdr)
-	req.Header.Set("X-Ntpdir-Ts", ts)
-	req.Header.Set("X-Ntpdir-Nonce", nonce)
-	req.Header.Set("X-Ntpdir-Sig", signMessage(secret, peerHdr, ts, nonce, "GET", path, nil))
+	req.Header.Set("X-Ddgw-Peer", peerHdr)
+	req.Header.Set("X-Ddgw-Ts", ts)
+	req.Header.Set("X-Ddgw-Nonce", nonce)
+	req.Header.Set("X-Ddgw-Sig", signMessage(secret, peerHdr, ts, nonce, "GET", path, nil))
 	res, err := pinnedClientAs(to.addr, to.mg.cl.node.Fingerprint(), 5*time.Second, me).Do(req)
 	if err != nil {
 		t.Fatal(err)

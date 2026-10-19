@@ -4274,7 +4274,7 @@
   // One node: a tcpdump-like capture on the node picked in the Node menu, shown live and downloadable as a .tgz (one .pcap in it).
   // Cluster: the same capture on every node at once for a chosen time, one .pcap per node in a .tgz.
   VIEWS.capture = (() => {
-    let status, iface, filter, info, box, startBtn, stopBtn, dlBtn, ifs = null, cursor = 0, shown = 0, last = null, running = false;
+    let status, iface, filter, info, box, startBtn, dlBtn, ifs = null, cursor = 0, shown = 0, last = null, running = false;
     let job = null, jobBox, durSel, goBtn, dlJob;
     const ROWS = 1500;
     const cluster = () => state.target === CLUSTER;
@@ -4304,7 +4304,7 @@
     }
     function empty(text) { clear(box).append(h("div", { class: "empty" }, text)); shown = 0; }
     function setButtons() {
-      stopBtn.disabled = !running;
+      startBtn.textContent = running ? "Stop" : "Start";   // one button: it starts a capture, and stops a running one
       dlBtn.disabled = !(last && last.count > 0);
     }
     async function refresh(full) {
@@ -4324,6 +4324,7 @@
       setButtons();
     }
     async function start() {
+      if (running) return;   // Start is greyed out while capturing; Enter in the filter box does nothing either
       try {
         await api("POST", "/api/capture/start", { iface: iface.value, filter: filter.value.trim() });
         say(status, "ok"); cursor = 0; last = null; empty("Waiting for packets…");
@@ -4388,13 +4389,12 @@
           await pollJob().catch(fail(status));
           return;
         }
-        startBtn = h("button", { class: "btn primary", type: "button", onclick: start }, "Start");
-        stopBtn = h("button", { class: "btn", type: "button", disabled: true, onclick: stop }, "Stop");
+        startBtn = h("button", { class: "btn primary", type: "button", onclick: () => (running ? stop() : start()) }, "Start");
         dlBtn = h("button", { class: "btn", type: "button", disabled: true, onclick: () => apiDownload("/api/capture/download", "dnsdir-capture.tgz").catch(fail(status)) }, "Download .tgz");
         info = h("div", { class: "hint nomargin" });
         box = h("div", { class: "logbox capbox", tabindex: "0", role: "log", "aria-label": "Captured packets" });
         main.append(status, section("Packet capture",
-          h("div", { class: "toolbar tight logbar" }, iface, filter, startBtn, stopBtn,
+          h("div", { class: "toolbar tight logbar" }, iface, filter, startBtn,
             h("button", { class: "btn", type: "button", onclick: clearAll }, "Clear"), dlBtn),
           box, info));
         empty("Not capturing. Choose an interface and press Start.");

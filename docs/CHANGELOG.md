@@ -1,5 +1,10 @@
 # Changelog
 
+## [v485] - 2026-10-19 — One Start/Stop button in Capture
+
+### Changed
+- **Monitor ▸ Capture has one button** instead of two: it reads Start and starts a capture, and reads Stop while one runs and stops it. Pressing Enter in the filter box starts a capture but never restarts a running one.
+
 ## [v484] - 2026-10-19 — Capture from a server given by name
 
 ### Changed

@@ -1,5 +1,10 @@
 # Changelog
 
+## [v479] - 2026-10-19 — The scheduler's "Only in" months on two lines
+
+### Fixed
+- **The month boxes of a scheduled task ("Only in") were in one long column**: a general style that gives a tick box a whole row applied to them too. They are now six to a line, January to June on the first and July to December on the second.
+
 ## [v478] - 2026-10-18 — One BGP switch, in Operate only
 
 ### Removed

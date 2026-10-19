@@ -1,5 +1,11 @@
 # Changelog
 
+## [v477] - 2026-10-18 — BGP on/off switch in Configure ▸ Anycast
+
+### Added
+- **An Enabled box in Configure ▸ Anycast** turns BGP off and on for this node, with a confirmation when switching it off. It does what Disable / Enable BGP under Operate ▸ Anycast does: every setting is kept, no session is started and no anycast address is announced. It is greyed out until a local AS number is set.
+- **An Enabled box on each neighbor's row** shuts that one session down and back up (a confirmation when switching it off), the same as Disable / Enable in Operate ▸ Anycast. The neighbor and its settings stay; editing a neighbor does not change whether it is enabled.
+
 ## [v476] - 2026-10-18 — Gateways are listed alphabetically
 
 ### Changed

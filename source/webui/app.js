@@ -4401,7 +4401,17 @@
         save(next);
       };
       for (const el of [as, desc, pw, mh]) el.addEventListener("change", commit);
-      return h("tr", { "data-peer": n.peer }, h("td", { class: "mono" }, n.peer), h("td", {}, as), h("td", {}, desc), h("td", {}, withEye(pw)), h("td", {}, mh));
+      // on/off for this one neighbor (the same as Operate ▸ Anycast): off shuts the session down and keeps the neighbor
+      const on = h("input", { type: "checkbox", checked: !n.disabled, disabled: !!cfg.disabled, title: cfg.disabled ? "BGP is switched off on this node" : "Off: the session is shut down and nothing is announced to this neighbor", "aria-label": "Neighbor " + n.peer + " enabled" });
+      on.addEventListener("change", () => {
+        if (!on.checked && !confirm("Disable neighbor " + n.peer + "?\n\nThe session is shut down and nothing is announced to it. The neighbor is kept.")) { on.checked = true; return; }
+        on.disabled = true;
+        chain = chain.then(async () => {
+          try { await api("POST", "/api/bgp/operate", { peer: n.peer, enabled: on.checked }); say(status, "ok"); } catch (e) { fail(status)(e); }
+          await load();
+        });
+      });
+      return h("tr", { "data-peer": n.peer }, h("td", { class: "mono" }, n.peer), h("td", {}, as), h("td", {}, desc), h("td", {}, withEye(pw)), h("td", {}, mh), h("td", {}, on));
     }
 
     // the new row: becomes a neighbor once it has an address and an AS
@@ -4419,7 +4429,7 @@
       };
       for (const el of [peer, as, desc, pw, mh]) el.addEventListener("change", commit);
       draft = { peer, focus: () => peer.focus() };
-      return h("tr", { "data-peer": "" }, h("td", {}, peer), h("td", {}, as), h("td", {}, desc), h("td", {}, withEye(pw)), h("td", {}, mh));
+      return h("tr", { "data-peer": "" }, h("td", {}, peer), h("td", {}, as), h("td", {}, desc), h("td", {}, withEye(pw)), h("td", {}, mh), h("td", {}));
     }
 
     function drawNeighbors() {
@@ -4439,13 +4449,13 @@
       const body = h("tbody", {});
       cfg.neighbors.forEach((n, i) => { const tr = neighborRow(n, i); body.append(tr); rows.set(n.peer, tr); });
       draft = null;
-      if (!cfg.neighbors.length) body.append(h("tr", {}, h("td", { colspan: 4, class: "empty" }, "No neighbors yet. Press + to add one.")));
+      if (!cfg.neighbors.length) body.append(h("tr", {}, h("td", { colspan: 6, class: "empty" }, "No neighbors yet. Press + to add one.")));
       for (const [k, tr] of rows) { const pick = () => select(k); tr.addEventListener("click", pick); tr.addEventListener("focusin", pick); }
       if (sel !== null && !rows.has(sel)) sel = null;
       clear(nbrs).append(section("Neighbors",
         h("div", { class: "toolbar tight" }, add, del),
         h("div", { class: "scroll" }, h("table", {},
-          h("thead", {}, h("tr", {}, ["Neighbor", "AS", "Description", "Password", "Multihop"].map((t) => h("th", {}, t)))), body))));
+          h("thead", {}, h("tr", {}, ["Neighbor", "AS", "Description", "Password", "Multihop", "Enabled"].map((t) => h("th", {}, t)))), body))));
       select(sel);
     }
 
@@ -4466,10 +4476,21 @@
         if (prep.checked) next.as_prepend = true; else delete next.as_prepend;
         save(next);
       };
+      // the on/off switch of BGP on this node (the same as Operate ▸ Anycast): off keeps every setting but announces nothing
+      const on = h("input", { type: "checkbox", checked: !cfg.disabled, disabled: !(cfg.asn > 0), "aria-label": "BGP enabled" });
+      on.addEventListener("change", async () => {
+        if (!on.checked && !confirm("Disable BGP on this node?\n\nIts sessions go down and the anycast addresses are no longer announced from this node. The settings are kept.")) { on.checked = true; return; }
+        on.disabled = true;
+        chain = chain.then(async () => {
+          try { await api("POST", "/api/bgp/operate", { enabled: on.checked }); say(status, "ok"); } catch (e) { fail(status)(e); }
+          await load();
+        });
+      });
       asn.addEventListener("input", needAS);
       for (const el of [asn, rid, ka, hold, prep]) el.addEventListener("change", commit);
       clear(settings).append(section("BGP",
         h("div", { class: "bgprow" },
+          h("label", { class: "f" }, h("span", {}, "\u00a0"), h("span", { class: "opt", title: cfg.asn > 0 ? "Off: every setting is kept, but no session is started and no anycast address is announced from this node." : "Set a local AS number first." }, on, " Enabled")),
           h("label", { class: "f" }, h("span", {}, "Local AS number"), asn),
           h("label", { class: "f" }, h("span", {}, "Router ID"), rid),
           h("label", { class: "f" }, h("span", {}, "Keepalive"), ka),

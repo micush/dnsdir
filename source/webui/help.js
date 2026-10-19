@@ -431,6 +431,7 @@ const DNSDIR_HELP = {
       ]],
       ["h", "Fields"],
       ["fields", [
+        ["Enabled", "The on/off switch of BGP on this node (the same as Disable / Enable BGP under **Operate → Anycast**). Off keeps the AS, router ID, timers and neighbors but starts no session and announces no anycast address. Needs a local AS number first."],
         ["Local AS number", "This node's AS number, for example `64512`. BGP runs on this node while it is set; clear it to turn BGP off."],
         ["Router ID", "An IPv4 address that identifies this router. Optional; empty lets FRR pick one. Needs a local AS number: the field is disabled until one is set."],
         ["Keepalive (seconds)", "How often this node sends a BGP keepalive. Default `3`. Must be shorter than the hold time."],
@@ -441,6 +442,7 @@ const DNSDIR_HELP = {
         ["Password for (a neighbor's row)", "Optional MD5 session password; it must match the router's. The eye beside the box shows or hides what is typed. Kept in the config file and its history, readable by root only."],
         ["New neighbor address", "The router's IPv4 or IPv6 address, for example `192.0.2.1` or `2001:db8::1`, in the empty row above the table."],
         ["New neighbor AS", "That router's AS number."],
+        ["Enabled (a neighbor's row)", "Off shuts this one session down (`neighbor … shutdown` in `frr.conf`) and nothing is announced to it; the neighbor stays configured. The same as right-click ▸ Disable under **Operate → Anycast**. Greyed out while BGP itself is off."],
         ["Multihop of (a neighbor's row)", "For an eBGP peer that is not on a directly connected subnet, for example an AWS VPC Route Server endpoint: the hop limit, usually `2`. Empty means directly connected. FRR then runs BFD to that peer in multihop mode as well, so the peer must be set up the same way (one side multihop and the other not leaves BFD down and the session resetting). Ignored for an iBGP neighbor."],
         ["New neighbor multihop", "Optional, 2-255. See *Multihop* in a neighbor's row."],
         ["New neighbor description", "Optional note."],

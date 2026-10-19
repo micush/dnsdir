@@ -263,7 +263,7 @@ When the Destination name is a name, the servers are asked for that name instead
 
 #### Editing the table in the GUI
 
-The table is shown a page at a time (25 to 500 rows per page), and a **Filter rows** box above it keeps only the rows with that text in any cell. Rows keep their numbers, which are the numbers in the log lines.
+The table is shown a page at a time (25 to 500 rows per page), and a **Filter rows** box above it keeps only the rows with that text in any cell. **`test:www.google.com`** in the box keeps the rows a query for that name would match, for any client (the name is read the way the daemon reads each row: `*`, `*.name`, patterns with `*` and `?`, `**`); add a client, `test:www.google.com 10.1.1.1`, to keep only the rows that also match that client. The first row shown is the one that answers, and the count says which. Rows keep their numbers, which are the numbers in the log lines.
 
 Drag a row by the dots at its left to change its order on the page (the first row that matches wins). Right-click a row for **Edit**, **Copy**, **Paste** (the copied row, or rows copied from a spreadsheet as tab-separated text in the column order above, go in below the row), **Add** (a new row below; the filter is cleared), **Move up**, **Move down**, **Move to top**, **Move to bottom** and **Delete**. Right-click below the rows to add one at the end.
 

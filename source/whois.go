@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -26,6 +28,7 @@ const (
 	whoisParallel = 4
 	whoisHitTTL   = 24 * time.Hour
 	whoisMissTTL  = time.Hour
+	whoisFailTTL  = 15 * time.Second // a failed attempt (timeout, refused, reset) is remembered only briefly, so Run again tries again
 	whoisCacheMax = 2000
 )
 
@@ -115,20 +118,85 @@ func newWhoisClient() *whoisClient {
 
 var whois = newWhoisClient()
 
-// raw asks one whois server one question.
-func whoisRaw(server, query string) (string, error) {
-	c, err := net.DialTimeout("tcp", whoisHostAddr(server), whoisTimeout)
+// whoisNetError is a failure to talk to a whois server (as opposed to an answer saying there is nothing): it may be
+// gone a moment later, so it is not kept in the cache like a real "not found".
+type whoisNetError struct{ err error }
+
+func (e *whoisNetError) Error() string { return e.err.Error() }
+func (e *whoisNetError) Unwrap() error { return e.err }
+
+// whoisFallback is the registry's server for the common TLDs, used only when whois.iana.org does not answer.
+var whoisFallback = map[string]string{
+	"com": "whois.verisign-grs.com", "net": "whois.verisign-grs.com", "org": "whois.publicinterestregistry.org",
+	"info": "whois.afilias.net", "biz": "whois.nic.biz", "io": "whois.nic.io", "us": "whois.nic.us", "uk": "whois.nic.uk",
+	"de": "whois.denic.de", "fr": "whois.nic.fr", "nl": "whois.domain-registry.nl", "edu": "whois.educause.edu",
+	"eu": "whois.eu", "ca": "whois.cira.ca", "co": "whois.nic.co", "me": "whois.nic.me", "dev": "whois.nic.google", "app": "whois.nic.google",
+}
+
+// whoisAddrs lists the addresses of a whois server, IPv4 first: a path that connects over IPv6 but then drops the
+// traffic would otherwise hold every lookup until it times out.
+func whoisAddrs(server string) ([]string, error) {
+	hp := whoisHostAddr(server)
+	host, port, err := net.SplitHostPort(hp)
 	if err != nil {
-		return "", fmt.Errorf("whois server %s is not reachable from this node (%v)", server, shortErr(err))
+		return []string{hp}, nil
+	}
+	if _, err := netip.ParseAddr(host); err == nil {
+		return []string{hp}, nil
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(context.Background(), host)
+	if err != nil {
+		return nil, err
+	}
+	var v4, v6 []string
+	for _, ip := range ips {
+		if ip.IP.To4() != nil {
+			v4 = append(v4, net.JoinHostPort(ip.IP.String(), port))
+		} else {
+			v6 = append(v6, net.JoinHostPort(ip.IP.String(), port))
+		}
+	}
+	out := append(v4, v6...)
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no address")
+	}
+	if len(out) > 4 {
+		out = out[:4]
+	}
+	return out, nil
+}
+
+// raw asks one whois server one question: each of its addresses in turn (IPv4 first) until one answers.
+func whoisRaw(server, query string) (string, error) {
+	addrs, err := whoisAddrs(server)
+	if err != nil {
+		return "", &whoisNetError{fmt.Errorf("whois server %s is not reachable from this node (%v)", server, shortErr(err))}
+	}
+	var last error
+	for _, a := range addrs {
+		out, err := whoisRawAt(server, a, query)
+		if err == nil {
+			return out, nil
+		}
+		last = err
+	}
+	return "", last
+}
+
+// whoisRawAt asks one address of a whois server.
+func whoisRawAt(server, addr, query string) (string, error) {
+	c, err := net.DialTimeout("tcp", addr, whoisTimeout)
+	if err != nil {
+		return "", &whoisNetError{fmt.Errorf("whois server %s is not reachable from this node (%v)", server, shortErr(err))}
 	}
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(whoisTimeout))
 	if _, err := io.WriteString(c, query+"\r\n"); err != nil {
-		return "", err
+		return "", &whoisNetError{err}
 	}
 	b, err := io.ReadAll(io.LimitReader(c, whoisMaxBytes))
 	if err != nil && len(b) == 0 {
-		return "", fmt.Errorf("whois server %s: %v", server, shortErr(err))
+		return "", &whoisNetError{fmt.Errorf("whois server %s did not answer from this node (%v)", server, shortErr(err))}
 	}
 	return string(b), nil
 }
@@ -150,6 +218,9 @@ func (w *whoisClient) serverFor(tld string) (string, error) {
 	if !ok {
 		resp, err := whoisRaw(whoisIANA, tld)
 		if err != nil {
+			if fb := whoisFallback[tld]; fb != "" { // IANA is only the phone book: for the common TLDs ask the registry directly (not remembered, IANA is tried again next time)
+				return fb, nil
+			}
 			return "", err
 		}
 		if m := referRe.FindStringSubmatch(resp); m != nil {
@@ -203,6 +274,10 @@ func (w *whoisClient) cached(key string, fetch func() (*WhoisInfo, error)) (*Who
 		e := whoisEntry{info: info, at: time.Now(), ttl: whoisHitTTL}
 		if err != nil {
 			e.err, e.ttl = err.Error(), whoisMissTTL
+			var ne *whoisNetError
+			if errors.As(err, &ne) {
+				e.ttl = whoisFailTTL
+			}
 		} else if !info.Found {
 			e.ttl = whoisMissTTL
 		}

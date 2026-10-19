@@ -1,5 +1,21 @@
 # Changelog
 
+## [v481] - 2026-10-19 — Test a name against the policy table
+
+### Added
+- **`test:NAME` in the policy filter box** keeps the rows a query for that name would match, for any client; `test:NAME 10.1.1.1` keeps only those that also match that client (an address, a network, `!` entries and `*` are read as the daemon reads them, for IPv4 and IPv6). The first row shown is the one that answers, and the count says so; with none, nothing is shown. Rows keep their numbers.
+
+### Changed
+- The filter box is one and a half times as wide.
+
+## [v480] - 2026-10-19 — Whois no longer repeats a timeout for an hour
+
+### Fixed
+- **A whois server's IPv4 addresses are asked before its IPv6 ones, each address in turn.** On a node whose IPv6 path to whois.iana.org connects but never answers, every lookup waited out the timeout and failed although the IPv4 path worked.
+- **Right-click ▸ Whois kept showing "whois server whois.iana.org: i/o timeout" although `whois` worked on the same node**: a failed attempt (timeout, connection refused or reset) was remembered like a real "not found", for an hour, so Run again returned the same error without asking anybody. A failure to reach a whois server is now remembered for 15 seconds only; "not found" answers are kept as before.
+- When whois.iana.org does not answer, the common TLDs (com, net, org, info, biz, io, us, uk, de, fr, nl, edu, eu, ca, co, me, dev, app) go straight to their registry's whois server, the way the `whois` command does. Other TLDs still need IANA.
+- The error says the server "did not answer from this node", not just "i/o timeout".
+
 ## [v479] - 2026-10-19 — The scheduler's "Only in" months on two lines
 
 ### Fixed

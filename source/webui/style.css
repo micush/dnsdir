@@ -523,7 +523,7 @@ table.policy tr.drop-below td { box-shadow: inset 0 -3px 0 var(--accent); }
 
 .policy-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .6rem; }
 .policy-bar .grow { flex: 1 1 0; }
-.policy-bar input.policy-filter { width: 16rem; max-width: 100%; }
+.policy-bar input.policy-filter { width: 24rem; max-width: 100%; }
 .policy-bar select { width: auto; flex: 0 0 auto; }
 .policy-bar input.policy-page { width: 4.5rem; }
 .policy-pager { display: inline-flex; align-items: center; gap: .35rem; }

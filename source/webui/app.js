@@ -2184,7 +2184,7 @@
     const empty = h("div", { class: "policy-empty" }, "");
     const wrap = h("div", { class: "policy-wrap" }, tbl, empty);
 
-    const filter = h("input", { type: "text", class: "policy-filter", placeholder: "Filter rows…", "aria-label": "Filter policy rows", autocomplete: "off", spellcheck: "false" });
+    const filter = h("input", { type: "text", class: "policy-filter", placeholder: "Filter rows…  or  test:www.example.com [client address]", title: "Type text to keep the rows with it in any cell. test:NAME keeps the rows that match that name (any client); test:NAME 10.1.1.1 only those that also match that client. The first of them answers the query.", "aria-label": "Filter policy rows", autocomplete: "off", spellcheck: "false" });
     const count = h("span", { class: "policy-count muted" }, "");
     const sizeSel = h("select", { "aria-label": "Rows per page" }, [25, 50, 100, 250, 500].map((n) => h("option", { value: String(n) }, n + " per page")));
     sizeSel.value = String(size);
@@ -2199,8 +2199,88 @@
     bar.addEventListener("change", (e) => e.stopPropagation());
 
     const changed = () => tbl.dispatchEvent(new Event("change", { bubbles: true }));
+    // test:NAME [CLIENT] keeps the rows a query for NAME (from CLIENT, when given) would match, the way the daemon reads them
+    const wild = (p, s) => {   // "*" any run of characters, "?" any one character
+      let pi = 0, si = 0, star = -1, mark = 0;
+      while (si < s.length) {
+        if (pi < p.length && p[pi] === "*") { star = pi; mark = si; pi++; }
+        else if (pi < p.length && (p[pi] === "?" || p[pi] === s[si])) { pi++; si++; }
+        else if (star >= 0) { mark++; si = mark; pi = star + 1; }
+        else return false;
+      }
+      while (pi < p.length && p[pi] === "*") pi++;
+      return pi === p.length;
+    };
+    const nameMatches = (cell, name) => {
+      let c = cell.trim().toLowerCase().replace(/\.$/, "");
+      if (c === "" || c === "*") return true;
+      if (!/[*?]/.test(c.startsWith("*.") ? c.slice(2) : c)) {
+        if (c.startsWith("*.")) { const r = c.slice(2); return name === r || name.endsWith("." + r); }
+        return name === c;
+      }
+      const any = c.startsWith("*.");
+      let pat = (any ? c.slice(2) : c).split(".");
+      if (any) pat = ["**", ...pat];
+      const ls = name.split(".");
+      const ok = Array.from({ length: pat.length + 1 }, () => new Array(ls.length + 1).fill(false));
+      ok[0][0] = true;
+      for (let i = 1; i <= pat.length; i++) {
+        for (let j = 0; j <= ls.length; j++) {
+          if (pat[i - 1] === "**") ok[i][j] = ok[i - 1][j] || (j > 0 && ok[i][j - 1]);
+          else if (j > 0) ok[i][j] = ok[i - 1][j - 1] && wild(pat[i - 1], ls[j - 1]);
+        }
+      }
+      return ok[pat.length][ls.length];
+    };
+    const parseIP = (str) => {   // { bits, n } or null
+      str = str.trim();
+      if (/^\d+\.\d+\.\d+\.\d+$/.test(str)) {
+        const p = str.split(".").map(Number);
+        return p.some((x) => x > 255) ? null : { bits: 32, n: p.reduce((a, x) => a * 256n + BigInt(x), 0n) };
+      }
+      if (!str.includes(":")) return null;
+      const halves = str.split("::");
+      if (halves.length > 2) return null;
+      const g = (x) => (x ? x.split(":") : []);
+      const a = g(halves[0]), c = halves.length === 2 ? g(halves[1]) : [];
+      if (halves.length === 1 && a.length !== 8) return null;
+      const fill = 8 - a.length - c.length;
+      if (fill < 0) return null;
+      let n = 0n;
+      for (const hx of [...a, ...(halves.length === 2 ? Array(fill).fill("0") : []), ...c]) {
+        if (!/^[0-9a-f]{1,4}$/i.test(hx)) return null;
+        n = (n << 16n) | BigInt(parseInt(hx, 16));
+      }
+      return { bits: 128, n };
+    };
+    const inNet = (entry, ip) => {
+      const [a, len] = entry.split("/");
+      const net = parseIP(a);
+      if (!net || net.bits !== ip.bits) return false;
+      const l = len === undefined ? net.bits : Number(len);
+      if (!(l >= 0 && l <= net.bits)) return false;
+      const sh = BigInt(net.bits - l);
+      return (ip.n >> sh) === (net.n >> sh);
+    };
+    const clientMatches = (cell, ip) => {
+      const es = cell.split(",").map((x) => x.trim()).filter(Boolean);
+      const pos = es.filter((x) => !x.startsWith("!")), neg = es.filter((x) => x.startsWith("!")).map((x) => x.slice(1).trim());
+      if (neg.some((x) => inNet(x, ip))) return false;
+      if (!pos.length || pos.some((x) => x === "*" || x.toLowerCase() === "any")) return true;
+      return pos.some((x) => inNet(x, ip));
+    };
+    let testing = null;   // while the filter is a test: the name (and client) asked about
     const visible = () => {
-      const q = filter.value.trim().toLowerCase();
+      const raw = filter.value.trim();
+      const tm = /^test:\s*(\S+)(?:\s+(\S+))?$/i.exec(raw);
+      testing = null;
+      if (tm) {
+        const name = tm[1].toLowerCase().replace(/\.$/, ""), cl = tm[2] ? parseIP(tm[2]) : null;
+        testing = { name, client: tm[2] || "", bad: !!tm[2] && !cl };
+        if (testing.bad) return [];
+        return data.filter((r) => nameMatches(r.v[1] || "", name) && (!cl || clientMatches(r.v[0] || "", cl)));
+      }
+      const q = raw.toLowerCase();
       return q ? data.filter((r) => r.v.some((x) => x.toLowerCase().includes(q))) : data;
     };
     const mark = (tr, row) => { tr.classList.toggle("incomplete", !row.v[2].trim() && !row.v[3].trim()); };
@@ -2229,7 +2309,8 @@
       first.disabled = prev.disabled = page === 0;
       next.disabled = last.disabled = page >= n - 1;
       empty.hidden = vis.length > 0;
-      empty.textContent = data.length ? "No rows match the filter." : "No rows. Right-click here ▸ Add row.";
+      if (testing && vis.length) count.textContent += ` · row ${data.indexOf(vis[0]) + 1} answers ${testing.name}`;
+      empty.textContent = testing && testing.bad ? `“${testing.client}” is not an address.` : testing ? "" : data.length ? "No rows match the filter." : "No rows. Right-click here ▸ Add row.";
     }
 
     function moveTo(row, target, after) {

@@ -1,5 +1,10 @@
 # Changelog
 
+## [v494] - 2026-10-20 — The loopback row is really gone from the cluster view
+
+### Fixed
+- **Monitor ▸ Host, Network interfaces:** the `lo` row was hidden for a single node but still listed for the whole cluster, where its name is `node lo`. It is hidden there too.
+
 ## [v493] - 2026-10-20 — Filesystems named by node, no loopback row, clearer login log lines
 
 ### Changed

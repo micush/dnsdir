@@ -108,6 +108,7 @@ type session struct {
 	created  time.Time
 	last     time.Time
 	checked  time.Time // last group-membership check
+	ip       string    // the address it signed in from (for the log)
 	readOnly bool      // signed in through the read-only group: may look, not change (see readonly.go)
 }
 
@@ -134,7 +135,8 @@ type WebServer struct {
 	stateDir string
 	noSave   atomic.Bool
 	fails    map[string]*failRec
-	loginQ   chan struct{} // bounds the logins waiting for PAM
+	lockSeen map[string]time.Time // when a refusal for a locked-out address was last logged (one line a minute, not one per try)
+	loginQ   chan struct{}        // bounds the logins waiting for PAM
 
 	applyMu sync.Mutex
 	running *WebConfig
@@ -145,7 +147,7 @@ type WebServer struct {
 func NewWebServer(mg *Mgmt, status *StatusServer, auth Authenticator) *WebServer {
 	w := &WebServer{
 		mg: mg, confPath: mg.confPath, certs: mg.certs, status: status, auth: auth,
-		sessions: map[string]*session{}, fails: map[string]*failRec{},
+		sessions: map[string]*session{}, fails: map[string]*failRec{}, lockSeen: map[string]time.Time{},
 		loginQ: make(chan struct{}, maxLoginQueue),
 	}
 	d := defaultWeb()
@@ -453,7 +455,9 @@ func (w *WebServer) lookup(r *http.Request) *session {
 	}
 	if now.Sub(s.last) > pol.sessionIdle() || now.Sub(s.created) > sessionMaxAge {
 		delete(w.sessions, key)
+		user, ip := s.user, s.ip
 		w.mu.Unlock()
+		infof("web: logout: %q signed out (session expired; signed in from %s)", user, firstNonEmpty(ip, "an unknown address"))
 		return nil
 	}
 	s.last = now
@@ -464,7 +468,7 @@ func (w *WebServer) lookup(r *http.Request) *session {
 	if recheck {
 		ok, ro, err := w.access(uname, pol)
 		if err != nil || !ok {
-			warnf("web: session for %q ended — no longer in group %q", uname, pol.Group)
+			warnf("web: session for %q ended — no longer in group %q (signed in from %s)", uname, pol.Group, firstNonEmpty(s.ip, "an unknown address"))
 			w.mu.Lock()
 			delete(w.sessions, key)
 			w.mu.Unlock()
@@ -684,6 +688,7 @@ func (w *WebServer) clearFailures(keys ...string) {
 
 func (w *WebServer) handleLogin(rw http.ResponseWriter, r *http.Request) {
 	if !sameOrigin(r) {
+		warnf("web: login refused from %s: cross-origin request (Origin %q)", clientIP(r), r.Header.Get("Origin"))
 		jsonError(rw, http.StatusForbidden, "cross-origin request refused")
 		return
 	}
@@ -700,11 +705,13 @@ func (w *WebServer) handleLogin(rw http.ResponseWriter, r *http.Request) {
 	case w.loginQ <- struct{}{}:
 		defer func() { <-w.loginQ }()
 	default:
+		warnf("web: login refused from %s: too many logins at once", ip)
 		rw.Header().Set("Retry-After", "2")
 		jsonError(rw, http.StatusServiceUnavailable, "Too many logins at once; try again in a moment.")
 		return
 	}
 	if wait, ok := w.reserve(keys...); !ok {
+		w.logLockedOut(ip, req.Username, wait)
 		lockoutError(rw, wait)
 		return
 	}
@@ -750,7 +757,7 @@ func (w *WebServer) handleLogin(rw http.ResponseWriter, r *http.Request) {
 	w.clearFailures(keys...)
 
 	now := time.Now()
-	s := &session{user: req.Username, csrf: randToken(), created: now, last: now, checked: now, readOnly: readOnly}
+	s := &session{user: req.Username, csrf: randToken(), created: now, last: now, checked: now, readOnly: readOnly, ip: ip}
 	tok := randToken()
 	w.mu.Lock()
 	w.sessions[sessKey(tok)] = s
@@ -760,7 +767,7 @@ func (w *WebServer) handleLogin(rw http.ResponseWriter, r *http.Request) {
 		Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true, Secure: true,
 		SameSite: http.SameSiteStrictMode, MaxAge: int(sessionMaxAge.Seconds()),
 	})
-	infof("web: %q logged in from %s", req.Username, ip)
+	infof("web: login: %q signed in from %s (%s)", req.Username, ip, accessWord(readOnly))
 	writeJSON(rw, http.StatusOK, w.sessionInfo(s))
 }
 
@@ -773,7 +780,7 @@ func (w *WebServer) handleLogout(rw http.ResponseWriter, r *http.Request, s *ses
 	}
 	http.SetCookie(rw, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1,
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
-	infof("web: %q logged out", s.user)
+	infof("web: logout: %q signed out from %s (signed in from %s)", s.user, clientIP(r), firstNonEmpty(s.ip, "an unknown address"))
 	writeJSON(rw, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -878,4 +885,23 @@ func (w *WebServer) handlePutConfig(rw http.ResponseWriter, r *http.Request, s *
 		return
 	}
 	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "config": dc})
+}
+
+// logLockedOut records a login attempt that was refused because the address or the name is locked out: once a
+// minute for each, so a guessing run is visible in the log without filling it.
+func (w *WebServer) logLockedOut(ip, name string, wait time.Duration) {
+	key := ip + "|" + name
+	now := time.Now()
+	w.mu.Lock()
+	last, seen := w.lockSeen[key]
+	if seen && now.Sub(last) <= time.Minute {
+		w.mu.Unlock()
+		return
+	}
+	if len(w.lockSeen) > 1000 {
+		w.lockSeen = map[string]time.Time{}
+	}
+	w.lockSeen[key] = now
+	w.mu.Unlock()
+	warnf("web: login refused for %q from %s: locked out for another %s", name, ip, wait.Round(time.Second))
 }

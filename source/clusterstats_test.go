@@ -179,10 +179,11 @@ func TestMergeHostAddsWhatAddsAndWeightsWhatDoesNot(t *testing.T) {
 	near(n.MemPct, 100*6.0/32.0, "now memory")
 	near(n.IO, 20, "now disk busy")
 	near(n.NetUtil, 40, "busiest link")
-	if len(n.FS) != 2 || n.FS[0].Total != 400 || n.FS[0].Used != 80 || n.FS[0].Device != "(several)" || n.FS[1].Device != "/dev/vdb" {
-		t.Fatalf("filesystems now: %+v", n.FS)
+	if len(n.FS) != 3 || n.FS[0].Mount != "A /" || n.FS[1].Mount != "B /" || n.FS[2].Mount != "B /var" {
+		t.Fatalf("filesystems now (one row per node and mount): %+v", n.FS)
 	}
-	near(n.FS[0].Pct, 20, "/ now")
+	near(n.FS[0].Pct, 50, "A / now (the node's own figure)")
+	near(n.FS[1].Pct, 10, "B / now (the node's own figure)")
 	if len(n.Ifaces) != 2 || n.Ifaces[0].Name != "A eth0" || n.Ifaces[1].Name != "B eth0" {
 		t.Fatalf("interfaces %+v", n.Ifaces)
 	}

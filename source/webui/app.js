@@ -4114,7 +4114,7 @@
           { label: "In", cls: "t5", values: d.rx, text: (i) => bits(d.rx[i]) + " (peak " + bits(d.rx_max[i]) + ")" },
           { label: "Out", cls: "t6", values: d.tx, text: (i) => bits(d.tx[i]) + " (peak " + bits(d.tx_max[i]) + ")" }], { floor: 1000, axis: (v) => bits(v) }));
       const fsRows = (n.fs || []).map((f) => h("tr", {}, h("td", { class: "mono" }, f.mount), h("td", {}, f.device + " · " + f.type), h("td", { class: "num" }, bytes(f.used) + " of " + bytes(f.total)), h("td", { class: "num" }, pc(f.pct))));
-      const ifRows = (n.ifaces || []).map((i) => h("tr", { class: i.counted ? null : "muted" }, h("td", { class: "mono" }, i.name), h("td", { title: i.counted ? null : "Not in the totals" }, i.up ? "up" : "down", i.counted ? "" : " *"),
+      const ifRows = (n.ifaces || []).filter((i) => i.name !== "lo").map((i) => h("tr", { class: i.counted ? null : "muted" }, h("td", { class: "mono" }, i.name), h("td", { title: i.counted ? null : "Not in the totals" }, i.up ? "up" : "down", i.counted ? "" : " *"),
         h("td", { class: "num" }, i.speed ? i.speed + " Mb/s" : "–"), h("td", { class: "num" }, bits(i.rx_bps)), h("td", { class: "num" }, bits(i.tx_bps)), h("td", { class: "num" }, i.util_pct >= 0 ? pc(i.util_pct) : "–")));
       fill(tables, 
         h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc("Filesystems"))), h("div", { class: "body flush" }, fsRows.length

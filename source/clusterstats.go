@@ -571,8 +571,6 @@ func mergeHost(parts []clusterPart[HostResult], infos []ClusterNodeInfo) *HostRe
 	now := HostNow{NetUtil: -1, FS: []fsUsage{}, Ifaces: []IfaceNow{}}
 	var cpuW, cpuS, ioS float64
 	var ioN int
-	fs := map[string]*fsUsage{}
-	var fsOrder []string
 	for _, p := range use {
 		h := p.R.Now
 		if h.At == 0 {
@@ -594,19 +592,9 @@ func mergeHost(parts []clusterPart[HostResult], infos []ClusterNodeInfo) *HostRe
 		if h.NetUtil > now.NetUtil {
 			now.NetUtil = h.NetUtil
 		}
-		for _, f := range h.FS {
-			u := fs[f.Mount]
-			if u == nil {
-				c := f
-				fs[f.Mount] = &c
-				fsOrder = append(fsOrder, f.Mount)
-				continue
-			}
-			u.Total += f.Total
-			u.Used += f.Used
-			if u.Device != f.Device {
-				u.Device = "(several)"
-			}
+		for _, f := range h.FS { // one row per node, named like the interfaces: the node can then be told from the others
+			f.Mount = p.Name + " " + f.Mount
+			now.FS = append(now.FS, f)
 		}
 		for _, i := range h.Ifaces {
 			i.Name = p.Name + " " + i.Name
@@ -621,14 +609,6 @@ func mergeHost(parts []clusterPart[HostResult], infos []ClusterNodeInfo) *HostRe
 	}
 	if ioN > 0 {
 		now.IO = ioS / float64(ioN)
-	}
-	sort.Strings(fsOrder)
-	for _, m := range fsOrder {
-		u := fs[m]
-		if u.Total > 0 {
-			u.Pct = 100 * float64(u.Used) / float64(u.Total)
-		}
-		now.FS = append(now.FS, *u)
 	}
 	r.Now = now
 	r.Cluster = &ClusterInfo{Nodes: infos}

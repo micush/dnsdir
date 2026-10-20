@@ -29,6 +29,7 @@ type sessionRec struct {
 	Created int64  `json:"cr"`
 	Last    int64  `json:"l"`
 	RO      bool   `json:"ro,omitempty"` // a read-only account
+	IP      string `json:"ip,omitempty"` // where it signed in from
 }
 
 // loadSessions restores the sessions saved by the last run; whatever has run out is dropped.
@@ -53,7 +54,7 @@ func (w *WebServer) loadSessions() {
 			continue
 		}
 		// checked is left at zero: the group is looked at again with the first request
-		w.sessions[r.Key] = &session{user: r.User, csrf: r.CSRF, created: created, last: last, readOnly: r.RO}
+		w.sessions[r.Key] = &session{user: r.User, csrf: r.CSRF, created: created, last: last, readOnly: r.RO, ip: r.IP}
 		n++
 	}
 	w.mu.Unlock()
@@ -70,7 +71,7 @@ func (w *WebServer) saveSessions() {
 	w.mu.Lock()
 	recs := make([]sessionRec, 0, len(w.sessions))
 	for k, s := range w.sessions {
-		recs = append(recs, sessionRec{Key: k, User: s.user, CSRF: s.csrf, Created: s.created.Unix(), Last: s.last.Unix(), RO: s.readOnly})
+		recs = append(recs, sessionRec{Key: k, User: s.user, CSRF: s.csrf, Created: s.created.Unix(), Last: s.last.Unix(), RO: s.readOnly, IP: s.ip})
 	}
 	w.mu.Unlock()
 	b, _ := json.Marshal(recs)

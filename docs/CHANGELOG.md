@@ -1,5 +1,14 @@
 # Changelog
 
+## [v493] - 2026-10-20 — Filesystems named by node, no loopback row, clearer login log lines
+
+### Changed
+- **Monitor ▸ Host, Filesystems for the whole cluster** now lists one row per node and mount, named like the Network interfaces rows (`node /var`), instead of adding the same mount of every node together. The Disk space tile shows the fullest of them.
+- **Logins in the log, with addresses.** Every line about signing in or out now names the address: `web: login: "name" signed in from ADDRESS (full access|read-only)`, `web: logout: "name" signed out from ADDRESS (signed in from ADDRESS)`, and a session that ran out is `web: logout: … (session expired; signed in from ADDRESS)`. Failed logins (`web: login failed for "name" from ADDRESS: reason`) were already logged; now an attempt refused because the address or name is locked out is too (`web: login refused for "name" from ADDRESS: locked out for another …`, at most once a minute for each), and so are a cross-origin login and "too many logins at once". The log is kept per node: look at the node the person signed in to (the Node menu on the Log page).
+
+### Removed
+- **Monitor ▸ Host, Network interfaces:** the `lo` row is not listed any more (it was never in the totals and has no link speed).
+
 ## [v492] - 2026-10-20 — No read-only tag beside the user name
 
 ### Removed

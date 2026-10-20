@@ -557,13 +557,14 @@ func run(dc *DaemonConfig, confFile, sockPath, stateDir string) error {
 		go applySNMP(nu.snmpSettings())
 		mg.OnConfigLoaded(nu)
 		if web != nil {
-			go web.Apply(nu.Web) // async: a listener restart must not wait on the request that triggered it
+			go func() { ensureReadGroup(nu.Web); web.Apply(nu.Web) }() // async: a listener restart must not wait on the request that triggered it
 		}
 		return nil
 	}
 	mg.reloadFn = reload
 	web = NewWebServer(mg, st, sysAuth{})
 	mg.webH = web.Handler()
+	ensureReadGroup(dc.Web)
 	web.Apply(dc.Web)
 	defer web.Stop()
 	mg.OnConfigLoaded(dc) // first history entry, cluster listener

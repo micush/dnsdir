@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"os/user"
 	"strings"
 )
 
@@ -82,4 +84,32 @@ func redactSecrets(v any) any {
 	}
 	walk(out)
 	return out
+}
+
+// ensureReadGroup makes the default read-only group (the one the installer creates) when it is in the setting and
+// missing, so a daemon updated from the web page or by hand, which never ran install.sh, has it too and the Users
+// page has a group to put people in.  Only the default name is ever created, and only by root; a directory group
+// is never made here.
+func ensureReadGroup(cfg WebConfig) {
+	def := defaultWeb().ReadGroup
+	if os.Geteuid() != 0 || def == "" {
+		return
+	}
+	found := false
+	for _, g := range splitGroups(cfg.ReadGroup) {
+		if g == def {
+			found = true
+		}
+	}
+	if !found {
+		return
+	}
+	if _, err := user.LookupGroup(def); err == nil {
+		return
+	}
+	if out, err := usersRun("", "groupadd", "--system", def); err != nil {
+		warnf("web: could not create the read-only group %q: %s", def, firstNonEmpty(out, err.Error()))
+		return
+	}
+	infof("web: created the read-only group %q (add people on the Users page)", def)
 }

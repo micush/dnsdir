@@ -3246,7 +3246,7 @@
     };
 
     let status, bar, cnote, tiles, chartBox, pies, tops, upds, foot, rangeBtns, fromIn, toIn, customRow;
-    let range = "1h", qpsView = false, sel = "", pickClient = "", pickDomain = "", hidden = new Set(), last = null, lastAt = 0, seq = 0, topPage = { c: 0, d: 0 }, topKey = "", cFilter = "", dFilter = "", filterTimer = 0;
+    let range = "1h", qpsView = false, clientsView = false, sel = "", pickClient = "", pickDomain = "", hidden = new Set(), last = null, lastAt = 0, seq = 0, topPage = { c: 0, d: 0 }, topKey = "", cFilter = "", dFilter = "", filterTimer = 0;
 
     // ── fetching ──
     // the picked node (Node menu in the top bar) answers; pick another member there
@@ -3281,9 +3281,9 @@
       const t = d.sums.total;
       // a tile with a kind is a button: it limits the lists and the chart to that answer; Total Queries clears it
       const tile = (cls, label, value, sub, key, tip) => h(key === undefined ? "div" : "button", key === undefined ? { class: "qtile " + cls, title: tip || null } :
-        { type: "button", class: "qtile pick " + cls, "aria-pressed": (key === "qps" ? qpsView : (KINDS[key] || "") === sel && !qpsView) ? "true" : "false",
-          title: key === "qps" ? (tip || "") : key ? "Show only " + label + " in the chart and lists" : "Show everything",
-          onclick: () => (key === "qps" ? toggleQps() : pick(KINDS[key] || "")) },
+        { type: "button", class: "qtile pick " + cls, "aria-pressed": (key === "qps" ? qpsView : key === "clients" ? clientsView : (KINDS[key] || "") === sel && !qpsView && !clientsView) ? "true" : "false",
+          title: key === "qps" || key === "clients" ? (tip || "") : key ? "Show only " + label + " in the chart and lists" : "Show everything",
+          onclick: () => (key === "qps" ? toggleQps() : key === "clients" ? toggleClients() : pick(KINDS[key] || "")) },
         h("div", { class: "qv", title: typeof value === "string" ? null : n0(value) }, typeof value === "string" ? value : shortCount(value)),   // a million and up is written short (2.71M, 100.5M), the full number in the tooltip
         h("div", { class: "qs" }, sub || "\u00a0"), h("div", { class: "ql" }, label));
       clear(tiles).append(
@@ -3299,7 +3299,7 @@
         tile("q-ref", "Refused", d.sums.refused, pct(d.sums.refused, t), "refused"),
         // dynamic DNS updates forwarded to a primary (they are part of Total too)
         tile("q-upd", "Updates", d.sums.updates, d.sums.updates ? (d.sums.updates_failed ? shortCount(d.sums.updates_failed) + " failed" : "none failed") : "", "updates"),
-        tile("q-clients", "Clients", d.sums.clients, ""),
+        tile("q-clients", "Clients", d.sums.clients, "", "clients", "Click to draw the number of distinct clients over time in the chart (every ten minutes up to a day and a half, hourly beyond; a lower bound, and in a cluster the busiest node's count)"),
         // answers served from the cache, out of the lookups that could be cached (the cache's own hit rate, over the chosen range)
         (() => { const hit = d.sums.cache_hits || 0, look = hit + (d.sums.cache_misses || 0);
           return tile("q-cache", "Cache Hits", look ? pct(hit, look) : "–", look ? "" : "off or unused", undefined, "Answered from the cache, out of the lookups that could be cached in this range" + (look ? ": " + n0(hit) + " of " + n0(look) : "")); })());
@@ -3308,13 +3308,15 @@
     function drawChart(d) {
       clear(chartBox);
       const only = Object.keys(KINDS).find((k) => KINDS[k] === sel); // the one line a tile picked
+      const single = qpsView || clientsView;   // one line of its own: no series toggles, no QPS row
+      if (clientsView) d = Object.assign({}, d, { client_counts: d.client_counts || d.total.map(() => 0) });
       if (qpsView) d = Object.assign({}, d, { qps: (d[only || "total"] || d.total).map((v) => v / (d.step || 60)) });   // the rate of what is picked (all queries when nothing is)
       const fq = (v) => (v >= 10 ? n0(Math.round(v)) : Number(v).toFixed(1));
       const qs = SERIES.find((s) => s.key === (only || "total"));
-      const avail = qpsView ? [{ key: "qps", label: "QPS" + (only ? " — " + qs.label : ""), cls: qs.cls }] : SERIES.filter((s) => only ? s.key === only : (s.key !== "other" || d.sums.other > 0) && (s.key !== "updates" || d.sums.updates > 0));
+      const avail = clientsView ? [{ key: "client_counts", label: "Clients" + (only ? " — " + qs.label : ""), cls: qs.cls }] : qpsView ? [{ key: "qps", label: "QPS" + (only ? " — " + qs.label : ""), cls: qs.cls }] : SERIES.filter((s) => only ? s.key === only : (s.key !== "other" || d.sums.other > 0) && (s.key !== "updates" || d.sums.updates > 0));
       const shown = avail.filter((s) => only || !hidden.has(s.key));
       const legend = h("div", { class: "qlegend", role: "group", "aria-label": "Series" }, avail.map((s) =>
-        h("button", { type: "button", class: "qchip " + s.cls, "aria-pressed": hidden.has(s.key) && !only ? "false" : "true", disabled: only || qpsView ? "" : null,
+        h("button", { type: "button", class: "qchip " + s.cls, "aria-pressed": hidden.has(s.key) && !only ? "false" : "true", disabled: only || single ? "" : null,
           onclick: () => { if (hidden.has(s.key)) hidden.delete(s.key); else hidden.add(s.key); drawChart(d); } },
           h("span", { class: "sw" }), s.label)));
       const n = d.total.length - (partialLast(d, d.total.length) ? 1 : 0);   // the bucket still filling is left out
@@ -3323,7 +3325,7 @@
       const W = 1000, H = 300, L = axisMargin(yLabels, 52), R = 14, T = 12, B = 28, pw = W - L - R, ph = H - T - B;
       const x = (i) => L + (n <= 1 ? pw / 2 : (pw * i) / (n - 1));
       const y = (v) => T + ph - (ph * v) / max;
-      const svg = sv("svg", { class: "qchart", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": qpsView ? "Queries per second over time" : "Queries over time" });
+      const svg = sv("svg", { class: "qchart", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": clientsView ? "Distinct clients over time" : qpsView ? "Queries per second over time" : "Queries over time" });
       for (let g = 0; g <= 4; g++) {
         const v = (max * g) / 4;
         svg.append(sv("line", { class: "qgrid", x1: L, x2: W - R, y1: y(v), y2: y(v) }), sv("text", { class: "qax", x: L - 6, y: y(v) + 4, "text-anchor": "end" }, yLabels[g]));
@@ -3341,10 +3343,10 @@
       const cross = sv("line", { class: "qcross hidden", y1: T, y2: T + ph });
       const dots = shown.map((s) => sv("circle", { class: "qdot hidden " + s.cls, r: 4, cx: 0, cy: 0 }));   // parked out of sight until the pointer is over the chart
       const tip = sv("g", { class: "qtip hidden" });
-      const tipBg = sv("rect", { class: "qtipbg", rx: 6, width: 210, height: 20 + 18 * (shown.length + 1 + (qpsView ? 0 : 1)) });
+      const tipBg = sv("rect", { class: "qtipbg", rx: 6, width: 210, height: 20 + 18 * (shown.length + 1 + (single ? 0 : 1)) });
       const tipHead = sv("text", { class: "qtiph", x: 10, y: 17 });
       const tipRows = shown.map((s, k) => sv("g", { transform: `translate(10 ${36 + 18 * k})` }, sv("rect", { class: s.cls + " sw", width: 10, height: 10, y: -9, rx: 2 }), sv("text", { class: "qtipt", x: 16, y: 0 }, "")));
-      const qpsRow = qpsView ? null : sv("g", { transform: `translate(10 ${36 + 18 * shown.length})` }, sv("rect", { class: "sw qpsw", width: 10, height: 10, y: -9, rx: 2 }), sv("text", { class: "qtipt", x: 16, y: 0 }, ""));   // the rate at this point, beside the counts
+      const qpsRow = single ? null : sv("g", { transform: `translate(10 ${36 + 18 * shown.length})` }, sv("rect", { class: "sw qpsw", width: 10, height: 10, y: -9, rx: 2 }), sv("text", { class: "qtipt", x: 16, y: 0 }, ""));   // the rate at this point, beside the counts
       tip.append(tipBg, tipHead, ...tipRows, ...(qpsRow ? [qpsRow] : []));
       const hit = sv("rect", { class: "qhit", x: L, y: T, width: pw, height: ph,
         onmousemove: (e) => {
@@ -3905,13 +3907,14 @@
     function pickC(c, add) { const v = togglePick(pickClient, c, add); if (v === pickClient) return; pickClient = v; pickDomain = ""; load(); }
     function pickD(n, add) { const v = togglePick(pickDomain, n, add); if (v === pickDomain) return; pickDomain = v; pickClient = ""; load(); }
     function pick(kind) {
-      const was = qpsView;
-      qpsView = false;   // any other tile goes back to counting queries
+      const was = qpsView || clientsView;
+      qpsView = clientsView = false;   // any other tile goes back to counting queries
       if (kind === sel) { if (was && last) draw(last); return; }
       sel = kind;
       load();
     }
-    function toggleQps() { qpsView = !qpsView; if (last) draw(last); }
+    function toggleQps() { qpsView = !qpsView; clientsView = false; if (last) draw(last); }
+    function toggleClients() { clientsView = !clientsView; qpsView = false; if (last) draw(last); }
 
     function draw(d) {
       last = d;

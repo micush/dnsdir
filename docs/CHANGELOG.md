@@ -1,5 +1,10 @@
 # Changelog
 
+## [v487] - 2026-10-20 — Clients over time on the Statistics chart
+
+### Added
+- **Statistics ▸ Clients tile is clickable**: it draws the number of different clients per point in the chart, like the QPS tile does for its rate (with a kind/outcome picked, only those queries count). Click it again or another tile to go back. The numbers come from the top-list slots already kept, so nothing new is stored: points are ten minutes wide up to a day and a half and an hour wide beyond, and a slot that hit its client cap makes the count a lower bound. In a cluster each point shows the busiest node's count (a sum would count a client that asked several nodes twice). New field `client_counts` in the statistics API answer.
+
 ## [v486] - 2026-10-19 — Capture keeps its filter when the node changes
 
 ### Fixed

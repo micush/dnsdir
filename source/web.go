@@ -103,11 +103,12 @@ func splitGroups(s string) []string {
 }
 
 type session struct {
-	user    string
-	csrf    string
-	created time.Time
-	last    time.Time
-	checked time.Time // last group-membership check
+	user     string
+	csrf     string
+	created  time.Time
+	last     time.Time
+	checked  time.Time // last group-membership check
+	readOnly bool      // signed in through the read-only group: may look, not change (see readonly.go)
 }
 
 type failRec struct {
@@ -390,12 +391,20 @@ func (w *WebServer) authedCT(h func(http.ResponseWriter, *http.Request, *session
 		// signed cluster channel and the user was authenticated where they logged
 		// in.  The context value can only be set in-process.
 		if ps, ok := r.Context().Value(proxyCtxKey{}).(*session); ok {
+			if w.ro(ps) && readOnlyDenied(r) {
+				jsonError(rw, http.StatusForbidden, readOnlyMsg)
+				return
+			}
 			h(rw, r, ps)
 			return
 		}
 		s := w.lookup(r)
 		if s == nil {
 			jsonError(rw, http.StatusUnauthorized, "not logged in")
+			return
+		}
+		if w.ro(s) && readOnlyDenied(r) {
+			jsonError(rw, http.StatusForbidden, readOnlyMsg)
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -453,7 +462,8 @@ func (w *WebServer) lookup(r *http.Request) *session {
 	w.mu.Unlock()
 
 	if recheck {
-		if ok, err := w.auth.InGroup(uname, pol.Group); err != nil || !ok {
+		ok, ro, err := w.access(uname, pol)
+		if err != nil || !ok {
 			warnf("web: session for %q ended — no longer in group %q", uname, pol.Group)
 			w.mu.Lock()
 			delete(w.sessions, key)
@@ -462,6 +472,7 @@ func (w *WebServer) lookup(r *http.Request) *session {
 		}
 		w.mu.Lock()
 		s.checked = now
+		s.readOnly = ro
 		w.mu.Unlock()
 	}
 	return s
@@ -700,6 +711,7 @@ func (w *WebServer) handleLogin(rw http.ResponseWriter, r *http.Request) {
 	pol := w.policy.Load()
 
 	var reason string
+	var readOnly bool
 	switch {
 	case !validUsername(req.Username) || req.Password == "":
 		reason = "malformed credentials"
@@ -711,10 +723,12 @@ func (w *WebServer) handleLogin(rw http.ResponseWriter, r *http.Request) {
 					reason += " (" + msg + ")"
 				}
 			}
-		} else if ok, err := w.auth.InGroup(req.Username, pol.Group); err != nil {
+		} else if ok, ro, err := w.access(req.Username, pol); err != nil {
 			reason = "group lookup failed: " + err.Error()
 		} else if !ok {
 			reason = "not a member of group " + pol.Group
+		} else {
+			readOnly = ro
 		}
 	}
 	if reason != "" {
@@ -736,7 +750,7 @@ func (w *WebServer) handleLogin(rw http.ResponseWriter, r *http.Request) {
 	w.clearFailures(keys...)
 
 	now := time.Now()
-	s := &session{user: req.Username, csrf: randToken(), created: now, last: now, checked: now}
+	s := &session{user: req.Username, csrf: randToken(), created: now, last: now, checked: now, readOnly: readOnly}
 	tok := randToken()
 	w.mu.Lock()
 	w.sessions[sessKey(tok)] = s
@@ -768,7 +782,7 @@ func (w *WebServer) sessionInfo(s *session) map[string]any {
 	return map[string]any{
 		"ok": true, "user": s.user, "csrf": s.csrf, "version": version(),
 		"hostname": host, "config_path": w.confPath,
-		"idle_minutes": w.policy.Load().SessionIdleMinutes,
+		"idle_minutes": w.policy.Load().SessionIdleMinutes, "read_only": w.ro(s),
 	}
 }
 
@@ -822,8 +836,12 @@ func (w *WebServer) handleGetConfig(rw http.ResponseWriter, r *http.Request, s *
 		jsonError(rw, http.StatusInternalServerError, err.Error())
 		return
 	}
+	var out any = dc
+	if w.ro(s) {
+		out = redactSecrets(dc) // a read-only account sees the settings, not the keys and passwords in them
+	}
 	writeJSON(rw, http.StatusOK, map[string]any{
-		"ok": true, "path": w.confPath, "exists": statErr == nil, "config": dc,
+		"ok": true, "path": w.confPath, "exists": statErr == nil, "config": out,
 	})
 }
 

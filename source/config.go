@@ -1269,6 +1269,9 @@ type WebConfig struct {
 	// Group is the system group whose members may log in: one name, or several separated by commas (the default is the
 	// local group and a group of the same name with "-users" for a directory such as Active Directory).
 	Group string `json:"group"`
+	// ReadGroup is the read-only login group(s), same format as Group: a member who is in none of the Group groups but in
+	// one of these may sign in and look at everything, but cannot change anything.  Empty (the default) means there is none.
+	ReadGroup string `json:"read_group,omitempty"`
 	// PAMService is the /etc/pam.d service used to check passwords.
 	PAMService string `json:"pam_service"`
 	// SessionIdleMinutes logs a browser out after this much inactivity.

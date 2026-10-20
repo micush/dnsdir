@@ -67,26 +67,27 @@ type SharedConfig struct {
 
 // SharedWebAuth is the replicated part of the sign-in rules.
 type SharedWebAuth struct {
-	MaxFailedLogins          int `json:"max_failed_logins"`
-	FailedLoginWindowMinutes int `json:"failed_login_window_minutes"`
-	LockoutMinutes           int `json:"lockout_minutes"`
-	MinPasswordLength        int `json:"min_password_length"`
+	MaxFailedLogins          int    `json:"max_failed_logins"`
+	FailedLoginWindowMinutes int    `json:"failed_login_window_minutes"`
+	LockoutMinutes           int    `json:"lockout_minutes"`
+	MinPasswordLength        int    `json:"min_password_length"`
+	ReadGroup                string `json:"read_group,omitempty"` // the read-only login groups
 }
 
 // sharedWebAuth is the document's WebAuth for a web block: nil while every value is the default.
 func sharedWebAuth(w WebConfig) *SharedWebAuth {
 	d := defaultWeb()
 	if w.MaxFailedLogins == d.MaxFailedLogins && w.FailedLoginWindowMinutes == d.FailedLoginWindowMinutes &&
-		w.LockoutMinutes == d.LockoutMinutes && w.minPassword() == defaultMinPassword {
+		w.LockoutMinutes == d.LockoutMinutes && w.minPassword() == defaultMinPassword && w.ReadGroup == "" {
 		return nil
 	}
-	return &SharedWebAuth{w.MaxFailedLogins, w.FailedLoginWindowMinutes, w.LockoutMinutes, w.MinPasswordLength}
+	return &SharedWebAuth{w.MaxFailedLogins, w.FailedLoginWindowMinutes, w.LockoutMinutes, w.MinPasswordLength, w.ReadGroup}
 }
 
 func (a *SharedWebAuth) applyTo(w *WebConfig) {
 	if a != nil {
-		w.MaxFailedLogins, w.FailedLoginWindowMinutes, w.LockoutMinutes, w.MinPasswordLength =
-			a.MaxFailedLogins, a.FailedLoginWindowMinutes, a.LockoutMinutes, a.MinPasswordLength
+		w.MaxFailedLogins, w.FailedLoginWindowMinutes, w.LockoutMinutes, w.MinPasswordLength, w.ReadGroup =
+			a.MaxFailedLogins, a.FailedLoginWindowMinutes, a.LockoutMinutes, a.MinPasswordLength, a.ReadGroup
 	}
 }
 

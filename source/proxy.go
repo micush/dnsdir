@@ -73,6 +73,7 @@ type proxyReq struct {
 	Path   string `json:"path"` // /api/...?query
 	CT     string `json:"ct,omitempty"`
 	Body   []byte `json:"body,omitempty"`
+	RO     bool   `json:"ro,omitempty"` // the user is on a read-only account: the other node holds the line too
 }
 
 type proxyResp struct {
@@ -102,7 +103,7 @@ func (c *Cluster) handleProxy(rw http.ResponseWriter, r *http.Request, caller Cl
 	if len(user) > maxUsernameLen || user == "" || strings.ContainsAny(user, " \r\n\t") {
 		user = "unknown"
 	}
-	s := &session{user: user + " via " + caller.Addr}
+	s := &session{user: user + " via " + caller.Addr, readOnly: req.RO}
 	ctx := context.WithValue(r.Context(), proxyCtxKey{}, s)
 	in, err := http.NewRequestWithContext(ctx, req.Method, req.Path, bytes.NewReader(req.Body))
 	if err != nil {
@@ -175,7 +176,7 @@ func (w *WebServer) handleProxy(rw http.ResponseWriter, r *http.Request, s *sess
 		warnf("web: %q relaying %s %s to %s (from %s)", s.user, r.Method, strings.SplitN(path, "?", 2)[0], node, clientIP(r))
 	}
 	resp, err := w.mg.cl.Relay(r.Context(), node, proxyReq{
-		User: s.user, Method: r.Method, Path: path, CT: r.Header.Get("Content-Type"), Body: body,
+		User: s.user, Method: r.Method, Path: path, CT: r.Header.Get("Content-Type"), Body: body, RO: w.ro(s),
 	})
 	if err != nil {
 		code := http.StatusBadGateway

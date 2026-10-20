@@ -1,5 +1,13 @@
 # Changelog
 
+## [v489] - 2026-10-20 — Read-only group, and a test that the cards, chart and lists agree
+
+### Added
+- **Read-only groups** (Configure ▸ Web, `web.read_group`; off by default, shared by the cluster): members of these groups who are in none of the login groups can sign in and see everything, but cannot change anything. Every request but a read is refused with 403 and a message (Sign out still works), keys and passwords in the configuration are shown as `(hidden)`, the configuration versions cannot be opened or downloaded, and a read-only label shows beside the user name. The check is made on the node the person is signed in to and again on a node a request is relayed to.
+
+### Changed
+- New test: over a fully counted range every number card equals the sum of its chart series, the answer kinds add up to the total, each top list adds up to the total (to the picked kind's card when one is picked), and the Clients line ends at the Clients card.
+
 ## [v488] - 2026-10-20 — The Clients line ends at the Clients tile
 
 ### Fixed

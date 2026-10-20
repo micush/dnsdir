@@ -315,7 +315,7 @@
         h("div", { class: "muted small" }, "v" + s.version + (s.hostname && s.hostname.toLowerCase() !== "dnsdir" ? " · " + s.hostname : ""))),
       h("div", { class: "nav-section" }, groups),
       h("div", { class: "nav-footer" },
-        h("div", { class: "who" }, "Signed in as ", h("strong", {}, s.user)),
+        h("div", { class: "who" }, "Signed in as ", h("strong", {}, s.user), s.read_only ? h("span", { class: "ro-badge", title: "This account can look at everything but cannot change anything" }, "read-only") : null),
         h("button", { class: "nav-signout", type: "button", onclick: logout }, "Sign out")));
     root.append(helpControls());
     root.append(h("div", { class: "shell" }, nav,
@@ -2163,6 +2163,7 @@
   const WEB_FIELDS = [
     { k: "listen", l: "Listen address", t: "port", hint: "the port, default 53853 (all addresses); to listen on one address only, write it with the port: 10.0.0.1:53853" },
     { shared: true, k: "group", l: "Login groups", t: "text", hint: "one or more, separated by commas: a member of any may sign in. The first one that is a local group is the one the Users page manages; the others can be directory (Active Directory) groups" },
+    { shared: true, k: "read_group", l: "Read-only groups", t: "text", hint: "optional, same form: a member of one of these (and of none of the login groups) can sign in and look at everything but change nothing, for example dnsdir-view" },
     { k: "pam_service", l: "PAM service", t: "text" },
     { k: "session_idle_minutes", l: "Session idle timeout (min)", t: "int", min: 1 },
     { shared: true, k: "max_failed_logins", l: "Failed logins before lockout", t: "int", min: 1 },

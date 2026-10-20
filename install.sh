@@ -31,6 +31,7 @@ UNIT=/etc/systemd/system/$UNIT_NAME
 PAM_FILE=/etc/pam.d/dnsdir
 NM_FILE=/etc/NetworkManager/conf.d/90-dnsdir-unmanaged.conf
 GROUP=dnsdir
+RO_GROUP=dnsdir-ro   # members may look at the web GUI but change nothing
 GUI_PORT=53853
 CLUSTER_PORT=53854
 STATE_DIR=/var/lib/dnsdir
@@ -61,6 +62,9 @@ Usage: sudo ./install.sh [options]
   --add-user NAME   add NAME to the '$GROUP' group so they can log in to the
                     web GUI (repeatable). The user running the installer
                     (the one behind sudo) is always added.
+  --add-ro-user NAME  add NAME to the '$RO_GROUP' group: they can log in to the
+                    web GUI and look at everything but change nothing
+                    (repeatable).
   --no-start        install and enable the service but do not start/restart it
   --force           reinstall even if this version is already installed, and
                     allow a downgrade
@@ -79,11 +83,13 @@ EOF
 }
 
 # ── arguments ────────────────────────────────────────────────────────────────
-ADD_USERS=(); KEEP_GO=1; NO_START=0; FORCE=0; SKIP_DEPS=0; ASSUME_YES=0; DRY=0; OPT_GO=""
+ADD_USERS=(); ADD_RO_USERS=(); KEEP_GO=1; NO_START=0; FORCE=0; SKIP_DEPS=0; ASSUME_YES=0; DRY=0; OPT_GO=""
 while [ $# -gt 0 ]; do
   case $1 in
     --add-user)    [ $# -ge 2 ] || die "--add-user needs a user name"; ADD_USERS+=("$2"); shift 2;;
     --add-user=*)  ADD_USERS+=("${1#*=}"); shift;;
+    --add-ro-user) [ $# -ge 2 ] || die "--add-ro-user needs a user name"; ADD_RO_USERS+=("$2"); shift 2;;
+    --add-ro-user=*) ADD_RO_USERS+=("${1#*=}"); shift;;
     --no-start)    NO_START=1; shift;;
     --no-keep-go)  KEEP_GO=0; shift;;
     --force)       FORCE=1; shift;;
@@ -211,10 +217,12 @@ if [ -n "$OTHER" ] && [ "$OTHER" != "$BIN" ]; then
 fi
 
 # values remembered from a previous install (so upgrades keep them)
-GROUP_CREATED=0; PAM_CREATED=0; NM_CREATED=0
+GROUP_CREATED=0; RO_GROUP_CREATED=0; PAM_CREATED=0; NM_CREATED=0
 if [ -f "$MANIFEST" ]; then
   # shellcheck disable=SC1090
   GROUP_CREATED=$( . "$MANIFEST"; echo "${GROUP_CREATED:-0}" )
+  # shellcheck disable=SC1090
+  RO_GROUP_CREATED=$( . "$MANIFEST"; echo "${RO_GROUP_CREATED:-0}" )
   # shellcheck disable=SC1090
   PAM_CREATED=$( . "$MANIFEST"; echo "${PAM_CREATED:-0}" )
   # shellcheck disable=SC1090
@@ -606,6 +614,23 @@ for u in ${ADD_USERS[@]+"${ADD_USERS[@]}"}; do
   fi
 done
 
+# read-only group: members may sign in to the web GUI and look at everything, but change nothing
+step "Group '$RO_GROUP' (members may look at the web GUI but change nothing)"
+if getent group "$RO_GROUP" >/dev/null 2>&1; then
+  info "group exists"
+else
+  run groupadd --system "$RO_GROUP"
+  RO_GROUP_CREATED=1
+  info "created group $RO_GROUP"
+fi
+for u in ${ADD_RO_USERS[@]+"${ADD_RO_USERS[@]}"}; do
+  if id -u "$u" >/dev/null 2>&1; then
+    run usermod -aG "$RO_GROUP" "$u"; info "added $u to $RO_GROUP (read-only)"
+  else
+    warn "no such user '$u' — not added"
+  fi
+done
+
 # PAM service
 step "PAM service $PAM_FILE"
 case $FAMILY in
@@ -737,6 +762,8 @@ if [ "$DRY" = 0 ]; then
     echo "NM_CREATED=$NM_CREATED"
     echo "GROUP=$GROUP"
     echo "GROUP_CREATED=$GROUP_CREATED"
+    echo "RO_GROUP=$RO_GROUP"
+    echo "RO_GROUP_CREATED=$RO_GROUP_CREATED"
     echo "CONF_DIR=$CONF_DIR"
     echo "STATE_DIR=$STATE_DIR"
     echo "GO_KEPT=$GO_KEPT"

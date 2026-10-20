@@ -19,11 +19,12 @@ UNIT=/etc/systemd/system/$UNIT_NAME
 PAM_FILE=/etc/pam.d/dnsdir
 NM_FILE=/etc/NetworkManager/conf.d/90-dnsdir-unmanaged.conf
 GROUP=dnsdir
+RO_GROUP=dnsdir-ro
 LEGACY_CONF_DIR=/etc/liras   # where releases before v15 kept the config
 STATE_DIR=/var/lib/dnsdir
 CONF_DIR=$STATE_DIR
 SYSTEMCTL=${DNSDIR_SYSTEMCTL:-systemctl}
-PAM_CREATED=""; NM_CREATED=""; GROUP_CREATED=""; PAM_SHA256=""
+PAM_CREATED=""; NM_CREATED=""; GROUP_CREATED=""; RO_GROUP_CREATED=""; PAM_SHA256=""
 
 PURGE=0; RM_GROUP=0; ASSUME_YES=0; DRY=0
 if [ -t 1 ]; then B=$'\033[1m'; R=$'\033[31m'; Y=$'\033[33m'; G=$'\033[32m'; N=$'\033[0m'; else B=; R=; Y=; G=; N=; fi
@@ -70,7 +71,7 @@ fi
 mval() { sed -n "s/^$1=//p" "$MANIFEST" 2>/dev/null | head -n1; }
 if [ -f "$MANIFEST" ]; then
   PAM_CREATED=$(mval PAM_CREATED); NM_CREATED=$(mval NM_CREATED)
-  GROUP_CREATED=$(mval GROUP_CREATED); PAM_SHA256=$(mval PAM_SHA256)
+  GROUP_CREATED=$(mval GROUP_CREATED); RO_GROUP_CREATED=$(mval RO_GROUP_CREATED); PAM_SHA256=$(mval PAM_SHA256)
 else
   warn "no install manifest at $MANIFEST — using the default layout; the group and PAM file will be left alone unless --purge"
 fi
@@ -179,6 +180,13 @@ if [ "$RM_GROUP" = 1 ] || { [ "$PURGE" = 1 ] && [ "$GROUP_CREATED" = 1 ]; }; the
   fi
 elif getent group "$GROUP" >/dev/null 2>&1; then
   info "kept group $GROUP (use --remove-group to delete it)"
+fi
+if [ "$RM_GROUP" = 1 ] || { [ "$PURGE" = 1 ] && [ "$RO_GROUP_CREATED" = 1 ]; }; then
+  if getent group "$RO_GROUP" >/dev/null 2>&1; then
+    run groupdel "$RO_GROUP" && info "removed group $RO_GROUP" || warn "could not remove group $RO_GROUP"
+  fi
+elif getent group "$RO_GROUP" >/dev/null 2>&1; then
+  info "kept group $RO_GROUP (use --remove-group to delete it)"
 fi
 
 step "AnyName removed"

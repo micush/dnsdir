@@ -1270,8 +1270,9 @@ type WebConfig struct {
 	// local group and a group of the same name with "-users" for a directory such as Active Directory).
 	Group string `json:"group"`
 	// ReadGroup is the read-only login group(s), same format as Group: a member who is in none of the Group groups but in
-	// one of these may sign in and look at everything, but cannot change anything.  Empty (the default) means there is none.
-	ReadGroup string `json:"read_group,omitempty"`
+	// one of these may sign in and look at everything, but cannot change anything.  The default is "dnsdir-ro" (the group the
+	// installer creates); empty means there is none.
+	ReadGroup string `json:"read_group"`
 	// PAMService is the /etc/pam.d service used to check passwords.
 	PAMService string `json:"pam_service"`
 	// SessionIdleMinutes logs a browser out after this much inactivity.
@@ -1306,6 +1307,7 @@ func defaultWeb() WebConfig {
 	return WebConfig{
 		Listen:                   fmt.Sprintf(":%d", defaultWebPort),
 		Group:                    "dnsdir,dnsdir-users",
+		ReadGroup:                "dnsdir-ro",
 		PAMService:               "dnsdir",
 		SessionIdleMinutes:       30,
 		MaxFailedLogins:          3,

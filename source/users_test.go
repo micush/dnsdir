@@ -88,7 +88,7 @@ func TestUsersList(t *testing.T) {
 func TestUserAdd(t *testing.T) {
 	m, calls := usersFixture(t, fxGroup, fxPasswd, "")
 	exp := time.Date(2027, 1, 2, 12, 0, 0, 0, time.UTC).Unix()
-	if _, _, err := m.UserAdd("dave", "s3cret pass", exp, "alice"); err != nil {
+	if _, _, err := m.UserAdd("dave", "s3cret pass", exp, false, "alice"); err != nil {
 		t.Fatal(err)
 	}
 	if len(*calls) != 2 || (*calls)[0].name != "useradd" || (*calls)[1].name != "chpasswd" {
@@ -115,7 +115,7 @@ func TestUserAddRefusals(t *testing.T) {
 		{"root", "x"},  // exists
 		{"alice", "x"}, // exists: never re-password an existing account
 	} {
-		if _, _, err := m.UserAdd(c.name, c.pw, 0, "alice"); err == nil {
+		if _, _, err := m.UserAdd(c.name, c.pw, 0, false, "alice"); err == nil {
 			t.Errorf("%q / %q should be refused", c.name, c.pw)
 		}
 	}
@@ -133,7 +133,7 @@ func TestUserAddRollsBackWithoutPassword(t *testing.T) {
 		}
 		return "", nil
 	}
-	if _, _, err := m.UserAdd("dave", "long-enough-1", 0, "alice"); err == nil || !strings.Contains(err.Error(), "bad password") {
+	if _, _, err := m.UserAdd("dave", "long-enough-1", 0, false, "alice"); err == nil || !strings.Contains(err.Error(), "bad password") {
 		t.Fatalf("err = %v", err)
 	}
 	last := (*calls)[len(*calls)-1]
@@ -364,14 +364,14 @@ func TestUsersListSuggestsOrdinaryAccountsNotInTheGroup(t *testing.T) {
 
 func TestUserGrantAddsAnExistingAccountToTheGroup(t *testing.T) {
 	m, calls := usersFixture(t, fxGroup, fxPasswd2, "dave:$6$salt$abcdefghijklmnop:1::::::\n")
-	if _, _, err := m.UserGrant("dave", "alice"); err != nil {
+	if _, _, err := m.UserGrant("dave", false, "alice"); err != nil {
 		t.Fatal(err)
 	}
 	if len(*calls) != 1 || (*calls)[0].name != "usermod" || strings.Join((*calls)[0].args, " ") != "-aG dnsdir dave" {
 		t.Fatalf("calls: %+v", *calls)
 	}
 	for _, c := range []struct{ name, why string }{{"nobody-here", "an account that does not exist"}, {"alice", "an account already in the group"}, {"root", "root"}, {"Bad Name", "an invalid name"}} {
-		if _, _, err := m.UserGrant(c.name, "alice"); err == nil {
+		if _, _, err := m.UserGrant(c.name, false, "alice"); err == nil {
 			t.Errorf("%s must be refused", c.why)
 		}
 	}
@@ -432,17 +432,17 @@ func TestPeerGrantAndRevoke(t *testing.T) {
 func TestUserGrantDirectoryAccount(t *testing.T) {
 	m, calls := usersFixture(t, fxGroup, fxPasswd, "")
 	usersLookup = func(n string) bool { return n == "Mcc.Smith" || n == "EX\\bob" }
-	if _, _, err := m.UserGrant("Mcc.Smith", "alice"); err != nil {
+	if _, _, err := m.UserGrant("Mcc.Smith", false, "alice"); err != nil {
 		t.Fatalf("grant of a directory account: %v", err)
 	}
 	if len(*calls) != 1 || (*calls)[0].name != "gpasswd" || strings.Join((*calls)[0].args, " ") != "-a Mcc.Smith "+m.guiGroup() {
 		t.Fatalf("a directory account is added with gpasswd: %+v", *calls)
 	}
-	if _, _, err := m.UserGrant("EX\\bob", "alice"); err != nil {
+	if _, _, err := m.UserGrant("EX\\bob", false, "alice"); err != nil {
 		t.Fatalf("domain\\name: %v", err)
 	}
 	for _, bad := range []string{"a:b", "a,b", "a b", "x\ny", "-a", "nobody-here"} {
-		if _, _, err := m.UserGrant(bad, "alice"); err == nil {
+		if _, _, err := m.UserGrant(bad, false, "alice"); err == nil {
 			t.Errorf("%q should be refused", bad)
 		}
 	}

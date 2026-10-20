@@ -2163,7 +2163,7 @@
   const WEB_FIELDS = [
     { k: "listen", l: "Listen address", t: "port", hint: "the port, default 53853 (all addresses); to listen on one address only, write it with the port: 10.0.0.1:53853" },
     { shared: true, k: "group", l: "Login groups", t: "text", hint: "one or more, separated by commas: a member of any may sign in. The first one that is a local group is the one the Users page manages; the others can be directory (Active Directory) groups" },
-    { shared: true, k: "read_group", l: "Read-only groups", t: "text", hint: "optional, same form: a member of one of these (and of none of the login groups) can sign in and look at everything but change nothing, for example dnsdir-view" },
+    { shared: true, k: "read_group", l: "Read-only groups", t: "text", hint: "same form; a member of one of these (and of none of the login groups) can sign in and look at everything but change nothing. Empty = nobody. People are added on the Users page" },
     { k: "pam_service", l: "PAM service", t: "text" },
     { k: "session_idle_minutes", l: "Session idle timeout (min)", t: "int", min: 1 },
     { shared: true, k: "max_failed_logins", l: "Failed logins before lockout", t: "int", min: 1 },
@@ -4873,11 +4873,13 @@
   // ── Users  (CLI: --users, --user-add, --user-passwd, --user-expiry, --user-del) ──
   VIEWS.users = (() => {
     // Layout: the accounts in a list on the left, the chosen one (or the "new user" / "existing account" form) on the right.
-    let status, listBox, detail, filterIn, users = [], others = [], group = "", sel = null, mode = "user", otherList = null;
+    let status, listBox, detail, filterIn, users = [], others = [], group = "", readGroup = "", sel = null, mode = "user", otherList = null;
     const dateText = (u) => (u.expires ? new Date(u.expires * 1000).toISOString().slice(0, 10) : "never");
     const toUnix = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? Math.floor(Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10), 12) / 1000) : 0);
     const me = () => (state.session && state.session.user) || "";
     const current = () => users.find((u) => u.name === sel) || null;
+    // Access: full (may change things) or read-only; offered only while a read-only group is set
+    const accessSel = (ro) => h("select", { "aria-label": "Access" }, h("option", { value: "full" }, "Full access"), h("option", { value: "ro", selected: ro ? "" : null }, "Read-only"));
 
     async function call(path, body, done) {
       try {
@@ -4899,7 +4901,7 @@
           const on = mode === "user" && u.name === sel;
           listBox.append(h("button", { type: "button", class: "uitem" + (on ? " on" : ""), "data-user": u.name,
             onclick: () => { sel = u.name; mode = "user"; drawList(); drawDetail(); } },
-            h("span", { class: "uname" }, u.name, u.name === me() ? h("span", { class: "pill info tiny" }, "you") : null),
+            h("span", { class: "uname" }, u.name, u.name === me() ? h("span", { class: "pill info tiny" }, "you") : null, u.read_only ? h("span", { class: "pill tiny" }, "read-only") : null),
             u.expired ? h("span", { class: "usub bad" }, "expired " + dateText(u)) : h("span", { class: "usub" }, u.expires ? "expires " + dateText(u) : "never expires")));
         });
       } finally { morph(real, listBox); listBox = real; }
@@ -4913,21 +4915,23 @@
         const name = h("input", { type: "text", autocomplete: "off", spellcheck: "false", autocapitalize: "none", maxlength: "32" });
         const pw = h("input", { type: "password", autocomplete: "new-password" });
         const exp = h("input", { type: "date" });
-        const add = () => call("add", { username: name.value.trim(), password: pw.value, expires: toUnix(exp.value) }, () => { sel = name.value.trim(); mode = "user"; });
+        const acc = readGroup ? accessSel(false) : null;
+        const add = () => call("add", { username: name.value.trim(), password: pw.value, expires: toUnix(exp.value), read_only: !!acc && acc.value === "ro" }, () => { sel = name.value.trim(); mode = "user"; });
         pw.addEventListener("keydown", (e) => { if (e.key === "Enter") add(); });
         detail.append(h("header", {}, h("h2", {}, tc("New user"))), h("div", { class: "body" },
-          h("div", { class: "grid c3" }, h("label", { class: "f" }, "Name", name), h("label", { class: "f" }, "Password", pw), h("label", { class: "f" }, "Expires (blank = never)", exp)),
+          h("div", { class: "grid c3" }, h("label", { class: "f" }, "Name", name), h("label", { class: "f" }, "Password", pw), h("label", { class: "f" }, "Expires (blank = never)", exp), acc ? h("label", { class: "f" }, "Access", acc) : null),
           h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "button", onclick: add }, "Add user"))));
         name.focus();
         return;
       }
       if (mode === "existing") {
         const who = h("input", { type: "text", list: "users-others", autocomplete: "off", spellcheck: "false", autocapitalize: "none", maxlength: "64" });
-        const grant = () => call("grant", { username: who.value.trim() }, () => { sel = who.value.trim(); mode = "user"; });
+        const acc = readGroup ? accessSel(false) : null;
+        const grant = () => call("grant", { username: who.value.trim(), read_only: !!acc && acc.value === "ro" }, () => { sel = who.value.trim(); mode = "user"; });
         who.addEventListener("keydown", (e) => { if (e.key === "Enter") grant(); });
         detail.append(h("header", {}, h("h2", {}, tc("Add an existing account"))), h("div", { class: "body" },
           h("p", { class: "muted small" }, "An account that already exists on this host, including one from a directory (Active Directory, LDAP through sssd), can be allowed to sign in here by adding it to the " + group + " group. A directory account keeps its password in the directory."),
-          h("div", { class: "grid c3" }, h("label", { class: "f" }, "Name", who, otherList)),
+          h("div", { class: "grid c3" }, h("label", { class: "f" }, "Name", who, otherList), acc ? h("label", { class: "f" }, "Access", acc) : null),
           h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "button", onclick: grant }, "Add to group"))));
         who.focus();
         return;
@@ -4937,11 +4941,13 @@
       const self = u.name === me();
       const pw = h("input", { type: "password", autocomplete: "new-password", "aria-label": "New password for " + u.name });
       const d = h("input", { type: "date", value: u.expires ? dateText(u) : "", "aria-label": "Expiry date for " + u.name });
+      const acc = readGroup && !self ? accessSel(!!u.read_only) : null;
       const note = h("span", { class: "usaved", "aria-live": "polite" });
       // Save sends what changed: a new password if one was typed, the date if it differs (blank = never expires)
       const save = async () => {
         const was = u.expires ? dateText(u) : "";
-        if (!pw.value && d.value === was) { note.textContent = "Nothing to save"; return; }
+        const accChanged = !!acc && (acc.value === "ro") !== !!u.read_only;
+        if (!pw.value && d.value === was && !accChanged) { note.textContent = "Nothing to save"; return; }
         note.textContent = "";
         if (pw.value) {
           let ok = true;
@@ -4950,13 +4956,15 @@
           if (!ok) return;
         }
         if (d.value !== was) await call("expiry", { username: u.name, expires: d.value ? toUnix(d.value) : 0 });
+        if (accChanged) await call("access", { username: u.name, read_only: acc.value === "ro" });
         drawDetail();
         const n = detail.querySelector(".usaved"); if (n) n.textContent = "Saved";
       };
       pw.addEventListener("keydown", (e) => { if (e.key === "Enter") save(); });
       const body = h("div", { class: "body ubody" },
         h("div", { class: "urow" }, h("label", { class: "f grow" }, "New password", pw)),
-        h("div", { class: "urow" }, h("label", { class: "f grow" }, "Expires (blank = never)", d)));
+        h("div", { class: "urow" }, h("label", { class: "f grow" }, "Expires (blank = never)", d)),
+        acc ? h("div", { class: "urow" }, h("label", { class: "f grow" }, "Access", acc)) : null);
       const left = [];
       if (!self) {
         left.push(h("button", { class: "btn", type: "button", onclick: () => {
@@ -4991,6 +4999,7 @@
         users = r.users || [];
         others = r.others || [];
         group = r.group;
+        readGroup = r.read_group || "";
         if (otherList) clear(otherList).append(...others.map((n) => h("option", { value: n })));
         if (mode === "user" && !current()) sel = users.length ? users[0].name : null;
         drawList();

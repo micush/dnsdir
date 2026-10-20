@@ -57,6 +57,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		User     string     `json:"username"`
 		Password string     `json:"password"`
 		Expires  int64      `json:"expires"`
+		ReadOnly bool       `json:"read_only"`
 		Iface    string     `json:"iface"`
 		Filter   string     `json:"filter"`
 		Seconds  int        `json:"seconds"`
@@ -495,19 +496,21 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 	// console users
 	case "users.list":
 		return m.UsersList(), nil
-	case "users.add", "users.password", "users.expiry", "users.delete", "users.grant", "users.revoke":
+	case "users.add", "users.password", "users.expiry", "users.delete", "users.grant", "users.revoke", "users.access":
 		var msg string
 		var partial bool
 		var err error
 		switch cmd {
 		case "users.add":
-			msg, partial, err = m.UserAdd(a.User, a.Password, a.Expires, actor)
+			msg, partial, err = m.UserAdd(a.User, a.Password, a.Expires, a.ReadOnly, actor)
 		case "users.password":
 			msg, partial, err = m.UserPassword(a.User, a.Password, actor)
 		case "users.expiry":
 			msg, partial, err = m.UserExpiry(a.User, a.Expires, actor)
 		case "users.grant":
-			msg, partial, err = m.UserGrant(a.User, actor)
+			msg, partial, err = m.UserGrant(a.User, a.ReadOnly, actor)
+		case "users.access":
+			msg, partial, err = m.UserAccess(a.User, a.ReadOnly, actor)
 		case "users.revoke":
 			msg, partial, err = m.UserRevoke(a.User, actor)
 		default:

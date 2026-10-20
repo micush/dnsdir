@@ -28,15 +28,18 @@ import (
 
 // UserInfo is one account.
 type UserInfo struct {
-	Name    string `json:"name"`
-	Expires int64  `json:"expires"` // Unix seconds, 0 = never
-	Expired bool   `json:"expired"` // the operating system refuses it now
+	Name     string `json:"name"`
+	ReadOnly bool   `json:"read_only,omitempty"` // in the read-only group only: may look, not change
+	Expires  int64  `json:"expires"`             // Unix seconds, 0 = never
+	Expired  bool   `json:"expired"`             // the operating system refuses it now
 }
 
 // UsersView is what the Users page shows.
 type UsersView struct {
-	Group string     `json:"group"`
-	Users []UserInfo `json:"users"`
+	Group string `json:"group"`
+	// ReadGroup is the local read-only group the page manages; empty when the read-only setting is empty.
+	ReadGroup string     `json:"read_group"`
+	Users     []UserInfo `json:"users"`
 	// Others are the local accounts that could be added to the group (people, not system accounts).
 	Others []string `json:"others"`
 }
@@ -112,6 +115,21 @@ func (m *Mgmt) guiGroup() string {
 	if len(list) == 0 {
 		return "dnsdir"
 	}
+	return firstLocalGroup(list)
+}
+
+// roGroup is the local group the Users page keeps the read-only accounts in: the first of web.read_group that is in
+// /etc/group, else the first one; empty when the setting is empty.
+func (m *Mgmt) roGroup() string {
+	if p := m.webPolicy.Load(); p != nil {
+		if list := splitGroups(p.ReadGroup); len(list) > 0 {
+			return firstLocalGroup(list)
+		}
+	}
+	return ""
+}
+
+func firstLocalGroup(list []string) string {
 	if b, err := os.ReadFile(usersGroupFile); err == nil {
 		for _, g := range list { // keep the order of the setting when several are local
 			for _, l := range strings.Split(string(b), "\n") {
@@ -191,12 +209,26 @@ func (m *Mgmt) UsersList() UsersView {
 		}
 	}
 	today := usersNow().Unix() / 86400
-	v := UsersView{Group: g, Users: []UserInfo{}, Others: otherAccounts(g)}
+	rg := m.roGroup()
+	v := UsersView{Group: g, ReadGroup: rg, Users: []UserInfo{}, Others: otherAccounts(g, rg)}
+	full := map[string]bool{}
 	for _, n := range groupMembers(g) {
+		full[n] = true
+	}
+	names := groupMembers(g)
+	if rg != "" {
+		for _, n := range groupMembers(rg) {
+			if !full[n] {
+				names = append(names, n)
+			}
+		}
+		sort.Strings(names)
+	}
+	for _, n := range names {
 		if n == "root" {
 			continue // never listed, never managed
 		}
-		u := UserInfo{Name: n}
+		u := UserInfo{Name: n, ReadOnly: !full[n]}
 		if d, ok := exp[n]; ok {
 			u.Expires = d * 86400
 			u.Expired = today >= d
@@ -208,10 +240,15 @@ func (m *Mgmt) UsersList() UsersView {
 
 // otherAccounts lists the accounts on this machine that are not in the group and could be: ordinary accounts (a user
 // id from 1000 up, not "nobody"), by name.  A system account can still be added by typing its name.
-func otherAccounts(group string) []string {
+func otherAccounts(groups ...string) []string {
 	in := map[string]bool{"root": true}
-	for _, n := range groupMembers(group) {
-		in[n] = true
+	for _, g := range groups {
+		if g == "" {
+			continue
+		}
+		for _, n := range groupMembers(g) {
+			in[n] = true
+		}
 	}
 	out := []string{}
 	b, err := os.ReadFile(usersPasswdFile)
@@ -308,8 +345,20 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
-func (m *Mgmt) memberOf(name string) bool {
-	for _, n := range groupMembers(m.guiGroup()) {
+// memberOf: the account is in the login group or in the read-only group (root is never one).
+func (m *Mgmt) memberOf(name string) bool { return m.fullMember(name) || m.roMember(name) }
+
+// fullMember: in the login group, so it can change things.
+func (m *Mgmt) fullMember(name string) bool { return inList(groupMembers(m.guiGroup()), name) }
+
+// roMember: in the read-only group and not in the login group.
+func (m *Mgmt) roMember(name string) bool {
+	rg := m.roGroup()
+	return rg != "" && !m.fullMember(name) && inList(groupMembers(rg), name)
+}
+
+func inList(list []string, name string) bool {
+	for _, n := range list {
 		if n == name && n != "root" {
 			return true
 		}
@@ -327,11 +376,12 @@ func (m *Mgmt) memberOf(name string) bool {
 
 // usersMsg is one change as it travels between members.
 type usersMsg struct {
-	Op      string `json:"op"` // apply | password | expiry | delete | grant | revoke
+	Op      string `json:"op"` // apply | password | expiry | delete | grant | revoke | access
 	Name    string `json:"name"`
 	Hash    string `json:"hash,omitempty"`
 	Expires int64  `json:"expires,omitempty"`
 	By      string `json:"by,omitempty"`
+	RO      bool   `json:"ro,omitempty"` // for the read-only group (apply, grant, access)
 }
 
 var cryptHashRe = regexp.MustCompile(`^\$[0-9a-z]+\$[A-Za-z0-9./$,=+-]{4,200}$`)
@@ -409,7 +459,7 @@ func (m *Mgmt) usersFan(msg usersMsg, done string) (string, bool) {
 func (m *Mgmt) usersPeer(msg usersMsg, by string) error {
 	name := msg.Name
 	okName := validUserName(name)
-	if msg.Op == "grant" || msg.Op == "revoke" {
+	if msg.Op == "grant" || msg.Op == "revoke" || msg.Op == "access" {
 		okName = validAccountName(name)
 	}
 	if !okName || name == "root" {
@@ -427,7 +477,7 @@ func (m *Mgmt) usersPeer(msg usersMsg, by string) error {
 		case msg.Op == "password":
 			return fmt.Errorf("%q is not a member of the %s group here", name, m.guiGroup())
 		default:
-			if err := m.createUser(name, msg.Expires); err != nil {
+			if err := m.createUser(name, msg.Expires, msg.RO); err != nil {
 				return err
 			}
 		}
@@ -446,11 +496,11 @@ func (m *Mgmt) usersPeer(msg usersMsg, by string) error {
 		case m.memberOf(name):
 			return nil
 		case userExists(name):
-			if err := m.addToGroup(name); err != nil {
+			if err := m.addToGroup(name, msg.RO); err != nil {
 				return err
 			}
 		case cryptHashRe.MatchString(msg.Hash): // not here yet: made the same as on the node that added it
-			if err := m.createUser(name, msg.Expires); err != nil {
+			if err := m.createUser(name, msg.Expires, msg.RO); err != nil {
 				return err
 			}
 			if out, err := usersRun(name+":"+msg.Hash+"\n", "chpasswd", "-e"); err != nil {
@@ -464,14 +514,26 @@ func (m *Mgmt) usersPeer(msg usersMsg, by string) error {
 		if !m.memberOf(name) {
 			return nil // already out
 		}
-		if m.countMembers() <= 1 {
+		if m.fullMember(name) && m.countMembers() <= 1 {
 			return errors.New("that is the last account that can sign in on this node")
 		}
-		if err := m.removeFromGroup(name); err != nil {
+		if err := m.removeFromGroups(name); err != nil {
 			return err
 		}
 		m.endUserSessions(name)
 		infof("users: %s removed %q from the %s group here", by, name, m.guiGroup())
+	case "access":
+		if !m.memberOf(name) {
+			return fmt.Errorf("%q is not a member of the %s group here", name, m.guiGroup())
+		}
+		if m.roMember(name) == msg.RO {
+			return nil // already so
+		}
+		if err := m.setAccess(name, msg.RO); err != nil {
+			return err
+		}
+		m.endUserSessions(name)
+		infof("users: %s made %q %s here", by, name, accessWord(msg.RO))
 	case "expiry":
 		if err := m.requireMember(name); err != nil {
 			return err
@@ -490,7 +552,7 @@ func (m *Mgmt) usersPeer(msg usersMsg, by string) error {
 		if err := m.requireMember(name); err != nil {
 			return err
 		}
-		if m.countMembers() <= 1 {
+		if m.fullMember(name) && m.countMembers() <= 1 {
 			return errors.New("that is the last account that can sign in on this node")
 		}
 		if out, err := usersRun("", "userdel", name); err != nil {
@@ -504,8 +566,13 @@ func (m *Mgmt) usersPeer(msg usersMsg, by string) error {
 	return nil
 }
 
-func (m *Mgmt) createUser(name string, expires int64) error {
+func (m *Mgmt) createUser(name string, expires int64, ro bool) error {
 	g := m.guiGroup()
+	if ro {
+		if g = m.roGroup(); g == "" {
+			return errors.New("there is no read-only group: set Read-only groups under Configure ▸ Web first")
+		}
+	}
 	shell := "/bin/false"
 	for _, s := range nologinShells {
 		if _, err := os.Stat(s); err == nil {
@@ -524,26 +591,57 @@ func (m *Mgmt) createUser(name string, expires int64) error {
 	return nil
 }
 
-func (m *Mgmt) addToGroup(name string) error {
+func (m *Mgmt) addToGroup(name string, ro bool) error {
+	g := m.guiGroup()
+	if ro {
+		if g = m.roGroup(); g == "" {
+			return errors.New("there is no read-only group: set Read-only groups under Configure ▸ Web first")
+		}
+	}
 	if !localAccount(name) { // a directory account: usermod does not know it, gpasswd does
-		if out, err := usersRun("", "gpasswd", "-a", name, m.guiGroup()); err != nil {
+		if out, err := usersRun("", "gpasswd", "-a", name, g); err != nil {
 			return fmt.Errorf("gpasswd failed: %s", firstNonEmpty(out, err.Error()))
 		}
 		return nil
 	}
-	if out, err := usersRun("", "usermod", "-aG", m.guiGroup(), name); err != nil {
+	if out, err := usersRun("", "usermod", "-aG", g, name); err != nil {
 		return fmt.Errorf("usermod failed: %s", firstNonEmpty(out, err.Error()))
 	}
 	return nil
 }
 
-func (m *Mgmt) removeFromGroup(name string) error {
-	g := m.guiGroup()
-	if !listedInGroup(g, name) {
-		return fmt.Errorf("%q is in the %s group because it is that account's primary group; change that with usermod -g, or delete the account", name, g)
+// removeFromGroups takes the account out of the login group and the read-only group, whichever it is listed in.
+func (m *Mgmt) removeFromGroups(name string) error {
+	for _, g := range []string{m.guiGroup(), m.roGroup()} {
+		if g == "" || !inList(groupMembers(g), name) {
+			continue
+		}
+		if !listedInGroup(g, name) {
+			return fmt.Errorf("%q is in the %s group because it is that account's primary group; change that with usermod -g, or delete the account", name, g)
+		}
+		if out, err := usersRun("", "gpasswd", "-d", name, g); err != nil {
+			return fmt.Errorf("gpasswd failed: %s", firstNonEmpty(out, err.Error()))
+		}
 	}
-	if out, err := usersRun("", "gpasswd", "-d", name, g); err != nil {
-		return fmt.Errorf("gpasswd failed: %s", firstNonEmpty(out, err.Error()))
+	return nil
+}
+
+func accessWord(ro bool) string {
+	if ro {
+		return "read-only"
+	}
+	return "full access"
+}
+
+// setAccess moves an account between the login group and the read-only group.  An account that has one of them as
+// its primary group cannot be moved (gpasswd cannot take it out of that one).
+func (m *Mgmt) setAccess(name string, ro bool) error {
+	if err := m.removeFromGroups(name); err != nil {
+		return err
+	}
+	if err := m.addToGroup(name, ro); err != nil {
+		m.addToGroup(name, !ro) // put it back where it was
+		return err
 	}
 	return nil
 }
@@ -561,7 +659,7 @@ func (m *Mgmt) setExpiry(name string, expires int64) error {
 
 // UserAdd creates a sign-in-only account in the GUI group on every node.
 // expires is Unix seconds, 0 for none.
-func (m *Mgmt) UserAdd(name, password string, expires int64, actor string) (string, bool, error) {
+func (m *Mgmt) UserAdd(name, password string, expires int64, readOnly bool, actor string) (string, bool, error) {
 	if !validUserName(name) || name == "root" {
 		return "", false, errors.New("a user name is 1-32 characters: lower-case letters, digits, _ or -, starting with a letter or _")
 	}
@@ -571,7 +669,7 @@ func (m *Mgmt) UserAdd(name, password string, expires int64, actor string) (stri
 	if userExists(name) {
 		return "", false, fmt.Errorf("an account called %q already exists on this machine", name)
 	}
-	if err := m.createUser(name, expires); err != nil {
+	if err := m.createUser(name, expires, readOnly); err != nil {
 		return "", false, err
 	}
 	if err := m.setUserPassword(name, password); err != nil {
@@ -579,14 +677,14 @@ func (m *Mgmt) UserAdd(name, password string, expires int64, actor string) (stri
 		return "", false, err
 	}
 	infof("users: %s created account %q in group %q", actor, name, m.guiGroup())
-	msg, partial := m.usersFan(usersMsg{Op: "apply", Name: name, Hash: shadowHash(name), Expires: expires, By: actor}, "User "+name+" added.")
+	msg, partial := m.usersFan(usersMsg{Op: "apply", Name: name, Hash: shadowHash(name), Expires: expires, By: actor, RO: readOnly}, "User "+name+" added"+map[bool]string{true: " (read-only)", false: ""}[readOnly]+".")
 	return msg, partial, nil
 }
 
 // UserGrant puts an account that already exists on this machine into the GUI group, so it can sign in with the
 // password it already has.  On the other nodes the account is added to the group when it exists there and created
 // with the same password hash when it does not.
-func (m *Mgmt) UserGrant(name, actor string) (string, bool, error) {
+func (m *Mgmt) UserGrant(name string, readOnly bool, actor string) (string, bool, error) {
 	if !validAccountName(name) || name == "root" {
 		return "", false, errors.New("invalid user name")
 	}
@@ -594,9 +692,9 @@ func (m *Mgmt) UserGrant(name, actor string) (string, bool, error) {
 		return "", false, fmt.Errorf("there is no account called %q on this machine; use Add user to create a local one", name)
 	}
 	if m.memberOf(name) {
-		return "", false, fmt.Errorf("%q is already in the %s group", name, m.guiGroup())
+		return "", false, fmt.Errorf("%q is already in the %s group (change its access on its own page)", name, m.guiGroup())
 	}
-	if err := m.addToGroup(name); err != nil {
+	if err := m.addToGroup(name, readOnly); err != nil {
 		return "", false, err
 	}
 	infof("users: %s added the existing account %q to the %s group", actor, name, m.guiGroup())
@@ -608,7 +706,7 @@ func (m *Mgmt) UserGrant(name, actor string) (string, bool, error) {
 	if hash == "" {
 		done += " It has no password yet: set one with Password."
 	}
-	msg, partial := m.usersFan(usersMsg{Op: "grant", Name: name, Hash: hash, Expires: localExpiry(name), By: actor}, done)
+	msg, partial := m.usersFan(usersMsg{Op: "grant", Name: name, Hash: hash, Expires: localExpiry(name), By: actor, RO: readOnly}, done)
 	return msg, partial, nil
 }
 
@@ -621,10 +719,10 @@ func (m *Mgmt) UserRevoke(name, actor string) (string, bool, error) {
 	if name == actor {
 		return "", false, errors.New("you cannot remove the account you are signed in as")
 	}
-	if m.countMembers() <= 1 {
+	if m.fullMember(name) && m.countMembers() <= 1 {
 		return "", false, errors.New("that is the last account that can sign in; add another one first")
 	}
-	if err := m.removeFromGroup(name); err != nil {
+	if err := m.removeFromGroups(name); err != nil {
 		return "", false, err
 	}
 	m.endUserSessions(name)
@@ -684,7 +782,7 @@ func (m *Mgmt) UserDelete(name, actor string) (string, bool, error) {
 	if name == actor {
 		return "", false, errors.New("you cannot delete the account you are signed in as")
 	}
-	if m.countMembers() <= 1 {
+	if m.fullMember(name) && m.countMembers() <= 1 {
 		return "", false, errors.New("that is the last account that can sign in; add another one first")
 	}
 	if out, err := usersRun("", "userdel", name); err != nil {
@@ -735,12 +833,18 @@ func (m *Mgmt) requireMember(name string) error {
 // create it elsewhere (accounts with no usable password hash are left out).
 func (m *Mgmt) usersExport() []usersMsg {
 	out := []usersMsg{}
-	for _, n := range groupMembers(m.guiGroup()) {
-		if n == "root" || !validUserName(n) {
+	names := groupMembers(m.guiGroup())
+	if rg := m.roGroup(); rg != "" {
+		names = append(names, groupMembers(rg)...)
+	}
+	done := map[string]bool{}
+	for _, n := range names {
+		if n == "root" || !validUserName(n) || done[n] {
 			continue
 		}
+		done[n] = true
 		if h := shadowHash(n); cryptHashRe.MatchString(h) {
-			out = append(out, usersMsg{Op: "apply", Name: n, Hash: h, Expires: localExpiry(n)})
+			out = append(out, usersMsg{Op: "apply", Name: n, Hash: h, Expires: localExpiry(n), RO: m.roMember(n)})
 		}
 	}
 	return out
@@ -778,4 +882,30 @@ func (m *Mgmt) usersPull(ctx context.Context, from ClusterPeer) {
 	}
 	added, skipped := m.usersSeed(res.Users, from.Addr)
 	infof("users: copied %d account(s) from %s on joining (%d already existed or were refused)", added, from.Addr, skipped)
+}
+
+// UserAccess moves a member between full access and read-only, on every node.  The signed-in user cannot move
+// themselves, and the last full-access account cannot be made read-only.
+func (m *Mgmt) UserAccess(name string, readOnly bool, actor string) (string, bool, error) {
+	if err := m.requireMember(name); err != nil {
+		return "", false, err
+	}
+	if m.roMember(name) == readOnly {
+		return "", false, fmt.Errorf("%q already has %s", name, accessWord(readOnly))
+	}
+	if readOnly {
+		if name == actor {
+			return "", false, errors.New("you cannot make the account you are signed in as read-only")
+		}
+		if m.countMembers() <= 1 {
+			return "", false, errors.New("that is the last account that can make changes; add another one first")
+		}
+	}
+	if err := m.setAccess(name, readOnly); err != nil {
+		return "", false, err
+	}
+	m.endUserSessions(name)
+	infof("users: %s made %q %s", actor, name, accessWord(readOnly))
+	msg, partial := m.usersFan(usersMsg{Op: "access", Name: name, By: actor, RO: readOnly}, name+" now has "+accessWord(readOnly)+".")
+	return msg, partial, nil
 }

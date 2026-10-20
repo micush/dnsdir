@@ -78,7 +78,7 @@ type SharedWebAuth struct {
 func sharedWebAuth(w WebConfig) *SharedWebAuth {
 	d := defaultWeb()
 	if w.MaxFailedLogins == d.MaxFailedLogins && w.FailedLoginWindowMinutes == d.FailedLoginWindowMinutes &&
-		w.LockoutMinutes == d.LockoutMinutes && w.minPassword() == defaultMinPassword && w.ReadGroup == "" {
+		w.LockoutMinutes == d.LockoutMinutes && w.minPassword() == defaultMinPassword && w.ReadGroup == d.ReadGroup {
 		return nil
 	}
 	return &SharedWebAuth{w.MaxFailedLogins, w.FailedLoginWindowMinutes, w.LockoutMinutes, w.MinPasswordLength, w.ReadGroup}

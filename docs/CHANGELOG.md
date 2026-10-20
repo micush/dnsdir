@@ -1,9 +1,14 @@
 # Changelog
 
+## [v488] - 2026-10-20 — The Clients line ends at the Clients tile
+
+### Fixed
+- **Statistics ▸ Clients chart** drew the clients of each ten-minute slot (the busiest node's, in a cluster), so it sat far below the tile. It now draws the clients counted so far in the range: it climbs as new clients appear and its last point is the number on the tile. In a cluster the nodes report which clients they first saw at each point and the union is taken, so a client that asked several nodes counts once. The still-filling last point is drawn too.
+
 ## [v487] - 2026-10-20 — Clients over time on the Statistics chart
 
 ### Added
-- **Statistics ▸ Clients tile is clickable**: it draws the number of different clients per point in the chart, like the QPS tile does for its rate (with a kind/outcome picked, only those queries count). Click it again or another tile to go back. The numbers come from the top-list slots already kept, so nothing new is stored: points are ten minutes wide up to a day and a half and an hour wide beyond, and a slot that hit its client cap makes the count a lower bound. In a cluster each point shows the busiest node's count (a sum would count a client that asked several nodes twice). New field `client_counts` in the statistics API answer.
+- **Statistics ▸ Clients tile is clickable**: it draws the clients counted so far in the chart, like the QPS tile does for its rate. The line climbs as new clients show up and its last point is the number on the tile; with a kind picked, only those count. Click it again or another tile to go back. Nothing new is stored: new clients are noticed per top-list slot, so the line moves in steps of ten minutes up to a day and a half and an hour beyond, and a slot that hit its client cap makes the count a lower bound. In a cluster each node reports which clients it first saw at each point and the union is taken, so a client that asked several nodes counts once. New fields `client_counts` and `client_new` in the statistics API answer.
 
 ## [v486] - 2026-10-19 — Capture keeps its filter when the node changes
 

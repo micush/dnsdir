@@ -3299,7 +3299,7 @@
         tile("q-ref", "Refused", d.sums.refused, pct(d.sums.refused, t), "refused"),
         // dynamic DNS updates forwarded to a primary (they are part of Total too)
         tile("q-upd", "Updates", d.sums.updates, d.sums.updates ? (d.sums.updates_failed ? shortCount(d.sums.updates_failed) + " failed" : "none failed") : "", "updates"),
-        tile("q-clients", "Clients", d.sums.clients, "", "clients", "Click to draw the number of distinct clients over time in the chart (every ten minutes up to a day and a half, hourly beyond; a lower bound, and in a cluster the busiest node's count)"),
+        tile("q-clients", "Clients", d.sums.clients, "", "clients", "Click to draw the clients counted so far in the chart; its last point is this number (the line moves in steps of ten minutes up to a day and a half, an hour beyond)"),
         // answers served from the cache, out of the lookups that could be cached (the cache's own hit rate, over the chosen range)
         (() => { const hit = d.sums.cache_hits || 0, look = hit + (d.sums.cache_misses || 0);
           return tile("q-cache", "Cache Hits", look ? pct(hit, look) : "–", look ? "" : "off or unused", undefined, "Answered from the cache, out of the lookups that could be cached in this range" + (look ? ": " + n0(hit) + " of " + n0(look) : "")); })());
@@ -3319,7 +3319,7 @@
         h("button", { type: "button", class: "qchip " + s.cls, "aria-pressed": hidden.has(s.key) && !only ? "false" : "true", disabled: only || single ? "" : null,
           onclick: () => { if (hidden.has(s.key)) hidden.delete(s.key); else hidden.add(s.key); drawChart(d); } },
           h("span", { class: "sw" }), s.label)));
-      const n = d.total.length - (partialLast(d, d.total.length) ? 1 : 0);   // the bucket still filling is left out
+      const n = d.total.length - (partialLast(d, d.total.length) && !clientsView ? 1 : 0);   // the bucket still filling is left out (not for the running client count: it only grows, and its last point is the tile)
       const top = Math.max(qpsView ? 0.1 : 1, ...shown.flatMap((s) => d[s.key].slice(0, n))), max = qpsView ? 4 * niceMax(top / 4) : niceMax(top);   // a rate gets four round steps
       const yLabels = [0, 1, 2, 3, 4].map((g) => (qpsView ? fq((max * g) / 4) : n0(Math.round((max * g) / 4))));
       const W = 1000, H = 300, L = axisMargin(yLabels, 52), R = 14, T = 12, B = 28, pw = W - L - R, ph = H - T - B;

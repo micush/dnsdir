@@ -398,11 +398,6 @@ func mergeQStats(parts []clusterPart[QStatsResult], infos []ClusterNodeInfo) *QS
 		add(r.Refused, q.Refused)
 		add(r.Other, q.Other)
 		add(r.Updates, q.Updates)
-		for i, v := range q.ClientsN { // nodes see the same clients, so a sum would count them twice: the busiest node is the lower bound
-			if j := off + i; j >= 0 && j < len(r.ClientsN) && v > r.ClientsN[j] {
-				r.ClientsN[j] = v
-			}
-		}
 		s := q.Sums
 		r.Sums.Total, r.Sums.NoError, r.Sums.ServFail = r.Sums.Total+s.Total, r.Sums.NoError+s.NoError, r.Sums.ServFail+s.ServFail
 		r.Sums.NXDomain, r.Sums.Refused, r.Sums.Other = r.Sums.NXDomain+s.NXDomain, r.Sums.Refused+s.Refused, r.Sums.Other+s.Other
@@ -434,6 +429,10 @@ func mergeQStats(parts []clusterPart[QStatsResult], infos []ClusterNodeInfo) *QS
 	seen := len(clients)
 	if _, ok := clients[qsOthers]; ok {
 		seen--
+	}
+	r.ClientsN = unionPerPoint(use, start, int64(step), n, r.ClientsN)
+	if n > 0 && int(r.ClientsN[n-1]) > maxClients {
+		maxClients = int(r.ClientsN[n-1])
 	}
 	r.Sums.Clients = maxClients
 	if seen > r.Sums.Clients {
@@ -637,3 +636,32 @@ func mergeHost(parts []clusterPart[HostResult], infos []ClusterNodeInfo) *HostRe
 }
 
 var _ = strings.TrimSpace
+
+// unionPerPoint adds up, for every point, the clients the nodes first saw at or before it, each client once:
+// the cluster's distinct clients so far.  A node that does not send its first-seen lists (an older version)
+// leaves the point as the busiest single node's count.
+func unionPerPoint(use []clusterPart[QStatsResult], start, step int64, n int, fallback []uint64) []uint64 {
+	out := make([]uint64, n)
+	seen := map[string]struct{}{}
+	any := false
+	for _, p := range use {
+		if p.R.ClientsNew != nil {
+			any = true
+		}
+	}
+	for j := 0; j < n; j++ {
+		for _, p := range use {
+			i := j - int((p.R.Start-start)/step)
+			if i >= 0 && i < len(p.R.ClientsNew) {
+				for _, c := range p.R.ClientsNew[i] {
+					seen[c] = struct{}{}
+				}
+			}
+		}
+		out[j] = uint64(len(seen))
+	}
+	if !any {
+		return fallback
+	}
+	return out
+}

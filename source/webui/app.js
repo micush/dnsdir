@@ -315,7 +315,7 @@
         h("div", { class: "muted small" }, "v" + s.version + (s.hostname && s.hostname.toLowerCase() !== "dnsdir" ? " · " + s.hostname : ""))),
       h("div", { class: "nav-section" }, groups),
       h("div", { class: "nav-footer" },
-        h("div", { class: "who" }, "Signed in as ", h("strong", {}, s.user), s.read_only ? h("span", { class: "ro-badge", title: "This account can look at everything but cannot change anything" }, "read-only") : null),
+        h("div", { class: "who" }, "Signed in as ", h("strong", {}, s.user)),
         h("button", { class: "nav-signout", type: "button", onclick: logout }, "Sign out")));
     root.append(helpControls());
     root.append(h("div", { class: "shell" }, nav,

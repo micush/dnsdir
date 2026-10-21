@@ -882,6 +882,8 @@ Top lists are collected in 10-minute steps for the last day and in hourly steps 
 
 **In a cluster.** Each node counts its own queries and has its own file; nothing is shared. Pick a member in the top-bar Node menu to see its statistics, or **Cluster** (its last entry, on Statistics and Host only) to see every node's numbers added together (`--all-nodes` on the command line).
 
+**Who asked for what, on disk.** The pairs behind "what did this client ask for" and "who asked for this" are in `<state-dir>/pairs/`, one gzip file per 10 minutes. Once an hour is over its six files are merged into one hour file, and once a day is over its hour files into one day file; identical pairs add up, so these are also smaller. The 10-minute files are kept for 26 hours, the hour and day files for the whole 30 days (about twice the space of the hour files alone). A range uses a day file for each whole day, an hour file for each whole hour and 10-minute files for the rest, so picking a client over a week reads about a dozen files instead of a thousand; what a finished file holds for the picked client or domain is also remembered in memory, so a refresh reads only the file still being filled. The merging runs in the background (at start-up for what an earlier version left, then every five minutes); a merged file keeps up to 2 million (hour) or 4 million (day) distinct pairs, beyond that a flood shows as "(others)" as before.
+
 ```
 dnsdir --stats
 dnsdir --stats --stats-rcode nxdomain

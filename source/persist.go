@@ -374,6 +374,7 @@ func startPersistence(dir string, stop <-chan struct{}) (final func()) {
 	}
 	done := make(chan struct{})
 	quit := make(chan struct{})
+	go qstats.pairs.rollup(qstats.now().Unix() / 60 / pairUnitMin) // merge what earlier versions left as unit files
 	go func() {
 		defer close(done)
 		t := time.NewTicker(persistEvery)
@@ -388,6 +389,7 @@ func startPersistence(dir string, stop <-chan struct{}) (final func()) {
 				if err := savePersistedOpt(dir, false); err != nil {
 					warnf("statistics: saving: %v", err)
 				}
+				go qstats.pairs.rollup(qstats.now().Unix() / 60 / pairUnitMin)
 			}
 		}
 	}()

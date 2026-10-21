@@ -595,18 +595,17 @@ func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
 	}
 	s.mu.Unlock()
 	cset, dset := pickSet(f.Client), pickSet(f.Domain)
-	if cset != nil || dset != nil { // the pairs are on disk: read the units the slots above cover
-		s.pairs.scan(from.Unix()/60/span*span/pairUnitMin, (to.Unix()/60/span+1)*span/pairUnitMin-1, func(kind int, c, name string, v uint32) {
-			if rcode != "" && qcNames[kind] != rcode {
-				return
+	if cset != nil || dset != nil { // the pairs are on disk: read the units the slots above cover (see qpairs_roll.go)
+		rkind := -1
+		for i, n := range qcNames {
+			if rcode != "" && n == rcode {
+				rkind = i
 			}
-			if cset[c] {
-				pairDomains[name] += uint64(v)
-			}
-			if dset[name] {
-				pairClients[c] += uint64(v)
-			}
-		})
+		}
+		if rcode != "" && rkind < 0 {
+			rkind = qcCount // no such kind: nothing matches
+		}
+		pairDomains, pairClients = s.pairs.lookup(from.Unix()/60/span*span/pairUnitMin, (to.Unix()/60/span+1)*span/pairUnitMin-1, now.Unix()/60/pairUnitMin, rkind, cset, dset)
 	}
 
 	for i := 0; i < n; i++ {

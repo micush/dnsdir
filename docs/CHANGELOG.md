@@ -1,5 +1,14 @@
 # Changelog
 
+## [v495] - 2026-10-21 — Picking a client or a domain in the statistics is much faster
+
+### Changed
+- **Statistics, picking a client or a domain (or the Filter box with a client picked).** The files of who asked for what (`<state-dir>/pairs/`) are read far less:
+  - Finished hours are merged into hour files and finished days into day files, in the background (at start-up for what is already there, then every five minutes). A range reads a day file for each whole day, an hour file for each whole hour, and 10-minute files only for the rest; the 10-minute files are kept for 26 hours, hour and day files for the retention. Identical pairs add up, so the merged files are smaller than the sum of the files they replace, and the day files add roughly as much space again as the hour files.
+  - What a finished file holds for the picked client or domain is remembered in memory (up to a million entries), so a refreshed page reads only the file still being filled.
+  - A file is read in one pass that compares the raw bytes of its strings with what was picked, several files at once.
+  On a synthetic two days of 60,000 pairs per file on a 2-core machine, the first look took 3.1 s instead of 10.3 s, the same look again 0.5 ms, and 0.7 s without the cache once the files were merged. The numbers shown are the same as before; a merged hour or day file keeps up to 2 / 4 million pairs, beyond that a flood shows as "(others)".
+
 ## [v494] - 2026-10-20 — The loopback row is really gone from the cluster view
 
 ### Fixed

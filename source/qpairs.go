@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Who asked for what.  The statistics answer "what did this client ask for" and "who asked for this" from the pairs
@@ -29,28 +30,38 @@ const (
 	pairMaxRows = 400000    // most distinct pairs a unit keeps; a flood of random names stops here
 	pairMaxStrs = 1 << 20   // most distinct strings a unit keeps
 	pairMaxRead = 256 << 20 // most a file may hold decompressed
-	pairMagic   = "PR1\n"
-	pairKindSh  = 56
-	pairIdMask  = 1<<28 - 1
+	// rolled-up files (an hour, a day) add the pairs of the files below them, so they may hold more
+	pairRollStrs = 1 << 22
+	pairHourRows = 2 << 20
+	pairDayRows  = 4 << 20
+	pairMagic    = "PR1\n"
+	pairKindSh   = 56
+	pairIdMask   = 1<<28 - 1
 )
 
 // pairAcc is the pairs of one unit.
 type pairAcc struct {
-	unit int64
-	idx  map[string]uint32
-	strs []string
-	rows map[uint64]uint32 // kind<<56 | client<<28 | name  →  count
+	unit    int64
+	maxRows int // most distinct pairs it keeps (pairMaxRows; more for a rolled-up file)
+	maxStrs int
+	idx     map[string]uint32
+	strs    []string
+	rows    map[uint64]uint32 // kind<<56 | client<<28 | name  →  count
 }
 
 func newPairAcc(unit int64) *pairAcc {
-	return &pairAcc{unit: unit, idx: map[string]uint32{}, rows: map[uint64]uint32{}}
+	return &pairAcc{unit: unit, maxRows: pairMaxRows, maxStrs: pairMaxStrs, idx: map[string]uint32{}, rows: map[uint64]uint32{}}
+}
+
+func newRollAcc(maxRows int) *pairAcc {
+	return &pairAcc{maxRows: maxRows, maxStrs: pairRollStrs, idx: map[string]uint32{}, rows: map[uint64]uint32{}}
 }
 
 func (a *pairAcc) id(s string) (uint32, bool) {
 	if i, ok := a.idx[s]; ok {
 		return i, true
 	}
-	if len(a.strs) >= pairMaxStrs {
+	if len(a.strs) >= a.maxStrs {
 		return 0, false
 	}
 	i := uint32(len(a.strs))
@@ -67,7 +78,7 @@ func (a *pairAcc) add(kind int, client, name string, n uint32) bool {
 		return false
 	}
 	key := uint64(kind)<<pairKindSh | uint64(ci)<<28 | uint64(ni)
-	if _, have := a.rows[key]; !have && len(a.rows) >= pairMaxRows {
+	if _, have := a.rows[key]; !have && len(a.rows) >= a.maxRows {
 		return false
 	}
 	a.rows[key] += n
@@ -116,7 +127,7 @@ func decodePairs(b []byte, fn func(kind int, client, name string, n uint32)) err
 		return errors.New("not a pairs file")
 	}
 	ns, err := binary.ReadUvarint(r)
-	if err != nil || ns > pairMaxStrs {
+	if err != nil || ns > pairRollStrs {
 		return errors.New("bad pairs file")
 	}
 	strs := make([]string, ns)
@@ -132,7 +143,7 @@ func decodePairs(b []byte, fn func(kind int, client, name string, n uint32)) err
 		strs[i] = string(sb)
 	}
 	nr, err := binary.ReadUvarint(r)
-	if err != nil || nr > pairMaxRows {
+	if err != nil || nr > pairDayRows {
 		return errors.New("bad pairs file")
 	}
 	for i := uint64(0); i < nr; i++ {
@@ -158,6 +169,11 @@ type pairStore struct {
 	dir string
 	mem map[int64][]byte
 	cur *pairAcc
+
+	cmu     sync.Mutex // the per-file results below (see qpairs_roll.go)
+	cache   map[string]*pairHit
+	cacheN  int
+	rolling atomic.Bool
 }
 
 func newPairStore() *pairStore { return &pairStore{mem: map[int64][]byte{}} }
@@ -178,6 +194,7 @@ func (p *pairStore) setDir(dir string) {
 		return
 	}
 	p.dir = dir
+	p.dropCache()
 	for u, b := range p.mem {
 		p.put(u, b)
 	}
@@ -189,15 +206,23 @@ func (p *pairStore) put(unit int64, b []byte) {
 		p.mem[unit] = b
 		return
 	}
-	tmp := p.file(unit) + ".tmp"
+	p.putFile(filepath.Base(p.file(unit)), b)
+}
+
+// putFile writes one file of the directory (by name) through a temporary file.
+func (p *pairStore) putFile(name string, b []byte) bool {
+	path := filepath.Join(p.dir, name)
+	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		warnf("statistics: saving pairs: %v", err)
-		return
+		return false
 	}
-	if err := os.Rename(tmp, p.file(unit)); err != nil {
+	if err := os.Rename(tmp, path); err != nil {
 		warnf("statistics: saving pairs: %v", err)
 		os.Remove(tmp)
+		return false
 	}
+	return true
 }
 
 func (p *pairStore) get(unit int64) []byte {
@@ -239,18 +264,35 @@ func (p *pairStore) prune(oldest int64) {
 		if strings.HasSuffix(n, ".tmp") {
 			continue
 		}
-		if u, ok := parsePairName(n); ok && u < oldest {
+		if k, u, ok := parseAnyPairName(n); ok && pairLastUnit(k, u) < oldest {
 			os.Remove(filepath.Join(p.dir, n))
 		}
 	}
 }
 
 func parsePairName(n string) (int64, bool) {
-	if !strings.HasPrefix(n, "p") || !strings.HasSuffix(n, ".gz") {
-		return 0, false
+	k, u, ok := parseAnyPairName(n)
+	return u, ok && k == 'p'
+}
+
+// parseAnyPairName reads the name of a unit file (p<unit>.gz), an hour file (h<hour>.gz) or a day file (d<day>.gz).
+func parseAnyPairName(n string) (byte, int64, bool) {
+	if len(n) < 5 || (n[0] != 'p' && n[0] != 'h' && n[0] != 'd') || !strings.HasSuffix(n, ".gz") {
+		return 0, 0, false
 	}
 	u, err := strconv.ParseInt(n[1:len(n)-3], 10, 64)
-	return u, err == nil
+	return n[0], u, err == nil
+}
+
+// pairLastUnit is the last unit a file covers.
+func pairLastUnit(kind byte, n int64) int64 {
+	switch kind {
+	case 'h':
+		return n*pairHourUnits + pairHourUnits - 1
+	case 'd':
+		return n*pairDayUnits + pairDayUnits - 1
+	}
+	return n
 }
 
 // open makes the accumulator of a unit, starting from its file if there is one (the daemon was restarted inside it).
@@ -328,6 +370,7 @@ func (p *pairStore) clear() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.cur = nil
+	p.dropCache()
 	p.mem = map[int64][]byte{}
 	if p.dir == "" {
 		return
@@ -335,7 +378,7 @@ func (p *pairStore) clear() {
 	p.mem = nil
 	ents, _ := os.ReadDir(p.dir)
 	for _, e := range ents {
-		if _, ok := parsePairName(e.Name()); ok || strings.HasSuffix(e.Name(), ".tmp") {
+		if _, _, ok := parseAnyPairName(e.Name()); ok || strings.HasSuffix(e.Name(), ".tmp") {
 			os.Remove(filepath.Join(p.dir, e.Name()))
 		}
 	}

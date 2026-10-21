@@ -1,5 +1,18 @@
 # Changelog
 
+## [v496] - 2026-10-21 — A node whose DNS stops answering pauses itself
+
+### Added
+- **Self-check.** A node now asks each of its own DNS listeners a real question every 5 seconds. If they stop answering while the program is still running (a stuck cache or worker pool, a listener nobody reads), the VIP and the anycast routes used to stay announced and clients timed out. After 3 misses in a row the node pauses itself the way Operate ▸ Node ▸ Pause does (gateways resign, VIP and anycast addresses come off, the primary role is handed over), but only in memory: the file does not change and a restart starts clean. It starts the gateways again after a minute (twice as long each time they fail again, up to 10 minutes) and trusts them after 6 good answers in a row. Pausing or resuming by hand takes over. It never pauses the only node in service or the only node serving a gateway. The Node page and `--node-status` say that the node paused itself and why; the log has the details.
+- New setting **Pause this node when its own DNS stops answering** (Configure ▸ General, `self_check`), on by default, local to the node; its change shows in the configuration history.
+- The check's question comes from the listener's own address and is not counted in the statistics, the client list or the rate limits.
+
+### Not changed
+- ntpdir: chrony answers NTP, not ntpdir, so there is nothing of its own to ask; no change there.
+
+### Verified
+- gofmt, vet and the full test suite, `node --check`. New tests: pause after 3 misses and not before, hold and trial start, longer hold after a failed trial, recovery after 6 answers, the only node is not paused, switching the check off resumes, a person taking over, the question over UDP against an answering and a silent listener, and a real listener answering it without counting it. Not verified in a browser, on a live cluster or against a real wedged cache.
+
 ## [v495] - 2026-10-21 — Picking a client or a domain in the statistics is much faster
 
 ### Changed

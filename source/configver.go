@@ -448,6 +448,10 @@ func configSections(a, b *DaemonConfig) []Section {
 		out = append(out, Section{"Log level", a.LogLevel + " → " + b.LogLevel})
 	}
 
+	if a.SelfCheck != b.SelfCheck {
+		out = append(out, Section{"Self-check", onOff(a.SelfCheck) + " → " + onOff(b.SelfCheck)})
+	}
+
 	// groups, matched by group_id
 	ga, gb := map[int]GroupConfig{}, map[int]GroupConfig{}
 	var ids []int

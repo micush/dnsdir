@@ -169,8 +169,10 @@ func (f *DNSFrontend) Listening() bool {
 // resolve forwards one query; on failure it answers SERVFAIL so clients fail
 // fast instead of timing out.
 func (f *DNSFrontend) resolve(query []byte, tcp bool, client netip.Addr) []byte {
+	// the node's own self-check (selfcheck.go) is not a client: it is not admitted, counted or timed
+	probe := client == f.addr && isSelfCheckQuery(query)
 	// who may ask, and how often, comes first: before the cache and before dynamic updates are relayed
-	if p := f.pool(); p != nil {
+	if p := f.pool(); !probe && p != nil {
 		if v := p.admit(client); v != admitOK {
 			return p.turnedAway(query, tcp, v)
 		}
@@ -179,7 +181,7 @@ func (f *DNSFrontend) resolve(query []byte, tcp bool, client netip.Addr) []byte 
 		return f.handleUpdate(query, tcp, client)
 	}
 	var t0 time.Time
-	timed := f.gw.sampled()
+	timed := !probe && f.gw.sampled()
 	if timed {
 		t0 = time.Now()
 	}
@@ -192,7 +194,7 @@ func (f *DNSFrontend) resolve(query []byte, tcp bool, client netip.Addr) []byte 
 	if timed && f.ctx.Err() == nil {
 		f.gw.lat(time.Since(t0))
 	}
-	if f.ctx.Err() == nil {
+	if f.ctx.Err() == nil && !probe {
 		if qi.ok {
 			name, qt := qi.name(), qi.qtype
 			rc := rcodeServFail

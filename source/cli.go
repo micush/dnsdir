@@ -489,7 +489,9 @@ func (f *cliFlags) run(sock string) bool {
 	case *f.nodeStatus:
 		var r NodePauseState
 		decode(op(sock, "node.status", nil), &r)
-		if r.Paused {
+		if r.Paused && r.Auto != "" {
+			fmt.Println("This node PAUSED ITSELF: " + r.Auto + ". It starts again by itself to check; --node-resume tries at once.")
+		} else if r.Paused {
 			fmt.Println("This node is PAUSED: it is not serving. Resume it with --node-resume.")
 		} else {
 			fmt.Println("This node is running.")

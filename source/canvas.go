@@ -201,7 +201,7 @@ func buildCanvas(dc *DaemonConfig, rows []SnapshotRow, pools []poolInfo) []Canva
 	for i := range dc.Groups {
 		g := &dc.Groups[i]
 		cg := CanvasGateway{Name: g.Name, GroupID: g.GroupID, Interface: g.Interface, VIP4: g.VIP4, VIP6: g.VIP6,
-			Servers: []CanvasServer{}, Fallback: []string{}, Families: []CanvasFamily{}, Members: membersOf(rows, g.GroupID), Paused: g.Paused, NodePaused: dc.NodePaused, ExcludedNodes: append([]string(nil), g.ExcludedNodes...), WeakKey: isWeakKey(g.Key)}
+			Servers: []CanvasServer{}, Fallback: []string{}, Families: []CanvasFamily{}, Members: membersOf(rows, g.GroupID), Paused: g.Paused, NodePaused: dc.nodePausedNow(), ExcludedNodes: append([]string(nil), g.ExcludedNodes...), WeakKey: isWeakKey(g.Key)}
 
 		stats := map[string]ServerStat{}
 		var cfg DNSConfig
@@ -349,13 +349,13 @@ func buildCanvas(dc *DaemonConfig, rows []SnapshotRow, pools []poolInfo) []Canva
 		cg.Status, cg.Detail = combineFamilies(cg.Families)
 		if g.Paused {
 			cg.Status, cg.Detail = "paused", "Paused on this node — it is not serving; the other nodes carry on"
-			if dc.NodePaused {
+			if dc.nodePausedNow() {
 				cg.Detail = "This node is paused — it is not serving; the other nodes carry on"
 			}
 			if g.PausedAll {
 				cg.PausedScope = "all"
 				cg.Detail = "Paused on all nodes — none of them serves it until it is resumed"
-			} else if !dc.NodePaused {
+			} else if !dc.nodePausedNow() {
 				cg.PausedScope = "node"
 			}
 			for i := range cg.Families {

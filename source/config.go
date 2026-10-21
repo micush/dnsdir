@@ -977,6 +977,11 @@ type DaemonConfig struct {
 	// replicated; omitempty so a config that never used it stays readable by older
 	// versions.
 	NodePaused bool `json:"node_paused,omitempty"`
+	// SelfCheck makes the node ask its own DNS listeners a question every few seconds and pause itself (like NodePaused,
+	// but only in memory) when they stop answering while the process is still up: a wedged cache or worker pool would
+	// otherwise keep the VIP and the anycast routes announced and black-hole queries.  It resumes by itself once the
+	// listeners answer again.  Local to the node.  On unless the file says otherwise (see selfcheck.go).
+	SelfCheck bool `json:"self_check"`
 	// PausedServersHere / PausedQueriesHere are the DNS servers and probe domains paused on this node only (the
 	// shared lists live in the DNS block).  Local, never replicated.
 	PausedServersHere []string `json:"paused_servers_here,omitempty"`
@@ -998,7 +1003,7 @@ func (dc *DaemonConfig) effective() *DaemonConfig {
 	}
 	c.DNS = here(c.DNS)
 	for i := range c.Groups {
-		if dc.NodePaused || c.Groups[i].PausedAll { // paused on every node, or this whole node is
+		if dc.nodePausedNow() || c.Groups[i].PausedAll { // paused on every node, or this whole node is
 			c.Groups[i].Paused = true
 		}
 		if id := localNodeID(); id != "" && containsStr(c.Groups[i].ExcludedNodes, id) { // removed from this gateway: it serves nothing here
@@ -1013,7 +1018,7 @@ func (dc *DaemonConfig) effective() *DaemonConfig {
 }
 
 func newDaemonConfig() *DaemonConfig {
-	return &DaemonConfig{LogLevel: "info", Groups: []GroupConfig{newGatewayGroup()},
+	return &DaemonConfig{LogLevel: "info", SelfCheck: true, Groups: []GroupConfig{newGatewayGroup()},
 		DNS: defaultDNS(), Web: defaultWeb(), Cluster: defaultCluster()}
 }
 

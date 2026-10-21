@@ -1454,6 +1454,22 @@ type SnapshotRow struct {
 	MAC      string `json:"mac,omitempty"`
 }
 
+// frontends are the DNS listeners this engine has open right now (for the self-check).
+func (e *Engine) frontends() []*DNSFrontend {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var out []*DNSFrontend
+	if e.dnsFE != nil && e.dnsFE.Listening() {
+		out = append(out, e.dnsFE)
+	}
+	for _, f := range e.dnsMore {
+		if f.Listening() {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 func (e *Engine) snapshot() []SnapshotRow {
 	e.mu.Lock()
 	defer e.mu.Unlock()

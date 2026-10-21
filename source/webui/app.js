@@ -2181,7 +2181,10 @@
     { k: "self", l: "Advertised address", t: "text" },
     { k: "sync_interval_sec", l: "Sync interval (s)", t: "int", min: 1, max: 3600 },
   ];
-  const GENERAL_FIELDS = [{ k: "log_level", l: "Log level", t: "select", options: ["debug", "info", "warning", "error"] }];
+  const GENERAL_FIELDS = [
+    { k: "log_level", l: "Log level", t: "select", options: ["debug", "info", "warning", "error"] },
+    { k: "self_check", l: "Pause this node when its own DNS stops answering", t: "bool", hint: "Every few seconds the node asks its own DNS listeners a question. If they stop answering while the program is still running (a stuck cache, say), the node pauses itself: the VIP and the anycast addresses come off and the other nodes carry on. It starts again by itself to check, and resumes once the listeners answer. It never pauses the only node in service. Local to this node." },
+  ];
 
   // Shown only when this node is part of a multi-node cluster.
   const sharedTag = (f) => (f.shared && state.clustered
@@ -5096,7 +5099,7 @@
               h("button", { class: "btn danger", type: "button", onclick: execute }, "Execute"))));
       },
       async poll() {
-        try { npPaused = !!(await api("GET", "/api/nodepause")).data.paused; showNodePause(); } catch (_) { /* keep the last state */ }
+        try { const np = (await api("GET", "/api/nodepause")).data; npPaused = !!np.paused; showNodePause(); if (np.auto) say(status, "bad", "This node paused itself: " + np.auto + ". It starts again by itself to check, or press Resume to try at once."); } catch (_) { /* keep the last state */ }
         const p = (await api("GET", "/api/power")).data;
         clear(pending);
         if (p.scheduled) {

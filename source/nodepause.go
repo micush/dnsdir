@@ -8,6 +8,8 @@ import (
 // NodePauseState is what the Node page and `dnsdir --node-status` show.
 type NodePauseState struct {
 	Paused bool `json:"paused"`
+	// Auto is why the node paused itself (see selfcheck.go); empty when it did not.  Paused is true then too.
+	Auto string `json:"auto,omitempty"`
 }
 
 // NodePauseStatus says whether this node is paused.
@@ -16,7 +18,7 @@ func (m *Mgmt) NodePauseStatus() (NodePauseState, error) {
 	if err != nil {
 		return NodePauseState{}, err
 	}
-	return NodePauseState{Paused: dc.NodePaused}, nil
+	return NodePauseState{Paused: dc.nodePausedNow(), Auto: selfPausedWhy()}, nil
 }
 
 // NodePause takes this whole node out of service (or puts it back): every gateway
@@ -24,6 +26,17 @@ func (m *Mgmt) NodePauseStatus() (NodePauseState, error) {
 // same as pausing each gateway but in one step and covering gateways added later.
 // The flag is local to the node and is never replicated.
 func (m *Mgmt) NodePause(pause bool, actor string) (string, error) {
+	if selfPauseActive() { // a person takes over from the self-check: resuming tries again at once
+		clearSelfPause()
+		if !pause {
+			if dc, _, err := m.LiveConfig(); err == nil && !dc.NodePaused {
+				if m.reloadFn != nil {
+					_ = m.reloadFn()
+				}
+				return "node resumed — its gateways rejoin once their DNS servers answer", nil
+			}
+		}
+	}
 	dc, _, err := m.LiveConfig()
 	if err != nil {
 		return "", err

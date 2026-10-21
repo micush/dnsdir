@@ -526,7 +526,7 @@ func run(dc *DaemonConfig, confFile, sockPath, stateDir string) error {
 		}
 		return gs
 	}
-	mg.pausedFn = func() bool { return sup.config().NodePaused }
+	mg.pausedFn = func() bool { return sup.config().nodePausedNow() }
 	mg.anycastFn = sup.AllAnycastStates
 	mg.poolOf = sup.poolFor
 	mg.flushFn = sup.flushCache
@@ -562,6 +562,29 @@ func run(dc *DaemonConfig, confFile, sockPath, stateDir string) error {
 		return nil
 	}
 	mg.reloadFn = reload
+	sc := &selfCheck{
+		enabled: func() bool { return sup.config().SelfCheck },
+		targets: func() []netip.AddrPort { return selfCheckTargets(sup) },
+		probe:   func(ap netip.AddrPort) (bool, bool) { return probeDNS(ap, selfTimeout) },
+		guard: func() string {
+			if mg.othersInService() == 0 {
+				return "it is the only node in service, so pausing it would stop every gateway"
+			}
+			return mg.lastServerOf()
+		},
+		apply: func(pause bool, why string) {
+			if nu, err := loadConfig(confFile); err == nil {
+				sup.Reload(nu)
+			} else {
+				warnf("self-check: cannot read the configuration: %v", err)
+			}
+			if pause {
+				mg.handOver("self-check", "pausing this node: "+why) // the primary role does not stay on a node that is out of service
+			}
+		},
+		now: time.Now,
+	}
+	go sc.run(ctx)
 	web = NewWebServer(mg, st, sysAuth{})
 	mg.webH = web.Handler()
 	ensureReadGroup(dc.Web)

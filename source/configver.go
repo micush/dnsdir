@@ -548,6 +548,12 @@ func configSections(a, b *DaemonConfig) []Section {
 	if !reflect.DeepEqual(a.DNS.ServerNames, b.DNS.ServerNames) && !(len(a.DNS.ServerNames) == 0 && len(b.DNS.ServerNames) == 0) {
 		out = append(out, Section{"DNS server names", "changed"})
 	}
+	if ladd, lrem := setDiff(a.DNS.ForwardLists, b.DNS.ForwardLists); len(ladd)+len(lrem) > 0 {
+		out = append(out, Section{"DNS conditional forwarding lists", "changed"})
+	}
+	if !reflect.DeepEqual(a.DNS.ServerForward, b.DNS.ServerForward) && !(len(a.DNS.ServerForward) == 0 && len(b.DNS.ServerForward) == 0) {
+		out = append(out, Section{"DNS server types and zone lists", "changed"})
+	}
 	qs := func(d DNSConfig) []string {
 		var l []string
 		for _, q := range d.Queries {

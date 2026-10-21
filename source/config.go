@@ -499,6 +499,11 @@ type DNSConfig struct {
 	// keyed by the server as written in Servers (the same rules as a gateway's name).  It only labels:
 	// it is left out of the pool's own configuration, so renaming never restarts a pool.
 	ServerNames map[string]string `json:"server_names,omitempty"`
+	// ForwardLists are the named lists of zones for conditional forwarding, one "name: zone, zone" each (Configure ▸ DNS
+	// proxy ▸ Conditional Forwarding).  Shared: every gateway's pool follows the Settings' copy.  ServerForward says, per
+	// server as written in Servers, which lists it serves and whether it serves only those zones (see fwdzones.go).
+	ForwardLists  []string                 `json:"forward_lists,omitempty"`
+	ServerForward map[string]ServerForward `json:"server_forward,omitempty"`
 	// FallbackServers are a last resort, used only while no server in Servers is in service (all down or paused,
 	// or none listed): the pool then answers from them, and goes back to Servers as soon as one of those answers
 	// again.  Same address forms as Servers.  They are never probed (the domains the normal servers are tested with
@@ -790,6 +795,9 @@ func (d DNSConfig) queriesFor(addr string) []DNSQuery {
 	if q, ok := d.ServerQueries[addr]; ok {
 		return q
 	}
+	if z := d.zonesOnlyFirstZone(addr); z != "" { // a server that serves only zones is asked for the SOA of its first zone
+		return []DNSQuery{{Name: z, Type: "SOA"}}
+	}
 	return d.Queries
 }
 
@@ -870,6 +878,9 @@ func (d *DNSConfig) Validate() error {
 	d.ServerNames = names
 	if len(names) == 0 {
 		d.ServerNames = nil
+	}
+	if err := d.validateForwarding(seen); err != nil {
+		return err
 	}
 	for _, sv := range d.Servers {
 		qs := d.queriesFor(sv)
@@ -1082,6 +1093,10 @@ func (c *DNSConfig) followSettings(shared DNSConfig) {
 	}
 	c.PolicyOn, c.PolicyLog, c.PolicyBlockTTL = shared.PolicyOn, shared.PolicyLog, shared.PolicyBlockTTL
 	c.Policy = clonePolicy(shared.Policy)
+	c.ForwardLists = append([]string(nil), shared.ForwardLists...)
+	if len(c.ForwardLists) == 0 {
+		c.ForwardLists = nil
+	}
 	c.SortListOn = shared.SortListOn
 	c.SortList = append([]string(nil), shared.SortList...)
 	if len(c.SortList) == 0 {
@@ -1101,6 +1116,17 @@ func (dc *DaemonConfig) Validate() error {
 			return fmt.Errorf("duplicate group_id %d", g.GroupID)
 		}
 		ids[g.GroupID] = true
+	}
+	// every list a server serves must exist among the shared lists
+	if err := dc.DNS.checkForwardLists(&dc.DNS, "dns"); err != nil {
+		return err
+	}
+	for _, g := range dc.Groups {
+		if g.DNS != nil {
+			if err := g.DNS.checkForwardLists(&dc.DNS, fmt.Sprintf("gateway %d", g.GroupID)); err != nil {
+				return err
+			}
+		}
 	}
 	// two gateways cannot own the same shared address, and an anycast address is not a gateway's shared address; the same
 	// anycast address on several gateways is how an anycast service is run (it is held while any of them can answer)

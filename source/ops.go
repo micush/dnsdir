@@ -477,6 +477,23 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 	// a name for an address (reverse DNS) or an address for a name, for the Add DNS server form
 	case "dns.lookup":
 		return hostLookup(a.Lookup)
+	// where a name would go with conditional forwarding: its zone, lists and servers (Configure ▸ DNS proxy ▸ Conditional Forwarding, --fwd-route)
+	case "fwd.route":
+		gid, err := strconv.Atoi(strings.TrimSpace(a.QGW))
+		if err != nil {
+			gid = a.Group
+		}
+		if m.poolOf == nil {
+			return nil, errors.New("the DNS pools are not available on this node")
+		}
+		p := m.poolOf(gid)
+		if p == nil {
+			return nil, fmt.Errorf("this node is not serving gateway %d, so it has no pool for it", gid)
+		}
+		if strings.TrimSpace(a.QName) == "" {
+			return nil, errors.New("which name? give a domain name")
+		}
+		return p.Route(a.QName), nil
 	// pause the whole node
 	case "node.status":
 		return m.NodePauseStatus()

@@ -267,6 +267,27 @@ The table is shown a page at a time (25 to 500 rows per page), and a **Filter ro
 
 Drag a row by the dots at its left to change its order on the page (the first row that matches wins). Right-click a row for **Edit**, **Copy**, **Paste** (the copied row, or rows copied from a spreadsheet as tab-separated text in the column order above, go in below the row), **Add** (a new row below; the filter is cleared), **Move up**, **Move down**, **Move to top**, **Move to bottom** and **Delete**. Right-click below the rows to add one at the end.
 
+### Conditional forwarding
+
+Some names must go only to the servers that know them: your internal zones to your internal DNS servers, while every other name goes to public resolvers that cannot see those zones. Conditional forwarding does that inside one gateway, with the same health checks, fastest-first ordering, spreading and failover as the rest of the pool.
+
+1. **Make lists of zones** under Configure ▸ DNS proxy ▸ Resolution ▸ **Conditional Forwarding** (`forward_lists`, shared by the cluster), one per line: `corp: corp.example, lab.example, 10.in-addr.arpa`. A zone covers itself and every name below it.
+2. **Give each server a type and its lists** on the Topology page (Add/Edit DNS server ▸ **Server type** and **Zone lists**, or `--canvas-set server --group N --server ADDRESS --server-type internal --lists corp`):
+
+| Type | Badge | Answers |
+|---|---|---|
+| Public resolver (the default) | **P** | every name except the zones that other servers carry |
+| Internal (zones only) | **I** | only the zones of its lists; never asked about anything else |
+| Public + Internal resolver | **P+I** | the zones of its lists and everything else (a recursive resolver that also holds your zones) |
+
+A name goes to the servers of the **most specific zone** it is in (a list for `dev.corp.example` beats one for `corp.example`). Any other name goes to the Public and Public + Internal servers. If every server of a zone is down, the client gets **SERVFAIL**; the name is never passed on to the other servers, so an internal name cannot leak to a public resolver. Fallback servers answer ordinary names when no other server for them is up, never a name in a zone.
+
+- **Health is per zone.** A probe domain that falls inside a zone the server serves (the most specific zone of its lists) decides that zone only: if it fails, the server is taken out of that zone and keeps answering everything else, and the zone's queries go to the other servers that carry it. Probe domains outside its zones decide whether it answers ordinary names, and a zone that has no probe of its own follows that. The probe boxes under a server show a small **I** (a zone probe) or **P** (a probe of ordinary names) in the bottom left corner. So give a Public + Internal server one probe for a public name and one in each internal zone you care about. An Internal server with no probe domains of its own is probed with the SOA of the first zone of its first list.
+- Policy rows are read first and win. A row that only has a destination name sends that name to the servers of the destination's zone.
+- A list that none of a gateway's servers serves is flagged on the Topology page (the gateway's tooltip) and by `--canvas`, because its zones then go to the other servers. A server cannot name a list that does not exist; deleting a list that a server uses is refused until the server is changed.
+- **Test a name** in the same section (or `dnsdir --fwd-route NAME --group N`) shows the zone, the lists and the servers a name would use on this node, in the order they would be tried. It reads the running settings and sends nothing.
+- The gateway shows red ("no DNS server for ordinary names is in use") when only Internal servers are up, because most queries cannot be answered.
+
 ### Client rate limiting
 
 These settings are in the top-level `dns` block (Configure ▸ DNS proxy ▸ Clients ▸ Client Rate Limiting). Every gateway uses them, including one with its own `dns` block, whose copy of these values is ignored.
@@ -430,6 +451,8 @@ dnsdir --canvas-set gateway --group 1 --spread-band 200      # this gateway's ow
                                                            #   --fail-threshold, --max-attempts, --latency-alpha); --lb settings goes back
 dnsdir --canvas-set server --group 1 --server 10.0.0.53 --label dns-a   # a server's name (also on --canvas-add server; - clears)
 dnsdir --canvas-set server --group 1 --server 10.0.0.53 --label dns-a.example.com   # a full name is also registered in DNS for 10.0.0.53 (RFC 2136); the previous full name's record is removed
+dnsdir --canvas-set server --group 1 --server 10.0.0.53 --server-type internal --lists corp,dev   # conditional forwarding: public | internal | both (--lists - clears)
+dnsdir --fwd-route host.corp.example --group 1   # where a name would go: its zone, lists and servers
 dnsdir --canvas-add anycast --group 1 --address 203.0.113.53   # an anycast address (--canvas-del anycast removes one)
 dnsdir --canvas-set gateway --group 1 --anycast A,B             # or replace the whole list (--anycast - clears)
 dnsdir --canvas-del gateway --group 1 --yes

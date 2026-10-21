@@ -31,6 +31,9 @@ type CanvasTest struct {
 	MS     float64 `json:"ms"`
 	Uptime *UpInfo `json:"uptime,omitempty"`
 	Paused string  `json:"paused,omitempty"` // "node" or "all" when this probe domain is paused
+	// Zone is the zone of a list the server serves that this probe domain is in ("" for a probe of ordinary names): it
+	// then says whether the server answers that zone, and a failure takes the server out of that zone only.
+	Zone string `json:"zone,omitempty"`
 }
 
 type CanvasServer struct {
@@ -44,6 +47,10 @@ type CanvasServer struct {
 	Tests  []CanvasTest `json:"tests"`
 	Uptime *UpInfo      `json:"uptime,omitempty"`
 	Paused string       `json:"paused,omitempty"` // "node" or "all" when the server is paused
+	// Type is "internal" (serves only the zones of its Lists) or "both" (those zones and everything else); empty is a public
+	// server.  Lists are the zone lists it serves (see fwdzones.go).
+	Type  string   `json:"type,omitempty"`
+	Lists []string `json:"lists,omitempty"`
 }
 
 // CanvasFamily is the state of one address family of a gateway (a gateway with
@@ -97,6 +104,9 @@ type CanvasGateway struct {
 	Uptime        *UpInfo  `json:"uptime,omitempty"`
 	// Nodes are the cluster's nodes and how each stands for this gateway (empty without a cluster); this node first.
 	Nodes []CanvasNode `json:"nodes,omitempty"`
+	// FwdWarn are the problems with conditional forwarding on this gateway: zone lists no server here serves, so their zones
+	// go to the general servers.
+	FwdWarn []string `json:"fwd_warn,omitempty"`
 }
 
 // CanvasMember is one cluster node currently serving the gateway: it holds an
@@ -217,6 +227,12 @@ func buildCanvas(dc *DaemonConfig, rows []SnapshotRow, pools []poolInfo) []Canva
 			}
 			for _, addr := range cfg.Servers {
 				cs := CanvasServer{Addr: addr, Name: cfg.ServerNames[addr], Tests: []CanvasTest{}}
+				if f, ok := cfg.ServerForward[addr]; ok && len(f.Lists) > 0 {
+					cs.Type, cs.Lists = f.fwdType(), append([]string(nil), f.Lists...)
+					if cs.Type == fwdPublic {
+						cs.Type = ""
+					}
+				}
 				st, probed := stats[addr]
 				switch {
 				case cfg.isPaused(addr):
@@ -241,6 +257,9 @@ func buildCanvas(dc *DaemonConfig, rows []SnapshotRow, pools []poolInfo) []Canva
 					cs.MS, cs.Rank, cs.InBand = st.EWMAMS, st.Rank, st.InBand
 					if bad > 0 {
 						cs.Status, cs.Detail = "warn", fmt.Sprintf("%d test(s) failing, server still eligible", bad)
+						if len(st.ZonesDown) > 0 {
+							cs.Detail = fmt.Sprintf("%d test(s) failing; out of service for the zone(s) %s only", bad, strings.Join(st.ZonesDown, ", "))
+						}
 					} else {
 						cs.Status, cs.Detail = "ok", fmt.Sprintf("healthy, %.2f ms", st.EWMAMS)
 					}
@@ -248,8 +267,9 @@ func buildCanvas(dc *DaemonConfig, rows []SnapshotRow, pools []poolInfo) []Canva
 				if np, nt := cfg.pausedQueryCount(addr); cs.Status == "ok" && nt > 1 && nt-np == 1 {
 					cs.Status, cs.Detail = "warn", fmt.Sprintf("only one probe domain is active (%d paused), so a failure elsewhere would not be noticed", np)
 				}
+				zset := cfg.serverZones(addr)
 				for _, q := range cfg.queriesFor(addr) {
-					ct := CanvasTest{Name: q.Name, Type: q.Type, Status: "idle", Detail: "not tested yet"}
+					ct := CanvasTest{Name: q.Name, Type: q.Type, Status: "idle", Detail: "not tested yet", Zone: zoneOfName(zset, q.Name)}
 					if cs.Status == "paused" {
 						ct.Status, ct.Detail = "paused", "server paused"
 						cs.Tests = append(cs.Tests, ct)
@@ -286,7 +306,14 @@ func buildCanvas(dc *DaemonConfig, rows []SnapshotRow, pools []poolInfo) []Canva
 		}
 		// the gateway itself, one state per address family
 		anyHealthy, anyDown, nPaused, nUsable := false, false, 0, 0
+		generalN, generalUp := 0, 0 // the servers that answer ordinary names (not zones only), and those of them in use
 		for _, s := range cg.Servers {
+			if s.Type != fwdInternal {
+				generalN++
+				if s.Status == "ok" || s.Status == "warn" {
+					generalUp++
+				}
+			}
 			if s.Status == "paused" {
 				nPaused++
 			}
@@ -331,6 +358,8 @@ func buildCanvas(dc *DaemonConfig, rows []SnapshotRow, pools []poolInfo) []Canva
 				cf.Status, cf.Detail = "bad", "no DNS server is healthy, so clients cannot be answered"
 			case len(cg.Servers) > 0 && nPaused == len(cg.Servers):
 				cf.Status, cf.Detail = "bad", "every DNS server is paused, so clients cannot be answered"
+			case !fbUp && generalN > 0 && generalUp == 0 && generalN < len(cg.Servers):
+				cf.Status, cf.Detail = "bad", "no DNS server for ordinary names is in use (only servers for zones are), so most queries cannot be answered"
 			case !active:
 				cf.Status, cf.Detail = "warn", "this node is not serving the gateway yet (state: "+state+")"
 			case !answering:
@@ -369,6 +398,7 @@ func buildCanvas(dc *DaemonConfig, rows []SnapshotRow, pools []poolInfo) []Canva
 				}
 			}
 		}
+		cg.FwdWarn = fwdWarnings(cfg)
 		cg.ECS = cfg.ECS
 		cg.LB = cfg.lbValues()
 		if g.DNS != nil {
@@ -554,6 +584,10 @@ type canvasEdit struct {
 	Name          string  `json:"name"`
 	Type          string  `json:"type"`
 	Pos           int     `json:"pos"` // --canvas-move: the new place in the list, 1 = first
+	// ServerType (public | internal | both) and Lists (zone list names, comma separated, "-" for none) set what a server
+	// serves in conditional forwarding (see fwdzones.go); empty leaves it as it is.
+	ServerType string `json:"server_type"`
+	Lists      string `json:"lists"`
 	// Node names a cluster node for --canvas-add|del node: its address, host name or node ID.  CanvasEdit turns it into
 	// nodeID and lists the cluster's node IDs in members, so the last member cannot be removed.
 	Node    string `json:"node"`
@@ -1046,6 +1080,14 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 			if e.Label != "" && e.Label != "-" {
 				setServerName(d, addr, e.Label)
 			}
+			if e.ServerType != "" || e.Lists != "" {
+				if _, err := setServerForward(dc, d, addr, e.ServerType, e.Lists); err != nil {
+					d.Servers = d.Servers[:len(d.Servers)-1]
+					delete(d.ServerQueries, addr)
+					setServerName(d, addr, "")
+					return "", err
+				}
+			}
 			return fmt.Sprintf("added server %s to gateway %d", addr, e.Group), nil
 		case "move":
 			if idx < 0 {
@@ -1060,8 +1102,23 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 			if idx < 0 {
 				return "", fmt.Errorf("server %s is not on gateway %d", addr, e.Group)
 			}
+			if e.ServerType != "" || e.Lists != "" {
+				msg, err := setServerForward(dc, d, addr, e.ServerType, e.Lists)
+				if err != nil {
+					return "", err
+				}
+				if e.Label != "" {
+					if e.Label == "-" {
+						setServerName(d, addr, "")
+					} else {
+						setServerName(d, addr, e.Label)
+					}
+					msg += "; name " + map[bool]string{true: "cleared", false: "set"}[e.Label == "-"]
+				}
+				return msg, nil
+			}
 			if e.Label == "" {
-				return "", errors.New("nothing to change: give --label (a name, or - to clear it)")
+				return "", errors.New("nothing to change: give --label (a name, or - to clear it), or --server-type / --lists")
 			}
 			if e.Label == "-" {
 				setServerName(d, addr, "")
@@ -1109,6 +1166,10 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 			n := len(d.queriesFor(d.Servers[idx]))
 			d.Servers = append(d.Servers[:idx], d.Servers[idx+1:]...)
 			delete(d.ServerQueries, addr)
+			delete(d.ServerForward, addr)
+			if len(d.ServerForward) == 0 {
+				d.ServerForward = nil
+			}
 			setServerName(d, addr, "")
 			return fmt.Sprintf("deleted server %s and its %d domain(s)", addr, n), nil
 		}

@@ -15,14 +15,15 @@ import (
 
 // fakeDNS is a UDP+TCP DNS server on loopback with tunable behaviour.
 type fakeDNS struct {
-	addr  string
-	delay atomic.Int64 // ns
-	mode  atomic.Int32 // 0 ok, 1 NXDOMAIN, 2 drop, 3 SERVFAIL
-	hits  atomic.Int64
-	lastQ atomic.Value // the last question name asked (a string)
-	only  atomic.Bool  // answer only the probe names (a.example, b.example): a server that cannot resolve anything else
-	pc    net.PacketConn
-	tl    net.Listener
+	addr       string
+	delay      atomic.Int64 // ns
+	mode       atomic.Int32 // 0 ok, 1 NXDOMAIN, 2 drop, 3 SERVFAIL
+	hits       atomic.Int64
+	lastQ      atomic.Value // the last question name asked (a string)
+	failSuffix atomic.Value // a zone (a string): names in it are not answered (per-zone health tests)
+	only       atomic.Bool  // answer only the probe names (a.example, b.example): a server that cannot resolve anything else
+	pc         net.PacketConn
+	tl         net.Listener
 }
 
 func reply(q []byte, rcode int, answers int) []byte {
@@ -42,6 +43,11 @@ func (f *fakeDNS) answer(q []byte) []byte {
 	}
 	if d := f.delay.Load(); d > 0 {
 		time.Sleep(time.Duration(d))
+	}
+	if sfx, _ := f.failSuffix.Load().(string); sfx != "" {
+		if n, _, ok := questionOf(q); ok && (n == sfx || strings.HasSuffix(n, "."+sfx)) {
+			return nil
+		}
 	}
 	if f.only.Load() {
 		if n, _, _ := questionOf(q); n != "a.example" && n != "b.example" {

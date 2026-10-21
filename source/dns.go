@@ -242,10 +242,17 @@ func exchangeOptID(ctx context.Context, addr string, query []byte, tcp bool, tim
 
 // Server is one upstream resolver with health and latency state.
 type Server struct {
-	Addr     string
-	Fallback bool        // used only while no normal server is healthy
-	noECS    atomic.Bool // refused or rejected a query carrying a client subnet but answers it without: not sent ECS
-	queries  []DNSQuery  // what this server is probed with
+	Addr      string
+	Fallback  bool     // used only while no normal server is healthy
+	zonesOnly bool     // serves only the zones of its lists, never other names (fwdzones.go)
+	lists     []string // the zone lists it serves
+	zq        []string // the zone each probe query is for ("" = a general probe), parallel to queries (fwdzones.go)
+
+	zoneProbed map[string]bool // the zones some probe is for
+	zoneUp     map[string]bool // ... and which of them answer now (under mu)
+	zoneFails  map[string]int  // consecutive failed probe rounds of each zone (under mu)
+	noECS      atomic.Bool     // refused or rejected a query carrying a client subnet but answers it without: not sent ECS
+	queries    []DNSQuery      // what this server is probed with
 
 	tests []TestStat // result of each query in the last probe round
 
@@ -289,6 +296,8 @@ type ServerStat struct {
 	LastProbeAgo float64 `json:"last_probe_ago_s"`
 	// Tests holds the outcome of each probe query in the latest round.
 	Tests []TestStat `json:"tests"`
+	// ZonesDown are the zones the server serves whose probe domains fail: it is out of service for them only.
+	ZonesDown []string `json:"zones_down,omitempty"`
 }
 
 // TestStat is the latest result of one probe query against one server.
@@ -340,6 +349,7 @@ type Pool struct {
 	logN     atomic.Int64
 	logSupp  atomic.Int64
 	lim      *clientLimits // nil when no client list or rate is configured (clientlimit.go)
+	fwd      *fwdRouter    // nil when no server carries a zone list (fwdzones.go)
 }
 
 func NewPool(cfg DNSConfig) *Pool {
@@ -359,13 +369,18 @@ func NewPool(cfg DNSConfig) *Pool {
 		for _, q := range qs {
 			dh[domKey(a, q.Name, q.Type)] = srvhist.series(domKey(a, q.Name, q.Type))
 		}
-		p.servers = append(p.servers, &Server{Addr: a, queries: qs, dh: dh, hist: srvhist.series(a)})
+		fw := cfg.ServerForward[a]
+		sv := &Server{Addr: a, queries: qs, dh: dh, hist: srvhist.series(a), lists: fw.Lists, zonesOnly: fw.ZonesOnly && len(fw.Lists) > 0}
+		sv.zq, sv.zoneProbed = cfg.probeZones(a, qs)
+		sv.zoneUp, sv.zoneFails = map[string]bool{}, map[string]int{}
+		p.servers = append(p.servers, sv)
 	}
 	for _, a := range cfg.FallbackServers {
 		// a fallback is a last resort: it is never probed (the domains the normal servers are tested with may be
 		// ones only they know) and always counts as up
 		p.servers = append(p.servers, &Server{Addr: a, Fallback: true, healthy: true, hist: srvhist.series(a)})
 	}
+	p.fwd = newFwdRouter(cfg, p.servers)
 	return p
 }
 
@@ -484,7 +499,8 @@ func (p *Pool) probeServer(ctx context.Context, s *Server) {
 	var okN int
 	var firstErr string
 	tests := make([]TestStat, 0, len(s.queries))
-	for _, q := range s.queries {
+	oks := make([]bool, len(s.queries)) // which probe queries answered, by position
+	for qi, q := range s.queries {
 		if ctx.Err() != nil {
 			return
 		}
@@ -519,6 +535,7 @@ func (p *Pool) probeServer(ctx context.Context, s *Server) {
 			continue
 		}
 		okN++
+		oks[qi] = true
 		s.hist.addPrOK()
 		s.hist.lat(rtt)
 		ds := s.dh[domKey(s.Addr, q.Name, q.Type)]
@@ -532,12 +549,51 @@ func (p *Pool) probeServer(ctx context.Context, s *Server) {
 		return
 	}
 	pass := serverPasses(okN, len(s.queries), p.cfg.DownPercent)
+	zoneOK, zoneN := map[string]int{}, map[string]int{}
+	if len(s.zq) == len(s.queries) && len(s.zoneProbed) > 0 {
+		// probes for a zone the server serves say whether it is up for that zone only; when it also has probes for
+		// ordinary names, those alone decide whether it is up for ordinary names (fwdzones.go)
+		gN, gOK := 0, 0
+		for i, z := range s.zq {
+			if z == "" {
+				gN++
+				if oks[i] {
+					gOK++
+				}
+				continue
+			}
+			zoneN[z]++
+			if oks[i] {
+				zoneOK[z]++
+			}
+		}
+		if gN > 0 {
+			pass = serverPasses(gOK, gN, p.cfg.DownPercent)
+		}
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastProbe = time.Now()
 	logDomainFlips(s.Addr, s.tests, tests)
 	s.tests = tests
+	for z, n := range zoneN {
+		if serverPasses(zoneOK[z], n, p.cfg.DownPercent) {
+			s.zoneFails[z] = 0
+			if !s.zoneUp[z] {
+				s.zoneUp[z] = true
+				p.rankGen.Add(1)
+				infof("dns: server %s answers the zone %s", s.Addr, z)
+			}
+		} else {
+			s.zoneFails[z]++
+			if s.zoneUp[z] && s.zoneFails[z] >= p.cfg.FailThreshold {
+				s.zoneUp[z] = false
+				p.rankGen.Add(1)
+				warnf("dns: server %s is DOWN for the zone %s: its probe domains there fail", s.Addr, z)
+			}
+		}
+	}
 	if pass {
 		s.sample(total/time.Duration(okN), p.cfg.LatencyAlpha)
 		s.okCount++
@@ -596,38 +652,7 @@ func logDomainFlips(addr string, prev, cur []TestStat) {
 }
 
 // Ranked returns the eligible servers, fastest first.
-func (p *Pool) Ranked() []*Server {
-	type ent struct {
-		s *Server
-		l float64
-	}
-	var es, fbs []ent
-	for _, s := range p.servers {
-		s.mu.Lock()
-		if s.healthy {
-			if s.Fallback {
-				fbs = append(fbs, ent{s, s.ewma})
-			} else {
-				es = append(es, ent{s, s.ewma})
-			}
-		}
-		s.mu.Unlock()
-	}
-	if len(es) == 0 { // every normal server is down: the fallback servers take over until one is back
-		es = fbs
-	}
-	sort.Slice(es, func(i, j int) bool {
-		if es[i].l != es[j].l {
-			return es[i].l < es[j].l
-		}
-		return es[i].s.Addr < es[j].s.Addr
-	})
-	out := make([]*Server, len(es))
-	for i, e := range es {
-		out[i] = e.s
-	}
-	return out
-}
+func (p *Pool) Ranked() []*Server { return p.rankedWhere(nil, true, "") }
 
 // rankSnap is the ranking of the eligible servers at one moment: the servers fastest first and their latencies.
 type rankSnap struct {
@@ -769,19 +794,25 @@ func (p *Pool) forward(ctx context.Context, query []byte, tcp bool, client netip
 		p.Answered.Add(1)
 		return r.localAnswer(ctx, p, query, &qi), nil
 	} else if r != nil && count { // a policy row's servers instead of the pool's
-		if len(r.servers) == 0 { // only a destination name: the pool's servers are asked for it
-			ranked = p.Candidates()
-		} else {
-			ranked = r.order()
-		}
 		if r.rename { // ... and perhaps another name for them to look up (rename.go)
 			var err error
 			if rn, query, err = r.newRenamer(query, &qi); err != nil {
 				return nil, err
 			}
 		}
+		if len(r.servers) == 0 { // only a destination name: the pool's servers are asked for it (those of its zone, if conditional forwarding has one)
+			var dq qinfo
+			if r.rename {
+				parseQuestion(query, &dq)
+			} else {
+				dq = qi
+			}
+			ranked = p.candidatesFor(&dq)
+		} else {
+			ranked = r.order()
+		}
 	} else {
-		ranked = p.Candidates()
+		ranked = p.candidatesFor(&qi)
 	}
 	ranked = dropAsker(ranked, client)
 	if qi.ok && count {
@@ -891,6 +922,12 @@ func (p *Pool) Snapshot() []ServerStat {
 		}
 		if !s.lastProbe.IsZero() {
 			st.LastProbeAgo = round2(time.Since(s.lastProbe).Seconds())
+			for z := range s.zoneProbed {
+				if !s.zoneUp[z] {
+					st.ZonesDown = append(st.ZonesDown, z)
+				}
+			}
+			sort.Strings(st.ZonesDown)
 		}
 		s.mu.Unlock()
 		out = append(out, st)

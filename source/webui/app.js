@@ -621,6 +621,30 @@
     // the optional name of a server (dns.server_names), shown under its address
     const srvName = (g, addr) => ((g.dns || cv.cfg.dns || {}).server_names || {})[addr] || "";
     const srvTitle = (g, addr) => (srvName(g, addr) ? srvName(g, addr) + " (" + shortAddr(addr) + ")" : shortAddr(addr));
+    // what a server serves in conditional forwarding (dns.server_forward): P public, I internal (its zones only), P+I both
+    const FWD_TYPES = ["Public resolver", "Internal (zones only)", "Public + Internal resolver"];
+    const srvForward = (g, addr) => ((g.dns || cv.cfg.dns || {}).server_forward || {})[addr] || null;
+    const fwdTypeOf = (f) => (!f || !(f.lists || []).length ? FWD_TYPES[0] : f.zones_only ? FWD_TYPES[1] : FWD_TYPES[2]);
+    const fwdBadge = (f) => ({ [FWD_TYPES[0]]: "P", [FWD_TYPES[1]]: "I", [FWD_TYPES[2]]: "P+I" })[fwdTypeOf(f)];
+    // the zone a probe domain of a server is for: the most specific zone of the lists the server serves that the name is in ("" = a probe of ordinary names)
+    const probeZone = (g, addr, name) => {
+      const f = srvForward(g, addr);
+      if (!f || !(f.lists || []).length) return "";
+      const zones = new Set();
+      for (const line of ((cv.cfg.dns || {}).forward_lists || [])) {
+        const i = line.indexOf(":");
+        if (i >= 0 && f.lists.includes(line.slice(0, i).trim().toLowerCase())) for (const z of line.slice(i + 1).split(/[\s,;]+/)) if (z) zones.add(z.toLowerCase().replace(/^\*\./, "").replace(/\.$/, ""));
+      }
+      const n = name.toLowerCase().replace(/\.$/, "");
+      for (let i = 0; i < n.length;) {
+        if (zones.has(n.slice(i))) return n.slice(i);
+        const j = n.indexOf(".", i);
+        if (j < 0) break;
+        i = j + 1;
+      }
+      return "";
+    };
+    const fwdTip = (f) => (f && (f.lists || []).length ? fwdTypeOf(f) + ": " + (f.zones_only ? "answers only the zones of " : "answers the zones of ") + f.lists.join(", ") + (f.zones_only ? "" : " and everything else") : FWD_TYPES[0] + ": answers everything except the zones other servers carry");
     const trunc = (t, n) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
     // cut a text to a pixel width (measured in the font the drawing uses), ending in … when it had to be cut
     let measureCtx = null;
@@ -680,7 +704,7 @@
       const fams = {};
       if (v) for (const f of v.families || []) fams[f.af] = f;
       const members = (v ? v.members || [] : []).map((m) => (m.via_local ? { ...m, via_addr: v.via_addr } : m));   // the serving node's own entry says which node it is
-      let circle = v ? v.status : "idle", why = v ? v.detail : "Starting — not running yet";
+      let circle = v ? v.status : "idle", why = (v ? v.detail : "Starting — not running yet") + (v && v.fwd_warn ? " — " + v.fwd_warn.join("; ") : "");
       // what is staged wins over the last live view, so the pause / resume shows at once
       const via = !!(v && v.via);   // this node does not serve the gateway: the picture is that of a node that does, so nothing local colours it
       const nodePaused = !via && !!(v && v.node_paused);
@@ -979,8 +1003,9 @@
             ghost: (k) => sv("rect", { class: "dropslot", x: rowX + (COLW - SW) / 2 + k * COLW, y: SY, width: SW, height: SH, rx: 4 }),
             drop: (k) => { ensureDNS(g); reorder(g.dns.servers, i, k); cv.sel = { kind: "srv", addr }; commit(); } }),
           onkeydown: (e) => { if (e.key === "Enter") pick("srv", addr)(e); } },
-          sv("title", {}, srvTitle(g, addr) + " — " + ss.why + (info && ss.c !== "paused" && ss.c !== "idle" ? upLine(info.uptime) : "")),
+          sv("title", {}, srvTitle(g, addr) + " — " + ss.why + " — " + fwdTip(srvForward(g, addr)) + (info && ss.c !== "paused" && ss.c !== "idle" ? upLine(info.uptime) : "")),
           sv("rect", { x, y: SY, width: SW, height: SH, rx: 4 }),
+          sv("text", { x: x + 7, y: SY + SH - 7, "text-anchor": "start", class: "t2 srvtype" }, fwdBadge(srvForward(g, addr))),
           label(mx, SY + (srvName(g, addr) ? 19 : 20), fitPx(shortAddr(addr), SW - 44, "600 13px system-ui, sans-serif"), "t1"),
           ...(srvName(g, addr) ? [label(mx, SY + 35, fitPx(srvName(g, addr), SW - 44, "400 11px system-ui, sans-serif"), "t2")] : []),
           label(mx, SY + (srvName(g, addr) ? 51 : 35), info && (ss.c === "ok" || ss.c === "warn") ? info.ms + " ms" + (info.rank ? " · #" + info.rank : "") : ss.c === "bad" ? "down" : ss.c === "paused" ? "paused" : "", "t2")));
@@ -998,8 +1023,9 @@
             ghost: (k) => { const gy = DY0 + k * DGE; return sv("polygon", { class: "dropslot", points: `${mx - DW / 2 + 14},${gy} ${mx + DW / 2 - 14},${gy} ${mx + DW / 2},${gy + DH} ${mx - DW / 2},${gy + DH}` }); },
             drop: (k) => { ensureDNS(g); reorder(ownQueries(g, addr), di, k); cv.sel = { kind: "dom", addr, di: k }; commit(); } }),
             onkeydown: (e) => { if (e.key === "Enter") pick("dom", addr, di)(e); } },
-            sv("title", {}, q.name + " (" + q.type + ") — " + why + (t && !sp && c !== "idle" ? upLine(t.uptime) : "")),
+            sv("title", {}, q.name + " (" + q.type + ") — " + why + (probeZone(g, addr, q.name) ? " — for the zone " + probeZone(g, addr, q.name) + ": a failure takes the server out of that zone only" : " — for ordinary names") + (t && !sp && c !== "idle" ? upLine(t.uptime) : "")),
             sv("polygon", { points: `${mx - DW / 2 + 14},${y} ${mx + DW / 2 - 14},${y} ${mx + DW / 2},${y + DH} ${mx - DW / 2},${y + DH}` }),
+            sv("text", { x: mx - DW / 2 + 12, y: y + DH - 5, "text-anchor": "start", class: "t2 srvtype" }, probeZone(g, addr, q.name) ? "I" : "P"),
             label(mx, y + 21, fitPx(q.name + (q.type === "A" ? "" : " " + q.type), DW - 46, "400 13px system-ui, sans-serif"), "t1 dn")));
         });
       });
@@ -1740,13 +1766,21 @@
       form(edit ? "Edit DNS server" : "Add DNS server", [
         { k: "addr", l: "IP address or host name", v: edit ? shortAddr(edit) : "", ph: "8.8.8.8", hint: "Add :port for a port other than 53. Write tls://host for DNS over TLS (port 853) or https://host/path for DNS over HTTPS (port 443).", on: lk.addr },
         { k: "label", l: "Name (optional)", v: edit ? srvName(g, edit) : "", ph: "e.g. dns-a", hint: "Shown under the address on the diagram. Fill in the address and its name is looked up; fill in a host name here and its address is.", on: lk.label },
+        { k: "ftype", l: "Server type", v: fwdTypeOf(srvForward(g, edit || "")), options: FWD_TYPES, hint: "Public resolver: answers everything except the zones other servers carry. Internal: answers only the zones of its lists (never other names). Public + Internal: answers its zones and everything else." },
+        { k: "flists", l: "Zone lists", v: ((srvForward(g, edit || "") || {}).lists || []).join(", "), ph: "corp, dev", hint: "For an Internal or Public + Internal server: the names of its zone lists (Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding), separated by commas." },
         ...(edit ? [] : [
-          { k: "name", l: "Domain to ask it about", v: "", ph: "google.com", hint: "A server is checked by asking it a question; add more domains afterwards." },
+          { k: "name", l: "Domain to ask it about", v: "", ph: "google.com", hint: "A server is checked by asking it a question; add more domains afterwards. For an Internal server, use a name in one of its zones (its zone itself with type SOA works). A domain inside one of its zones decides that zone only." },
           { k: "type", l: "Record type", v: "A", options: QTYPES }]),
       ], (v) => {
         if (!v.addr) return "Enter an IP address or host name.";
         if (!edit && !/^[A-Za-z0-9_.\-]+$/.test(v.name)) return "Enter a domain name such as google.com.";
         if (!/^[A-Za-z0-9_.\-:\[\]]+$/.test(v.addr)) return "That doesn't look like an IP address or host name.";
+        const flists = (v.flists || "").toLowerCase().split(/[\s,]+/).filter(Boolean);
+        const haveLists = ((cv.cfg.dns || {}).forward_lists || []).map((l) => l.split(":")[0].trim().toLowerCase());
+        if (v.ftype !== FWD_TYPES[0] && !flists.length) return "A " + v.ftype.replace(/ \(.*/, "").toLowerCase() + " server needs at least one zone list. Make the lists under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding, or choose Public resolver.";
+        if (v.ftype === FWD_TYPES[0] && flists.length) return "A public resolver has no zone lists: choose Internal or Public + Internal, or clear the lists.";
+        const missing = flists.filter((l) => !haveLists.includes(l));
+        if (missing.length) return "There is no zone list called " + missing.join(", ") + (haveLists.length ? " (the lists are: " + haveLists.join(", ") + ")." : " — there are no zone lists yet. Make them under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding.");
         const nm = (v.label || "").trim();
         const full = nm.toLowerCase();
         const ip = (/^\[([0-9a-f:.]+)\](:\d+)?$/i.exec(v.addr) || /^(\d+\.\d+\.\d+\.\d+)(:\d+)?$/.exec(v.addr) || /^([0-9a-f:]*:[0-9a-f:]*)$/i.exec(v.addr) || [])[1] || "";
@@ -1760,6 +1794,7 @@
           g.dns.servers[i] = a;
           if (a !== edit) {
             if (g.dns.server_names) delete g.dns.server_names[edit];
+            if (g.dns.server_forward) delete g.dns.server_forward[edit];
             g.dns.server_queries[a] = ownQueries(g, edit); delete g.dns.server_queries[edit];
             if ((g.dns.paused_servers || []).includes(edit)) g.dns.paused_servers = g.dns.paused_servers.map((x) => (x === edit ? a : x));
           }
@@ -1769,6 +1804,8 @@
           g.dns.server_queries[a] = [{ name: v.name, type: v.type }];
           cv.sel = { kind: "srv", addr: a };
         }
+        if (flists.length) { g.dns.server_forward = g.dns.server_forward || {}; g.dns.server_forward[a] = { lists: flists, ...(v.ftype === FWD_TYPES[1] ? { zones_only: true } : {}) }; }
+        else if (g.dns.server_forward) { delete g.dns.server_forward[a]; if (!Object.keys(g.dns.server_forward).length) delete g.dns.server_forward; }
         const oldNm = edit ? srvName(g, edit) : "";
         if (nm) { g.dns.server_names = g.dns.server_names || {}; g.dns.server_names[a] = nm; }
         else if (g.dns.server_names) { delete g.dns.server_names[a]; if (!Object.keys(g.dns.server_names).length) delete g.dns.server_names; }
@@ -1838,6 +1875,7 @@
           g.dns.servers = g.dns.servers.filter((a) => a !== s.addr);
           if (g.dns.server_queries) delete g.dns.server_queries[s.addr];
           if (g.dns.server_names) { delete g.dns.server_names[s.addr]; if (!Object.keys(g.dns.server_names).length) delete g.dns.server_names; }
+          if (g.dns.server_forward) { delete g.dns.server_forward[s.addr]; if (!Object.keys(g.dns.server_forward).length) delete g.dns.server_forward; }
           if (g.dns.paused_servers) g.dns.paused_servers = g.dns.paused_servers.filter((a) => a !== s.addr);
           finish();
         };
@@ -2135,6 +2173,9 @@
     { shared: true, k: "policy_log", l: "Log policy matches", t: "bool" },
     { shared: true, k: "policy_block_ttl", l: "Blocked answer cache (s)", t: "int", min: 0, max: 604800, hint: "0 = 14400" },
     { shared: true, k: "policy", l: "Policy rows", t: "policy", wide: true },
+    { section: "Conditional Forwarding", note: "Send the names of some zones only to the servers that know them, for example your internal zones to your internal DNS servers, while every other name goes to the public resolvers. Make named lists of zones here; then, on the Topology page, give each server a type (Public, Internal, or Public + Internal) and the lists it serves. A name goes to the servers of the most specific zone it is in; if all of them are down the client gets SERVFAIL (the name is never sent to the other servers)." },
+    { shared: true, k: "forward_lists", l: "Zone lists", t: "list", wide: true, hint: "One list per line: a name, a colon, then its zones separated by commas or spaces. For example  corp: corp.example, lab.example, 10.in-addr.arpa  (a zone covers itself and every name below it)." },
+    { t: "fwdtest", l: "Test a name", wide: true },
     { section: "Client Rate Limiting", note: "Applies to every gateway that uses these settings, over UDP, TCP, DoT and DoH, before the cache. This node itself is always allowed and never limited. Counters are per node." },
     { shared: true, k: "allowed_clients", l: "Allowed clients", t: "list", wide: true, hint: "Networks that may use the proxy, one per line: 10.0.0.0/8, 192.168.1.5, 2001:db8::/32. Empty = everyone. Anyone else is answered REFUSED (dynamic updates too)." },
     { shared: true, k: "client_rate", l: "Queries per second", t: "int", min: 0, max: 10000000, hint: "0 = no limit. A client is one IPv4 address or one IPv6 /64." },
@@ -2448,6 +2489,41 @@
   const WELL_KNOWN_KEYS = ["", "dnsdir", "dgw", "ddgw", "change-me", "changeme", "secret", "password", "key", "test", "default"];
   const isWeakKey = (k) => k.length < 12 || WELL_KNOWN_KEYS.includes(k.trim().toLowerCase());
 
+  // Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding: type a name and see which zone, lists and servers it would use
+  // on this node (the saved settings, not what is being edited)
+  function fwdTestBox() {
+    const gw = h("select", { "aria-label": "Gateway" });
+    const name = h("input", { type: "text", placeholder: "host.corp.example", autocomplete: "off", spellcheck: "false", "aria-label": "Name to test" });
+    const out = h("div", { class: "hint", role: "status" });
+    const go = h("button", { class: "btn", type: "button" }, "Test");
+    (async () => {
+      try {
+        for (const g of (((await api("GET", "/api/config")).config || {}).groups || [])) gw.append(h("option", { value: String(g.group_id) }, g.name ? g.name : "Gateway " + g.group_id));
+      } catch (e) { /* the page still works without the list */ }
+      if (!gw.options.length) gw.append(h("option", { value: "1" }, "Gateway 1"));
+    })();
+    const run = async () => {
+      const n = name.value.trim();
+      clear(out);
+      if (!n) return;
+      try {
+        const r = (await api("GET", "/api/fwdroute?gw=" + encodeURIComponent(gw.value) + "&name=" + encodeURIComponent(n))).data;
+        const lines = [r.general
+          ? r.name + " is in no zone that has a server, so it goes to the general servers."
+          : r.name + " is in the zone " + r.zone + " (list " + (r.lists || []).join(", ") + "), so it goes only to the servers of that zone."];
+        if (!r.servers || !r.servers.length) lines.push("No server is available for it: the client gets SERVFAIL.");
+        else if (!r.servers.some((s) => s.healthy)) lines.push("Every one of them is down: the client gets SERVFAIL.");
+        out.append(...lines.map((t) => h("div", {}, t)), h("ul", {}, (r.servers || []).map((s, i) =>
+          h("li", {}, (s.healthy ? (i === 0 ? "1st choice " : "") : "DOWN ") + shortAddrOf(s.addr) + " — " + s.type + (s.healthy ? ", " + s.ms + " ms" : "")))));
+      } catch (e) { out.append(h("div", { class: "notice bad" }, e.message || String(e))); }
+    };
+    go.addEventListener("click", run);
+    name.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); run(); } });
+    return h("div", {}, h("div", { class: "toolbar" }, gw, name, go), out,
+      h("span", { class: "hint" }, "Asks this node about the saved settings; nothing is sent to any server."));
+  }
+  const shortAddrOf = (a) => a.replace(/:53$/, "").replace(/^\[(.*)\]$/, "$1");
+
   function fieldset(specs, obj, asCards) {
     const getters = {};
     let grid = h("div", { class: "grid" });
@@ -2470,6 +2546,10 @@
         get = () => input.checked;
         grid.append(h("label", { class: "f check" }, input, f.l, sharedTag(f)));
         getters[f.k] = get;
+        continue;
+      }
+      if (f.t === "fwdtest") {
+        grid.append(h("div", { class: "f wide" }, h("span", {}, f.l), fwdTestBox()));
         continue;
       }
       if (f.t === "policy") {
@@ -2549,7 +2629,7 @@
           ["Servers", ["Upstream servers"]],
           ["Health & balancing", ["Load Balancing", "Timing"]],
           ["Listeners", ["Listeners"]],
-          ["Resolution", ["Policy-Based Resolution", "Sort List"]],
+          ["Resolution", ["Policy-Based Resolution", "Sort List", "Conditional Forwarding"]],
           ["Cache & ECS", ["Cache", "Client network (ECS)"]],
           ["Clients", ["Client Rate Limiting"]],
         ];
@@ -2601,7 +2681,7 @@
         ...general.get(),
         // keep what this form has no fields for (a gateway's own DNS pool, per-server domains)
         groups: groups.map((g) => ({ ...(g.orig.dns ? { dns: g.orig.dns } : {}), ...(g.orig.paused ? { paused: true } : {}), ...(g.orig.paused_all ? { paused_all: true } : {}), ...(g.orig.excluded_nodes ? { excluded_nodes: g.orig.excluded_nodes } : {}), ...(g.orig.node_order ? { node_order: g.orig.node_order } : {}), ...(g.orig.paused_vips ? { paused_vips: g.orig.paused_vips } : {}), ...(g.orig.paused_vips_here ? { paused_vips_here: g.orig.paused_vips_here } : {}), ...(g.orig.extra_vips ? { extra_vips: g.orig.extra_vips } : {}), ...g.fs.get() })),
-        dns: { ...(cfg.dns.schedule ? { schedule: cfg.dns.schedule } : {}), ...(cfg.dns.server_queries ? { server_queries: cfg.dns.server_queries } : {}), ...(cfg.dns.server_names ? { server_names: cfg.dns.server_names } : {}), ...(cfg.dns.paused_servers ? { paused_servers: cfg.dns.paused_servers } : {}), ...(cfg.dns.paused_queries ? { paused_queries: cfg.dns.paused_queries } : {}), ...dns.get(), ...snmpShared() },
+        dns: { ...(cfg.dns.schedule ? { schedule: cfg.dns.schedule } : {}), ...(cfg.dns.server_queries ? { server_queries: cfg.dns.server_queries } : {}), ...(cfg.dns.server_names ? { server_names: cfg.dns.server_names } : {}), ...(cfg.dns.server_forward ? { server_forward: cfg.dns.server_forward } : {}), ...(cfg.dns.paused_servers ? { paused_servers: cfg.dns.paused_servers } : {}), ...(cfg.dns.paused_queries ? { paused_queries: cfg.dns.paused_queries } : {}), ...dns.get(), ...snmpShared() },
         // the certificate is managed under Web GUI; keep any file paths already in the config
         web: { cert_file: cfg.web.cert_file || "", key_file: cfg.web.key_file || "", ...web.get() },
         cluster: cluster.get(),

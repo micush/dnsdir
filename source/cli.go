@@ -39,6 +39,7 @@ type cliFlags struct {
 	canvasPause, canvasResume, canvasMove, canvasAdd, canvasDel, canvasSet, vip, vip6, ifname, server, name, qtype, ecs, label, anycast, address, scope, node, realMACs                                                                              *string
 	pos, group, ecsV4, ecsV6, spreadBand, downPercent, failThreshold, maxAttempts                                                                                                                                                                    *int
 	serverStats, gatewayStats, spread, lbMode                                                                                                                                                                                                        *string
+	serverType, serverLists, fwdRoute                                                                                                                                                                                                                *string
 	latencyAlpha                                                                                                                                                                                                                                     *float64
 }
 
@@ -59,6 +60,7 @@ func registerCLIFlags(fs *flag.FlagSet) *cliFlags {
 		canvas: b("canvas"), vmacTest: b("test-vmac"), tshoot: b("tshoot"), tshootCapture: b("tshoot-capture"), tshootFile: s("tshoot-file"), realMACs: s("real-macs"), canvasAdd: s("canvas-add"), canvasDel: s("canvas-del"),
 		canvasSet: s("canvas-set"), canvasMove: s("canvas-move"), pos: fs.Int("to", 0, ""), canvasPause: s("canvas-pause"), canvasResume: s("canvas-resume"), vip6: s("vip6"), ecs: s("ecs"), label: s("label"), anycast: s("anycast"), address: s("address"), scope: s("scope"), node: s("node"),
 		ecsV4: fs.Int("ecs-v4", 0, ""), ecsV6: fs.Int("ecs-v6", 0, ""),
+		serverType: s("server-type"), serverLists: s("lists"), fwdRoute: s("fwd-route"),
 		serverStats: s("server-stats"), gatewayStats: s("gateway-stats"), spread: s("spread"), lbMode: s("lb"), spreadBand: fs.Int("spread-band", 0, ""), downPercent: fs.Int("down-percent", 0, ""),
 		failThreshold: fs.Int("fail-threshold", 0, ""), maxAttempts: fs.Int("max-attempts", 0, ""), latencyAlpha: fs.Float64("latency-alpha", 0, ""),
 		vip: s("vip"), ifname: s("interface"), server: s("server"), name: s("name"), qtype: s("type"),
@@ -150,7 +152,7 @@ func (f *cliFlags) run(sock string) bool {
 	case *f.canvasAdd != "" || *f.canvasDel != "" || *f.canvasSet != "" || *f.canvasPause != "" || *f.canvasResume != "" || *f.canvasMove != "":
 		e := canvasEdit{Action: "add", Kind: *f.canvasAdd, Group: *f.group, VIP: *f.vip, VIP6: *f.vip6, Interface: *f.ifname, Label: *f.label, Anycast: *f.anycast, Address: *f.address, Scope: *f.scope, Node: *f.node, RealMACs: *f.realMACs,
 			Server: *f.server, Name: *f.name, Type: *f.qtype, ECS: *f.ecs, ECSv4: *f.ecsV4, ECSv6: *f.ecsV6,
-			LB: *f.lbMode, Spread: *f.spread, SpreadBand: *f.spreadBand, DownPercent: *f.downPercent, FailThreshold: *f.failThreshold, MaxAttempts: *f.maxAttempts, LatencyAlpha: *f.latencyAlpha, Pos: *f.pos}
+			LB: *f.lbMode, Spread: *f.spread, SpreadBand: *f.spreadBand, DownPercent: *f.downPercent, FailThreshold: *f.failThreshold, MaxAttempts: *f.maxAttempts, LatencyAlpha: *f.latencyAlpha, Pos: *f.pos, ServerType: *f.serverType, Lists: *f.serverLists}
 		if *f.canvasMove != "" {
 			e.Action, e.Kind = "move", *f.canvasMove
 			if e.Kind != "server" && e.Kind != "domain" && e.Kind != "anycast" {
@@ -357,6 +359,10 @@ func (f *cliFlags) run(sock string) bool {
 		runServerStats(sock, f)
 	case *f.dnsUpdates:
 		runDNSUpdates(sock)
+	case *f.fwdRoute != "":
+		var r FwdRoute
+		decode(op(sock, "fwd.route", map[string]string{"name": *f.fwdRoute, "gw": strconv.Itoa(*f.group)}), &r)
+		printFwdRoute(r)
 	case *f.dnsLookup != "":
 		var r LookupResult
 		decode(op(sock, "dns.lookup", map[string]string{"lookup": *f.dnsLookup}), &r)
@@ -835,6 +841,9 @@ func showCanvas(sock string) {
 		if g.WeakKey {
 			fmt.Printf("      key: well known or short, so anyone on the network can take over this gateway — set a long random key (Settings ▸ Gateway groups ▸ HMAC shared key)\n")
 		}
+		for _, w := range g.FwdWarn {
+			fmt.Printf("      conditional forwarding: %s\n", w)
+		}
 		for _, n := range g.Nodes {
 			who := n.Name
 			if n.Name != n.Addr {
@@ -858,6 +867,11 @@ func showCanvas(sock string) {
 			if s.InBand {
 				extra += " [spread: takes turns]"
 			}
+			if s.Type == fwdInternal {
+				extra += " [internal: only " + strings.Join(s.Lists, ", ") + "]"
+			} else if s.Type == fwdBoth {
+				extra += " [public + internal: " + strings.Join(s.Lists, ", ") + "]"
+			}
 			who := s.Addr
 			if s.Name != "" {
 				who = s.Name + " (" + s.Addr + ")"
@@ -868,7 +882,11 @@ func showCanvas(sock string) {
 				if j == len(s.Tests)-1 {
 					tb = "└─"
 				}
-				fmt.Printf("  %s %s %s /_\\ %s %s — %s\n", pad, tb, canvasTag[t.Status], t.Name, t.Type, t.Detail+upNote(t.Uptime))
+				zt := ""
+				if t.Zone != "" {
+					zt = " [zone " + t.Zone + "]"
+				}
+				fmt.Printf("  %s %s %s /_\\ %s %s%s — %s\n", pad, tb, canvasTag[t.Status], t.Name, t.Type, zt, t.Detail+upNote(t.Uptime))
 			}
 			if len(s.Tests) == 0 {
 				fmt.Printf("  %s    (no domains: add one with --canvas-add domain --group %d --server %s --name example.com)\n", pad, g.GroupID, s.Addr)

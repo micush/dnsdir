@@ -308,6 +308,19 @@ func cloneDNS(d DNSConfig) DNSConfig {
 	} else {
 		d.ServerNames = nil
 	}
+	d.ForwardLists = append([]string(nil), d.ForwardLists...)
+	if len(d.ForwardLists) == 0 {
+		d.ForwardLists = nil
+	}
+	if len(d.ServerForward) > 0 {
+		m := make(map[string]ServerForward, len(d.ServerForward))
+		for k, v := range d.ServerForward {
+			m[k] = ServerForward{Lists: append([]string(nil), v.Lists...), ZonesOnly: v.ZonesOnly}
+		}
+		d.ServerForward = m
+	} else {
+		d.ServerForward = nil
+	}
 	if d.LB != nil {
 		l := *d.LB
 		d.LB = &l

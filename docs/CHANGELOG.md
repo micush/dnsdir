@@ -1,5 +1,20 @@
 # Changelog
 
+## [v498] - 2026-10-21 — Conditional forwarding: health per zone
+
+- A probe domain that falls inside a zone a server serves (the most specific zone of its lists) now decides that zone only. When it fails the server is taken out of that zone, and the zone's queries go to the other servers that carry it, while the server goes on answering ordinary names; the probes of ordinary names decide whether it answers those, and a zone with no probe of its own follows them. An Internal server, which has only zone probes, is in service for each zone by that zone's probes. The log says when a server goes down or comes back for a zone, `--canvas` tags each probe with its zone, and the server's state says which zones it is out of.
+- Topology: each probe domain box shows a small **I** (in a zone the server serves) or **P** (ordinary names) in its bottom left corner, and its tooltip says which.
+- The "Test a name" box and `--fwd-route` show a server as down for the zone when its zone probes fail.
+- Tests: the zone of a probe, a Public + Internal server out of one zone only, an Internal server with probes in two zones.
+
+## [v497] - 2026-10-21 — Conditional forwarding: zones go to their own servers
+
+- **Conditional forwarding.** Send the names of some zones only to the servers that know them, inside one gateway. Make named zone lists under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding (`forward_lists`, shared), give each server a **type** (Public resolver, Internal (zones only), or Public + Internal resolver) and the lists it serves (`server_forward`, per gateway), and a query goes to the servers of the most specific zone it is in, with the usual health checks, fastest-first ordering, spreading and failover. If every server of a zone is down the client gets SERVFAIL and the name is never sent to the other servers; fallback servers never answer a name in a zone. Policy rows are read first; a row that only has a destination name routes by the destination. The default is unchanged: a server with no lists is a Public resolver and a pool where no server has a list behaves exactly as before.
+- Topology: a small **P**, **I** or **P+I** in the bottom left corner of each server square, the type and lists in the Add/Edit server form, a warning (gateway tooltip and `--canvas`) for a zone list no server of the gateway serves, and a red gateway state when only zones-only servers are up. An Internal server with no probe domains of its own is probed with the SOA of its first zone.
+- **Test a name** box under the zone lists (`GET /api/fwdroute`, `--fwd-route NAME --group N`): the zone, lists and servers a name would use on this node, with each server's state. `--canvas-set server --server-type public|internal|both --lists a,b` sets a server's type and lists (also on `--canvas-add server`; `--lists -` clears).
+- Saving is refused if a server names a list that does not exist, or an Internal server has no list. Configuration history shows changes to the lists and to server types.
+- Tests: routing by zone, most specific zone, no leak when a zone is down, fallback behavior, SOA probe, validation, a policy rename routed by its destination.
+
 ## [v496] - 2026-10-21 — A node whose DNS stops answering pauses itself
 
 ### Added

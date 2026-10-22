@@ -459,3 +459,58 @@ func TestFwdInternalServerTwoZones(t *testing.T) {
 		t.Fatal("the lab zone's probe fails: its queries must fail rather than go on")
 	}
 }
+
+// With conditional forwarding on, the rank and the spread band (the blue line on the topology) are worked out for
+// each group of servers the forwarding path really uses: the general servers, and the servers of each zone.  Before,
+// one ranking over every server meant the fastest internal server took the only blue line and was rank 1, and
+// the public servers were never marked.
+func TestFwdSnapshotRanksPerGroup(t *testing.T) {
+	pub, intl, both, dev := newFakeDNS(t), newFakeDNS(t), newFakeDNS(t), newFakeDNS(t)
+	cfg := testDNSCfg(pub.addr, intl.addr, both.addr, dev.addr)
+	cfg.Spread, cfg.SpreadBand = true, 20
+	cfg.ForwardLists = []string{"corp: corp.example", "dev: dev.corp.example"}
+	cfg.ServerForward = map[string]ServerForward{
+		intl.addr: {Lists: []string{"corp"}, ZonesOnly: true},
+		both.addr: {Lists: []string{"corp"}},
+		dev.addr:  {Lists: []string{"dev"}, ZonesOnly: true},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	p := NewPool(cfg)
+	p.ProbeNow(context.Background())
+	for _, s := range p.servers {
+		s.mu.Lock()
+		switch s.Addr {
+		case pub.addr:
+			s.ewma = 20
+		case both.addr:
+			s.ewma = 300
+		case intl.addr:
+			s.ewma = 0.5
+		case dev.addr:
+			s.ewma = 2
+		}
+		s.mu.Unlock()
+	}
+	p.rankGen.Add(1)
+	got := map[string]ServerStat{}
+	for _, st := range p.Snapshot() {
+		got[st.Addr] = st
+	}
+	for _, c := range []struct {
+		name   string
+		addr   string
+		rank   int
+		inBand bool
+	}{
+		{"public server: first of the general servers", pub.addr, 1, true},
+		{"public + internal server: second of the general servers", both.addr, 2, false},
+		{"internal server: first of the corp zone", intl.addr, 1, true},
+		{"dev server: alone in its zone", dev.addr, 1, true},
+	} {
+		if st := got[c.addr]; st.Rank != c.rank || st.InBand != c.inBand {
+			t.Errorf("%s: rank %d in-band %v, want %d / %v", c.name, st.Rank, st.InBand, c.rank, c.inBand)
+		}
+	}
+}

@@ -284,7 +284,7 @@ type ServerStat struct {
 	Name         string  `json:"name,omitempty"` // the name given to the server on the Topology page, if any
 	Healthy      bool    `json:"healthy"`
 	Fallback     bool    `json:"fallback,omitempty"` // a fallback server: in use only while every normal server is down
-	Rank         int     `json:"rank"`               // 1 = fastest healthy; 0 = not eligible
+	Rank         int     `json:"rank"`               // 1 = fastest healthy of its own group (the servers for ordinary names, or those of its zones); 0 = not eligible
 	InBand       bool    `json:"in_band"`            // spread is on and the server is within the band of the fastest: it takes turns
 	EWMAMS       float64 `json:"ewma_ms"`
 	LastMS       float64 `json:"last_ms"`
@@ -706,15 +706,43 @@ func bandCount(lat []float64, band int) int {
 }
 
 // inBand is the set of servers that currently take their turn at the front: with spread on, those within the
-// band of the fastest healthy one (a lone fastest server counts); empty with spread off.
+// band of the fastest healthy one of their own ranking (a lone fastest server counts); empty with spread off.
+// With conditional forwarding on there is a ranking for the general servers and one for each zone that has a
+// server, as the forwarding path uses them, so the fastest public server and the fastest internal one both count.
 func (p *Pool) inBand() map[*Server]bool {
 	out := map[*Server]bool{}
 	if !p.cfg.Spread {
 		return out
 	}
-	ranked := p.Ranked()
+	for _, ranked := range p.scopeRanks() {
+		p.addBand(out, ranked)
+	}
+	return out
+}
+
+// scopeRanks are the rankings the forwarding path uses: one without conditional forwarding; with it, the general
+// servers first (the fallback servers behind them) and then one for each zone that has a server.
+func (p *Pool) scopeRanks() [][]*Server {
+	if p.fwd == nil {
+		return [][]*Server{p.Ranked()}
+	}
+	out := [][]*Server{p.rankedWhere(serverIsGeneral, true, "")}
+	zones := make([]string, 0, len(p.fwd.zones))
+	for z := range p.fwd.zones {
+		zones = append(zones, z)
+	}
+	sort.Strings(zones)
+	for _, z := range zones {
+		set := p.fwd.zones[z]
+		out = append(out, p.rankedWhere(func(s *Server) bool { return containsServer(set, s) }, false, z))
+	}
+	return out
+}
+
+// addBand adds to out the servers of ranked (fastest first) that are within the band of the first.
+func (p *Pool) addBand(out map[*Server]bool, ranked []*Server) {
 	if len(ranked) == 0 {
-		return out
+		return
 	}
 	lat := make([]float64, len(ranked))
 	for i, s := range ranked {
@@ -725,7 +753,6 @@ func (p *Pool) inBand() map[*Server]bool {
 	for _, s := range ranked[:bandCount(lat, p.cfg.SpreadBand)] {
 		out[s] = true
 	}
-	return out
 }
 
 // spreadOrder puts the servers of ranked (sorted fastest first, lat their latencies) that are within band
@@ -905,9 +932,19 @@ func (p *Pool) forward(ctx context.Context, query []byte, tcp bool, client netip
 }
 
 func (p *Pool) Snapshot() []ServerStat {
+	// the rank is the place in the server's own ranking: among the general servers for one that answers ordinary
+	// names, among the servers of its zones for one that serves only zones
 	rank := map[*Server]int{}
-	for i, s := range p.Ranked() {
+	scopes := p.scopeRanks()
+	for i, s := range scopes[0] {
 		rank[s] = i + 1
+	}
+	for _, sc := range scopes[1:] {
+		for i, s := range sc {
+			if r := rank[s]; r == 0 || (s.zonesOnly && i+1 < r) {
+				rank[s] = i + 1
+			}
+		}
 	}
 	band := p.inBand()
 	out := make([]ServerStat, 0, len(p.servers))

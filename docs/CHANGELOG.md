@@ -1,5 +1,9 @@
 # Changelog
 
+## [v507] - 2026-10-21 — Rank and blue lines per group of servers
+
+- Topology: with conditional forwarding on, the **#** under a server and the blue (spread) lines were worked out over every server at once, so an internal server that was the fastest overall took the only blue line and the public servers got none, although queries are spread within each group separately. Now each server is ranked in its own group (the servers for ordinary names, or the servers of its zones) and the fastest of each group gets a blue line: the fastest public server and the fastest internal one, as the daemon really routes. Without conditional forwarding nothing changes. The routing itself is unchanged; this only fixes the drawing and the Statistics rank column.
+
 ## [v506] - 2026-10-21 — Delete a cluster member in one step
 
 - Cluster ▸ Members: right-click a member ▸ **Delete** drops it from the cluster and leaves nothing behind (before, **Remove** put its address on a removed list and a second step, **Allow again**, was needed to clear it). A member that is still running resets itself to a cluster of one. The removed-nodes card now has a **Delete** button on each address to forget one that is already there. Command line: `--cluster-delete ADDR`. `--cluster-remove` and `--cluster-unremove` are unchanged, for blocking a node that must not come back.

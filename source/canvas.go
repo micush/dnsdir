@@ -21,7 +21,8 @@ import (
 //	idle  grey    not known yet (not applied, or not probed yet)
 //
 // A blue line from the gateway to a server (in_band) means spread is on and the server is within the
-// band of the fastest one, so queries take turns across the blue ones.
+// band of the fastest one of its own group (with conditional forwarding: the servers for ordinary names, or
+// the servers of a zone), so queries take turns across the blue ones.
 
 type CanvasTest struct {
 	Name   string  `json:"name"`

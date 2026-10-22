@@ -1,5 +1,18 @@
 # Changelog
 
+## [v504] - 2026-10-21 — Test a name box removed
+
+- Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding no longer has a **Test a name** box; the `test:NAME` filter on the Zone lists table shows the zone and list a name falls in. The servers a name would use are still available on the command line (`--fwd-route NAME --group N`), which the help now says.
+- The `test:NAME` filter now keeps only the zone that decides (every row of that zone, when it is in several lists), not the wider zones above it as well. Before, `test:media1.ad.cush.local` showed both the `cush.local` row and the `ad.cush.local` row, which read as if the name matched both, although the count line named the right one.
+
+## [v503] - 2026-10-21 — Conditional Forwarding description moved to the help
+
+- The paragraph that sat at the top of Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding is now the **Conditional Forwarding** entry in that tab's help, above **Zone lists**. The section itself starts with the zone lists table.
+
+## [v502] - 2026-10-21 — Test a name is just a text box
+
+- Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding ▸ **Test a name**: the gateway drop-down is gone, and the first thing on the row was a full-width drop-down that looked like the name box. Type a name and press Enter (or **Test**): it tells you which zone and list the name matches and which servers would resolve it, fastest first, with DOWN marked. With several gateways the answer is given for each one, under the gateway's name.
+
 ## [v501] - 2026-10-21 — Zone list picker that copes with hundreds of lists
 
 - In Topology ▸ Add/Edit DNS server, **Zone lists** no longer shows every list at once. The lists the server serves show as little tags with an ✕ to remove them; a box below finds the others as you type (up to eight matches are shown, with a note of how many more, **Enter** adds the first match, a click adds one). Only lists that exist can be added; a tag for a list that has since been deleted is shown in amber. Hidden for a Public resolver, as in v500. The stored form, the daemon and the command line are unchanged.

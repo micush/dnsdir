@@ -2210,9 +2210,8 @@
     { shared: true, k: "policy_log", l: "Log policy matches", t: "bool" },
     { shared: true, k: "policy_block_ttl", l: "Blocked answer cache (s)", t: "int", min: 0, max: 604800, hint: "0 = 14400" },
     { shared: true, k: "policy", l: "Policy rows", t: "policy", wide: true },
-    { section: "Conditional Forwarding", note: "Send the names of some zones only to the servers that know them, for example your internal zones to your internal DNS servers, while every other name goes to the public resolvers. Make named lists of zones here (one zone to a row); then, on the Topology page, give each server a type (Public, Internal, or Public + Internal) and the lists it serves. A name goes to the servers of the most specific zone it is in; if all of them are down the client gets SERVFAIL (the name is never sent to the other servers)." },
+    { section: "Conditional Forwarding" },
     { shared: true, k: "forward_lists", l: "Zone lists", t: "zones", wide: true },
-    { t: "fwdtest", l: "Test a name", wide: true },
     { section: "Client Rate Limiting", note: "Applies to every gateway that uses these settings, over UDP, TCP, DoT and DoH, before the cache. This node itself is always allowed and never limited. Counters are per node." },
     { shared: true, k: "allowed_clients", l: "Allowed clients", t: "list", wide: true, hint: "Networks that may use the proxy, one per line: 10.0.0.0/8, 192.168.1.5, 2001:db8::/32. Empty = everyone. Anyone else is answered REFUSED (dynamic updates too)." },
     { shared: true, k: "client_rate", l: "Queries per second", t: "int", min: 0, max: 10000000, hint: "0 = no limit. A client is one IPv4 address or one IPv6 /64." },
@@ -2543,7 +2542,7 @@
     const empty = h("div", { class: "policy-empty" }, "");
     const wrap = h("div", { class: "policy-wrap" }, tbl, empty);
 
-    const filter = h("input", { type: "text", class: "policy-filter", placeholder: "Filter or test rows", title: "Type text to keep the rows with it in any cell. test:NAME keeps the zones that name is in; the most specific one decides where it goes.", "aria-label": "Filter zone rows", autocomplete: "off", spellcheck: "false" });
+    const filter = h("input", { type: "text", class: "policy-filter", placeholder: "Filter or test rows", title: "Type text to keep the rows with it in any cell. test:NAME keeps the zone that name falls in (the most specific one it is in) and says where it goes.", "aria-label": "Filter zone rows", autocomplete: "off", spellcheck: "false" });
     const count = h("span", { class: "policy-count muted" }, "");
     const sizeSel = h("select", { "aria-label": "Rows per page" }, [25, 50, 100, 250, 500].map((n) => h("option", { value: String(n) }, n + " per page")));
     sizeSel.value = String(size);
@@ -2566,9 +2565,11 @@
       testing = null;
       if (tm) {
         const name = tm[1].toLowerCase().replace(/\.$/, "");
-        const rows = data.filter((r) => inZone(zoneOf(r.v[1]), name));
-        const win = rows.reduce((b, r) => (!b || zoneOf(r.v[1]).length > zoneOf(b.v[1]).length ? r : b), null);
-        testing = { name, win };
+        const covers = data.filter((r) => inZone(zoneOf(r.v[1]), name));
+        const win = covers.reduce((b, r) => (!b || zoneOf(r.v[1]).length > zoneOf(b.v[1]).length ? r : b), null);
+        // only the zone that decides is kept (every row of it: the same zone may be in several lists), not the wider zones above it
+        const rows = win ? covers.filter((r) => zoneOf(r.v[1]) === zoneOf(win.v[1])) : [];
+        testing = { name, win, lists: [...new Set(rows.map((r) => r.v[0].trim().toLowerCase() || "?"))] };
         return rows;
       }
       const q = raw.toLowerCase();
@@ -2600,7 +2601,7 @@
       first.disabled = prev.disabled = page === 0;
       next.disabled = last.disabled = page >= n - 1;
       empty.hidden = vis.length > 0;
-      if (testing && testing.win) count.textContent += ` · ${testing.name} goes to the servers of ${zoneOf(testing.win.v[1])} (list ${testing.win.v[0].trim().toLowerCase() || "?"}), the most specific zone`;
+      if (testing && testing.win) count.textContent += ` · ${testing.name} goes to the servers of ${zoneOf(testing.win.v[1])} (list ${testing.lists.join(", ")}), the most specific zone it is in`;
       empty.textContent = testing ? (vis.length ? "" : `${testing.name} is in none of these zones, so it goes to the general servers.`) : data.length ? "No rows match the filter." : "No rows. Right-click here ▸ Add row.";
     }
 
@@ -2722,41 +2723,6 @@
   const WELL_KNOWN_KEYS = ["", "dnsdir", "dgw", "ddgw", "change-me", "changeme", "secret", "password", "key", "test", "default"];
   const isWeakKey = (k) => k.length < 12 || WELL_KNOWN_KEYS.includes(k.trim().toLowerCase());
 
-  // Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding: type a name and see which zone, lists and servers it would use
-  // on this node (the saved settings, not what is being edited)
-  function fwdTestBox() {
-    const gw = h("select", { "aria-label": "Gateway" });
-    const name = h("input", { type: "text", placeholder: "host.corp.example", autocomplete: "off", spellcheck: "false", "aria-label": "Name to test" });
-    const out = h("div", { class: "hint", role: "status" });
-    const go = h("button", { class: "btn", type: "button" }, "Test");
-    (async () => {
-      try {
-        for (const g of (((await api("GET", "/api/config")).config || {}).groups || [])) gw.append(h("option", { value: String(g.group_id) }, g.name ? g.name : "Gateway " + g.group_id));
-      } catch (e) { /* the page still works without the list */ }
-      if (!gw.options.length) gw.append(h("option", { value: "1" }, "Gateway 1"));
-    })();
-    const run = async () => {
-      const n = name.value.trim();
-      clear(out);
-      if (!n) return;
-      try {
-        const r = (await api("GET", "/api/fwdroute?gw=" + encodeURIComponent(gw.value) + "&name=" + encodeURIComponent(n))).data;
-        const lines = [r.general
-          ? r.name + " is in no zone that has a server, so it goes to the general servers."
-          : r.name + " is in the zone " + r.zone + " (list " + (r.lists || []).join(", ") + "), so it goes only to the servers of that zone."];
-        if (!r.servers || !r.servers.length) lines.push("No server is available for it: the client gets SERVFAIL.");
-        else if (!r.servers.some((s) => s.healthy)) lines.push("Every one of them is down: the client gets SERVFAIL.");
-        out.append(...lines.map((t) => h("div", {}, t)), h("ul", {}, (r.servers || []).map((s, i) =>
-          h("li", {}, (s.healthy ? (i === 0 ? "1st choice " : "") : "DOWN ") + shortAddrOf(s.addr) + " — " + s.type + (s.healthy ? ", " + s.ms + " ms" : "")))));
-      } catch (e) { out.append(h("div", { class: "notice bad" }, e.message || String(e))); }
-    };
-    go.addEventListener("click", run);
-    name.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); run(); } });
-    return h("div", {}, h("div", { class: "toolbar" }, gw, name, go), out,
-      h("span", { class: "hint" }, "Asks this node about the saved settings; nothing is sent to any server."));
-  }
-  const shortAddrOf = (a) => a.replace(/:53$/, "").replace(/^\[(.*)\]$/, "$1");
-
   function fieldset(specs, obj, asCards) {
     const getters = {};
     let grid = h("div", { class: "grid" });
@@ -2786,10 +2752,6 @@
         getters[f.k] = zt.get;
         grid.append(h("div", { class: "f wide" }, h("span", {}, f.l, sharedTag(f)), zt.el,
           h("span", { class: "hint" }, "One zone to a row; the rows with the same list name are that list. A zone covers itself and every name below it. Give servers their lists on the Topology page. Type test:NAME in the filter to see which zone a name falls in.")));
-        continue;
-      }
-      if (f.t === "fwdtest") {
-        grid.append(h("div", { class: "f wide" }, h("span", {}, f.l), fwdTestBox()));
         continue;
       }
       if (f.t === "policy") {

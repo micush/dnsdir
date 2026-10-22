@@ -2263,13 +2263,13 @@
     { shared: true, k: "min_password_length", l: "Minimum password length", t: "int", min: 0, max: 128, hint: "0 = 8" },
   ];
   const SSO_FIELDS = [
-    { shared: true, k: "sso_base_url", l: "Address of this console", t: "text", hint: "Optional, https://name:port with no path. Use it when the provider is to send the browser back to one fixed address (a cluster behind one name); empty uses the address the browser used." },
+    { shared: true, k: "sso_base_url", l: "Address of this console", t: "text" },
     { shared: true, k: "sso_google_client_id", l: "Google client ID", t: "text" },
     { shared: true, k: "sso_google_client_secret", l: "Google client secret", t: "secret" },
-    { shared: true, k: "sso_entra_tenant", l: "Microsoft tenant ID", t: "text", hint: "The Directory (tenant) ID, a GUID. Only accounts of this organisation can sign in." },
-    { shared: true, k: "sso_entra_client_id", l: "Microsoft client ID", t: "text", hint: "The Application (client) ID." },
+    { shared: true, k: "sso_entra_tenant", l: "Microsoft tenant ID", t: "text" },
+    { shared: true, k: "sso_entra_client_id", l: "Microsoft client ID", t: "text" },
     { shared: true, k: "sso_entra_client_secret", l: "Microsoft client secret", t: "secret" },
-    { shared: true, k: "sso_users", l: "Users", t: "rows", rows: "ssousers", wide: true, hint: "rw may change settings; ro may only look. Only these addresses can sign in with a provider." },
+    { shared: true, k: "sso_users", l: "Users", t: "rows", rows: "ssousers", wide: true },
   ];
   const SNMP_FIELDS = [
     { shared: true, k: "snmp_communities", l: "Community strings", t: "rows", rows: "community", wide: true },
@@ -2652,7 +2652,7 @@
   }
 
   // A small table for a list of lines made of a few columns (Sort list, single sign-on users): rows to edit in place, drag to
-  // reorder, a filter box, paging, a right-click menu (Edit, Copy, Paste, Add, Move, Delete) and an Add row button.
+  // reorder, a filter box, paging, a and a right-click menu (Edit, Copy, Paste, Add row, Move, Delete).
   // spec: {cols: [{name, ph, opts?}], parse(line) -> [cell, ...], format(cells) -> [line, ...], mark(cells) -> true when the row is
   // not complete (outlined and not saved), empty: text for no rows}.
   const rowClips = {};
@@ -2667,7 +2667,6 @@
     const wrap = h("div", { class: "policy-wrap" }, tbl, empty);
     const filter = h("input", { type: "text", class: "policy-filter", placeholder: "Filter rows", "aria-label": "Filter rows", autocomplete: "off", spellcheck: "false" });
     const count = h("span", { class: "policy-count muted" }, "");
-    const addBtn = h("button", { type: "button", class: "btn small" }, "Add row");
     const sizeSel = h("select", { "aria-label": "Rows per page" }, [25, 50, 100, 250, 500].map((n) => h("option", { value: String(n) }, n + " per page")));
     sizeSel.value = String(size);
     const mkBtn = (label, title) => h("button", { type: "button", class: "btn small", title, "aria-label": title }, label);
@@ -2675,7 +2674,7 @@
     const pageIn = h("input", { type: "number", min: "1", class: "policy-page", "aria-label": "Page number" });
     const pages = h("span", { class: "muted" }, "");
     const pager = h("span", { class: "policy-pager" }, first, prev, pageIn, pages, next, last);
-    const bar = h("div", { class: "policy-bar" }, addBtn, filter, count, h("span", { class: "grow" }), pager, sizeSel);
+    const bar = h("div", { class: "policy-bar" }, filter, count, h("span", { class: "grow" }), pager, sizeSel);
     const box = h("div", { class: "policy-box" }, bar, wrap);
     bar.addEventListener("change", (e) => e.stopPropagation());   // the filter and paging controls are not settings
     const changed = () => tbl.dispatchEvent(new Event("change", { bubbles: true }));
@@ -2703,7 +2702,7 @@
       first.disabled = prev.disabled = page === 0;
       next.disabled = last.disabled = page >= n - 1;
       empty.hidden = vis.length > 0;
-      empty.textContent = data.length ? "No rows match the filter." : (spec.empty || "No rows.") + " Add row, or right-click here.";
+      empty.textContent = data.length ? "No rows match the filter." : (spec.empty || "No rows.") + " Right-click here ▸ Add row.";
     }
     function moveTo(row, target, after) {
       if (row === target) return;
@@ -2798,7 +2797,6 @@
       ["Add", () => focusRow(insert([], null), 0)],
       ["Paste", () => paste(data[data.length - 1])],
     ]));
-    addBtn.addEventListener("click", () => focusRow(insert([], null), 0));
     filter.addEventListener("input", () => { page = 0; render(); });
     sizeSel.addEventListener("change", () => { size = +sizeSel.value || 50; page = 0; render(); });
     first.addEventListener("click", () => { page = 0; render(); });
@@ -3346,7 +3344,6 @@
         ["dns", "DNS", dnsTabs()],
         ["web", "Web GUI", webTabs()],
         ["sso", "SSO", section("Single sign-on",
-          h("p", { class: "hint" }, "Lets people sign in with a Google or Microsoft account instead of a system password (the password login stays). Register this console with the provider as a web application; its redirect URI is the address of this page followed by /api/sso/callback (https://this-node:53853/api/sso/callback). Only the e-mail addresses in the Users table may sign in, whatever account they use."),
           sso.el)],
         ["snmp", "SNMP", h("div", {}, (() => { const c = section("SNMP", snmp.el); c.querySelector("h2").append(snmpPill); return c; })())],
         ["cluster", "Cluster", section("Cluster", cluster.el)],

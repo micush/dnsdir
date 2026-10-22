@@ -1,5 +1,10 @@
 # Changelog
 
+## [v514] - 2026-10-22 — Tidier tables and SSO page
+
+- The **Add row** button is gone from the list tables; right-click ▸ **Add row** does it (the empty table says so).
+- The text on the **SSO** tab is in the help now (Configure ▸ Users ▸ SSO), not on the page.
+
 ## [v513] - 2026-10-22 — Single sign-on moves to Users; four more lists as tables
 
 - Single sign-on is now on Configure ▸ **Users**, which has two tabs: **Local** (the accounts of this host) and **SSO** (the providers and the e-mail addresses that may sign in). Configure ▸ Web GUI is back to two tabs, General and Certificates.

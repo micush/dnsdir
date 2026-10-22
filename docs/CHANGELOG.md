@@ -1,5 +1,9 @@
 # Changelog
 
+## [v516] - 2026-10-22 — Narrower list tables
+
+- The list tables are no longer as wide as the whole card (at most 42 rem), and their number column is narrow, so a one-column table is not half number column.
+
 ## [v515] - 2026-10-22 — Help for Local and SSO users
 
 - **Users** has two help pages now, one for the **Local** tab and one for the **SSO** tab, each describing its own settings (the SSO one has the Google and Microsoft set-up steps and how an address is matched to a provider).

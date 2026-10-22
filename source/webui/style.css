@@ -672,3 +672,9 @@ table.policy.zones tr.incomplete td:nth-child(2) { box-shadow: inset 0 0 0 2px v
 table.zones.one th:first-child, table.zones.one td.grip { width: 6rem; }
 
 .grid .brk { grid-column-start: 1; }   /* a field that starts a new row of the grid */
+
+/* the tables for lists (rowTable) are as wide as their content needs, not the whole card; the number column holds a few digits */
+.policy-box.rows { max-width: 42rem; }
+table.policy.rows { width: 100%; min-width: 0; }
+table.policy.rows th:nth-child(1), table.policy.rows td.grip, table.zones.one.rows th:first-child, table.zones.one.rows td.grip { width: 3.2rem; }
+table.policy.rows th:nth-child(n+2) { width: auto; }

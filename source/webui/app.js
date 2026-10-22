@@ -1140,19 +1140,40 @@
     }
     function form(title, fields, onOk, okLabel) {
       const els = {}, hints = {};
-      // f.checks: a little tag for each of the names, f.v the ones switched on (click a tag to switch it); its value is the
-      // chosen names joined by commas, and setDisabled(true) hides the whole field and makes the value empty
+      // f.checks: the names that can be chosen (there may be hundreds), f.v the ones chosen. The chosen ones show as little tags
+      // with an x; a box below finds the others by what is typed (Enter adds the first match, a click adds one). Its value is the
+      // chosen names joined by commas; setDisabled(true) makes the value empty (the caller hides the field for a type with none)
       const checkGroup = (f) => {
-        const boxes = f.checks.map((n) => h("input", { type: "checkbox", value: n, checked: (f.v || []).includes(n) }));
-        const wrapEl = h("div", { class: "checks", role: "group", "aria-label": f.l },
-          f.checks.length ? f.checks.map((n, i) => {
-            const tag = h("label", { class: "tag" + (boxes[i].checked ? " on" : "") }, boxes[i], n);
-            boxes[i].addEventListener("change", () => tag.classList.toggle("on", boxes[i].checked));
-            return tag;
-          }) : h("span", { class: "hint" }, f.none || "Nothing to choose from yet."));
+        const names = f.checks, chosen = (f.v || []).slice();
         let off = false;
-        Object.defineProperty(wrapEl, "value", { get: () => (off ? "" : boxes.filter((b) => b.checked).map((b) => b.value).join(",")) });
-        wrapEl.setDisabled = (d) => { off = d; boxes.forEach((b) => { b.disabled = d; }); if (wrapEl.parentElement) wrapEl.parentElement.hidden = d; };
+        const tagsEl = h("div", { class: "tags" });
+        const input = h("input", { type: "text", autocomplete: "off", spellcheck: "false", placeholder: names.length ? "Type to find a zone list to add" : "", "aria-label": f.l });
+        const sugg = h("div", { class: "sugg", role: "listbox" });
+        const wrapEl = h("div", { class: "checks", role: "group", "aria-label": f.l }, tagsEl, names.length ? input : h("span", { class: "hint" }, f.none || "Nothing to choose from yet."), sugg);
+        const matches = () => { const q = input.value.trim().toLowerCase(); return names.filter((n) => !chosen.includes(n) && (!q || n.toLowerCase().includes(q))); };
+        const drawSugg = (show) => {
+          sugg.replaceChildren();
+          if (!show) return;
+          const m = matches();
+          for (const n of m.slice(0, 8)) sugg.append(h("div", { class: "opt", role: "option", onmousedown: (e) => { e.preventDefault(); add(n); } }, n));
+          if (m.length > 8) sugg.append(h("div", { class: "more" }, (m.length - 8) + " more: keep typing to narrow them"));
+          if (!m.length && input.value.trim()) sugg.append(h("div", { class: "more" }, "No zone list matches."));
+        };
+        const drawTags = () => {
+          tagsEl.replaceChildren(...chosen.map((n) => h("span", { class: "tag on" + (names.includes(n) ? "" : " gone"), title: names.includes(n) ? "" : "There is no zone list of this name" }, n,
+            h("button", { type: "button", "aria-label": "Remove " + n, disabled: off, onclick: () => { chosen.splice(chosen.indexOf(n), 1); drawTags(); drawSugg(document.activeElement === input); } }, "×"))));
+        };
+        const add = (n) => { if (!chosen.includes(n)) chosen.push(n); input.value = ""; drawTags(); drawSugg(true); input.focus(); };
+        input.addEventListener("input", () => drawSugg(true));
+        input.addEventListener("focus", () => drawSugg(true));
+        input.addEventListener("blur", () => drawSugg(false));
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") { e.preventDefault(); const q = input.value.trim().toLowerCase(), m = matches(); const hit = m.find((n) => n.toLowerCase() === q) || m[0]; if (hit && q) add(hit); }
+          else if (e.key === "Escape" && (input.value || sugg.childNodes.length)) { e.stopPropagation(); input.value = ""; drawSugg(false); }
+        });
+        drawTags();
+        Object.defineProperty(wrapEl, "value", { get: () => (off ? "" : chosen.join(",")) });
+        wrapEl.setDisabled = (d) => { off = d; input.disabled = d; wrapEl.classList.toggle("off", d); drawTags(); };
         return wrapEl;
       };
       const grid = h("div", { class: "grid" }, fields.map((f) => {
@@ -1783,7 +1804,7 @@
         { k: "addr", l: "IP address or host name", v: edit ? shortAddr(edit) : "", ph: "8.8.8.8", hint: "Add :port for a port other than 53. Write tls://host for DNS over TLS (port 853) or https://host/path for DNS over HTTPS (port 443).", on: lk.addr },
         { k: "label", l: "Name (optional)", v: edit ? srvName(g, edit) : "", ph: "e.g. dns-a", hint: "Shown under the address on the diagram. Fill in the address and its name is looked up; fill in a host name here and its address is.", on: lk.label },
         { k: "ftype", l: "Server type", v: fwdTypeOf(srvForward(g, edit || "")), options: FWD_TYPES, initOn: true, on: (els) => { const pub = els.ftype.value === FWD_TYPES[0]; els.flists.setDisabled(pub); els.flists.parentElement.style.display = pub ? "none" : ""; }, hint: "Public resolver: answers everything except the zones other servers carry. Internal: answers only the zones of its lists (never other names). Public + Internal: answers its zones and everything else." },
-        { k: "flists", l: "Zone lists", v: (srvForward(g, edit || "") || {}).lists || [], checks: forwardListNames(), none: "There are no zone lists yet. Make them under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding.", hint: "For an Internal or Public + Internal server: click the zone lists it serves to switch them on (they are made under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding). A Public resolver has none." },
+        { k: "flists", l: "Zone lists", v: (srvForward(g, edit || "") || {}).lists || [], checks: forwardListNames(), none: "There are no zone lists yet. Make them under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding.", hint: "For an Internal or Public + Internal server: type to find the zone lists it serves and add them (they are made under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding). A Public resolver has none." },
         ...(edit ? [] : [
           { k: "name", l: "Domain to ask it about", v: "", ph: "google.com", hint: "A server is checked by asking it a question; add more domains afterwards. For an Internal server, use a name in one of its zones (its zone itself with type SOA works). A domain inside one of its zones decides that zone only." },
           { k: "type", l: "Record type", v: "A", options: QTYPES }]),

@@ -1,5 +1,9 @@
 # Changelog
 
+## [v501] - 2026-10-21 — Zone list picker that copes with hundreds of lists
+
+- In Topology ▸ Add/Edit DNS server, **Zone lists** no longer shows every list at once. The lists the server serves show as little tags with an ✕ to remove them; a box below finds the others as you type (up to eight matches are shown, with a note of how many more, **Enter** adds the first match, a click adds one). Only lists that exist can be added; a tag for a list that has since been deleted is shown in amber. Hidden for a Public resolver, as in v500. The stored form, the daemon and the command line are unchanged.
+
 ## [v500] - 2026-10-21 — Zone lists are picked as tags, not typed
 
 - In Topology ▸ Add/Edit DNS server, **Zone lists** is no longer a free-text box. Each list made under Conditional Forwarding shows as a little tag; click a tag to switch it on (it fills in) or off, so a list can no longer be misspelled. A Public resolver has no zones, so the field is hidden for that type and appears when the type is Internal or Public + Internal; with no lists made yet it says so. The stored form, the daemon and the command line are unchanged.

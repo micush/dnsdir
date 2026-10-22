@@ -1,5 +1,9 @@
 # Changelog
 
+## [v517] - 2026-10-22 — Empty new rows go away
+
+- In the list tables, a row added with right-click ▸ **Add** and left empty disappears again when you press Esc or click elsewhere. A row with anything in it stays.
+
 ## [v516] - 2026-10-22 — Narrower list tables
 
 - The list tables are no longer as wide as the whole card (at most 42 rem), and their number column is narrow, so a one-column table is not half number column.

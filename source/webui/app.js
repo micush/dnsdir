@@ -2757,11 +2757,26 @@
         moveTo(d, row, below);
       });
       tr.addEventListener("contextmenu", (e) => rowMenu(menuFor(row))(e));
+      tr.addEventListener("keydown", (e) => { if (e.key === "Escape" && row.fresh && isBlank(row)) { e.stopPropagation(); if (document.activeElement) document.activeElement.blur(); dropBlank(row); } });
+      tr.addEventListener("focusout", () => setTimeout(() => { if (!tr.contains(document.activeElement)) dropBlank(row); }, 0));
       mark(tr, row);
       return tr;
     }
+    // a row added with Add and left empty (Esc, or a click elsewhere) goes away again; a select counts as empty while it shows its first choice
+    const isBlank = (row) => row.v.every((x, i) => (spec.cols[i].opts ? x === spec.cols[i].opts[0] : !x.trim()));
+    function dropBlank(row) {
+      if (!row.fresh || !data.includes(row) || !isBlank(row)) return false;
+      const ae = document.activeElement, atr = ae && ae.closest ? ae.closest("tr") : null;
+      const keep = atr && atr._row && atr._row !== row && tbody.contains(atr) ? { row: atr._row, col: [...atr.querySelectorAll("input, select")].indexOf(ae), a: ae.selectionStart, b: ae.selectionEnd } : null;
+      data.splice(data.indexOf(row), 1);
+      render();
+      if (keep) { focusRow(keep.row, keep.col); const el = (trOf(keep.row) || {}).querySelectorAll ? trOf(keep.row).querySelectorAll("input, select")[keep.col] : null; try { if (el && keep.a != null) el.setSelectionRange(keep.a, keep.b); } catch (x) { /* a select */ } }
+      return true;
+    }
     function insert(vals, after) {
-      const row = { v: Array.from({ length: N }, (_, i) => vals[i] || "") };
+      for (const r of data.filter((x) => x.fresh && isBlank(x))) data.splice(data.indexOf(r), 1);
+      if (after && !data.includes(after)) after = null;
+      const row = { v: Array.from({ length: N }, (_, i) => vals[i] || ""), fresh: !vals.some((x) => x) };
       data.splice(after ? data.indexOf(after) + 1 : data.length, 0, row);
       filter.value = "";
       render(row);

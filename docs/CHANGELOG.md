@@ -1,5 +1,14 @@
 # Changelog
 
+## [v513] - 2026-10-22 — Single sign-on moves to Users; four more lists as tables
+
+- Single sign-on is now on Configure ▸ **Users**, which has two tabs: **Local** (the accounts of this host) and **SSO** (the providers and the e-mail addresses that may sign in). Configure ▸ Web GUI is back to two tabs, General and Certificates.
+- **Neighbors (unicast mode)**, **More IPv4 addresses** and **More IPv6 addresses** (Gateway groups) and **Community strings** (SNMP) are tables, like the other lists. The stored settings are unchanged.
+
+## [v512] - 2026-10-22 — More lists as tables
+
+- These lists are tables now, like Conditional Forwarding (edit in place, drag, right-click menu, filter, paging, **Add row**): DNS ▸ Servers ▸ **Servers**, **Fallback servers** and **Probe queries** (a name and a type), DNS ▸ Clients ▸ **Allowed clients**, **Per-client limits** (address or network, queries per second) and **Never limited**, and DNS ▸ Resolution ▸ Block Lists ▸ **Always allow**. The stored settings are unchanged.
+
 ## [v511] - 2026-10-22 — Web GUI in three tabs; Sort list and SSO users as tables
 
 - Configure ▸ Web GUI is now three tabs: **General**, **SSO** and **Certificates**.

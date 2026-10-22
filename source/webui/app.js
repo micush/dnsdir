@@ -2180,8 +2180,8 @@
     { k: "interface", l: "Interface", t: "text" },
     { shared: true, k: "vip4", l: "IPv4 VIP/prefix", t: "text", hint: "e.g. 10.0.0.1/24 — empty to disable" },
     { shared: true, k: "vip6", l: "IPv6 VIP/prefix", t: "text", hint: "e.g. 2001:db8::1/64 — empty to disable" },
-    { shared: true, k: "more_vip4", l: "More IPv4 addresses", t: "list", hint: "Same subnet as the VIP, one per line, no prefix length." },
-    { shared: true, k: "more_vip6", l: "More IPv6 addresses", t: "list", hint: "Same subnet as the VIP, one per line, no prefix length." },
+    { shared: true, k: "more_vip4", l: "More IPv4 addresses", t: "rows", rows: "morevip4", wide: true, hint: "Same subnet as the VIP, one per row, no prefix length." },
+    { shared: true, k: "more_vip6", l: "More IPv6 addresses", t: "rows", rows: "morevip6", wide: true, hint: "Same subnet as the VIP, one per row, no prefix length." },
     { k: "priority", l: "Priority", t: "int", min: 0, max: 255 },
     { shared: true, k: "lb_method", l: "LB method", t: "select", options: LB },
     { k: "weight", l: "Weight", t: "int", min: 0, max: 255 },
@@ -2191,13 +2191,13 @@
     { shared: true, k: "key", l: "HMAC shared key", t: "text", weakKey: true },
     { k: "preempt", l: "Preemption", t: "bool" },
     { shared: true, k: "real_macs", l: "Use real MAC addresses (no virtual MACs)", t: "bool", hint: "On for a gateway you add now (most networks need it: a VMware port group that is not promiscuous, a cloud with one MAC per interface, a switch with port security); gateways that already existed keep their setting. Off is the older way with a virtual MAC per node. On: the VIP is on every node's lo and the controller answers ARP with the real MAC of the node it picks. Failover then depends on the neighbors honoring an unsolicited ARP. Restarts the gateway; set it on every node's cluster together." },
-    { shared: true, k: "neighbors", l: "Neighbors (unicast mode)", t: "list", wide: true, hint: "Every node, one IP per line. Empty: multicast." },
+    { shared: true, k: "neighbors", l: "Neighbors (unicast mode)", t: "rows", rows: "neighbors", wide: true, hint: "Every node, one IP per row. Empty: multicast." },
   ];
   const DNS_FIELDS = [
     { section: "Upstream servers", note: "The default settings for every gateway that has no servers of its own (a gateway drawn on the Topology page can have its own)." },
-    { shared: true, k: "servers", l: "Servers", t: "list", wide: true, hint: "One per line: 10.0.0.53, 10.0.1.53:5353, [2001:db8::53]:53, tls://dns.example.com (DNS over TLS, port 853), https://dns.example.com/dns-query (DNS over HTTPS)" },
-    { shared: true, k: "fallback_servers", l: "Fallback servers", t: "list", wide: true, hint: "Same forms. Used only while no server above is in service (all down or paused), and dropped as soon as one answers again. They are never probed and always count as up, so a public resolver that knows nothing of your internal names is fine." },
-    { shared: true, k: "queries", l: "Probe queries", t: "queries", wide: true, hint: "Every server is asked each of these to check it works. One per line: \"example.com\" or \"example.com AAAA\"" },
+    { shared: true, k: "servers", l: "Servers", t: "rows", rows: "servers", wide: true, hint: "One per row: 10.0.0.53, 10.0.1.53:5353, [2001:db8::53]:53, tls://dns.example.com (DNS over TLS, port 853), https://dns.example.com/dns-query (DNS over HTTPS)" },
+    { shared: true, k: "fallback_servers", l: "Fallback servers", t: "rows", rows: "fallback", wide: true, hint: "Same forms. Used only while no server above is in service (all down or paused), and dropped as soon as one answers again. They are never probed and always count as up, so a public resolver that knows nothing of your internal names is fine." },
+    { shared: true, k: "queries", l: "Probe queries", t: "rows", rows: "queries", wide: true, hint: "Every server is asked each of these to check it works: a name and a record type." },
     { shared: true, k: "tls_insecure", l: "Accept any certificate from tls:// and https:// servers (insecure)", t: "bool" },
     { section: "Load Balancing", cols: 3, note: "Applies to every gateway unless that gateway has its own load balancing (Topology ▸ right-click the gateway ▸ Edit)." },
     { shared: true, k: "spread", l: "Spread queries over servers of similar speed (round-robin)", t: "bool" },
@@ -2225,14 +2225,14 @@
     { shared: true, k: "block_lists", l: "Lists", t: "blocklists", wide: true },
     { shared: true, k: "block_action", l: "Blocked answer", t: "select", options: ["null", "nxdomain", "nodata", "refused"], hint: "null = 0.0.0.0 and ::, the default. nxdomain = the name does not exist. nodata = no records. refused = REFUSED." },
     { shared: true, k: "block_update_hours", l: "Update every (hours)", t: "int", min: 0, max: 720, hint: "0 = 24" },
-    { shared: true, k: "allow_domains", l: "Always allow", t: "list", wide: true, hint: "One domain per line. A name here, and every name below it, is never blocked by a block list or by a policy row that blocks (null, nxdomain, nodata, refused). Rows that forward or rewrite still apply." },
+    { shared: true, k: "allow_domains", l: "Always allow", t: "rows", rows: "allowdomains", wide: true, hint: "One domain per row. A name here, and every name below it, is never blocked by a block list or by a policy row that blocks (null, nxdomain, nodata, refused). Rows that forward or rewrite still apply." },
     { section: "Client Rate Limiting", note: "Applies to every gateway that uses these settings, over UDP, TCP, DoT and DoH, before the cache. This node itself is always allowed and never limited. Counters are per node." },
-    { shared: true, k: "allowed_clients", l: "Allowed clients", t: "list", wide: true, hint: "Networks that may use the proxy, one per line: 10.0.0.0/8, 192.168.1.5, 2001:db8::/32. Empty = everyone. Anyone else is answered REFUSED (dynamic updates too)." },
+    { shared: true, k: "allowed_clients", l: "Allowed clients", t: "rows", rows: "allowedclients", wide: true, hint: "Networks that may use the proxy, one per row: 10.0.0.0/8, 192.168.1.5, 2001:db8::/32. Empty = everyone. Anyone else is answered REFUSED (dynamic updates too)." },
     { shared: true, k: "client_rate", l: "Queries per second", t: "int", min: 0, max: 10000000, hint: "0 = no limit. A client is one IPv4 address or one IPv6 /64." },
     { shared: true, k: "client_burst", l: "Burst (queries at once)", t: "int", min: 0, max: 100000000, hint: "0 = twice the rate, at least 10." },
     { shared: true, k: "client_action", l: "Over the limit", t: "select", options: ["drop", "truncate", "refused"] },
-    { shared: true, k: "client_limits", l: "Per-client limits", t: "list", wide: true, hint: "One per line: an address or network, then queries per second (192.168.1.5 50)." },
-    { shared: true, k: "client_exempt", l: "Never limited", t: "list", wide: true, hint: "Networks exempt from the rate limit (not from the allowed list), same forms." },
+    { shared: true, k: "client_limits", l: "Per-client limits", t: "rows", rows: "limits", wide: true, hint: "An address or network, and the queries per second each client in it may send (192.168.1.5, 50)." },
+    { shared: true, k: "client_exempt", l: "Never limited", t: "rows", rows: "exempt", wide: true, hint: "Networks exempt from the rate limit (not from the allowed list), same forms." },
     { section: "Client network (ECS)" },
     { shared: true, k: "ecs", l: "Pass the client's network to the servers", t: "bool" },
     { shared: true, k: "ecs_prefix4", l: "IPv4 prefix bits", t: "int", min: 1, max: 32 },
@@ -2272,7 +2272,7 @@
     { shared: true, k: "sso_users", l: "Users", t: "rows", rows: "ssousers", wide: true, hint: "rw may change settings; ro may only look. Only these addresses can sign in with a provider." },
   ];
   const SNMP_FIELDS = [
-    { shared: true, k: "snmp_communities", l: "Community strings", t: "list", wide: true },
+    { shared: true, k: "snmp_communities", l: "Community strings", t: "rows", rows: "community", wide: true },
     { k: "location", l: "Location", t: "text" },
     { shared: true, k: "snmp_contact", l: "Contact", t: "text" },
   ];
@@ -2661,7 +2661,7 @@
     const data = (lines || []).map((l) => ({ v: spec.parse(l) }));
     let page = 0, size = 50, dragging = null;
     const tbody = h("tbody", {});
-    const tbl = h("table", { class: "policy zones" },
+    const tbl = h("table", { class: "policy zones" + (N === 1 ? " one" : "") },
       h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number and order" }, "#"), ...spec.cols.map((c) => h("th", {}, c.name)))), tbody);
     const empty = h("div", { class: "policy-empty" }, "");
     const wrap = h("div", { class: "policy-wrap" }, tbl, empty);
@@ -2721,8 +2721,9 @@
       spec.cols.forEach((c, i) => {
         let inp;
         if (c.opts) {
-          inp = h("select", { "aria-label": c.name }, c.opts.map((o) => h("option", { value: o }, o)));
-          if (!c.opts.includes(row.v[i])) row.v[i] = c.opts[0];
+          const opts = c.opts.includes(row.v[i]) || !row.v[i] ? c.opts : [...c.opts, row.v[i]];   // a value this list does not know is kept
+          inp = h("select", { "aria-label": c.name }, opts.map((o) => h("option", { value: o }, o)));
+          if (!row.v[i]) row.v[i] = c.opts[0];
           inp.value = row.v[i];
           inp.addEventListener("change", () => { row.v[i] = inp.value; mark(tr, row); });
         } else {
@@ -2810,11 +2811,19 @@
     render();
     return {
       el: box,
-      get: () => data.flatMap((r) => (spec.mark(cells(r)) ? [] : spec.format(cells(r)))),
+      get: () => (spec.obj ? data.filter((r) => !spec.mark(cells(r))).map((r) => spec.obj(cells(r)))
+        : data.flatMap((r) => (spec.mark(cells(r)) ? [] : spec.format(cells(r))))),
     };
   }
 
-  // the two lists that are tables
+  // one value to a row, one row to a list entry (a row with several, separated by commas or spaces, is saved as several entries)
+  const oneCol = (key, name, ph, empty) => ({
+    key, empty, cols: [{ name, ph }],
+    parse: (line) => [String(line).trim()],
+    format: (c) => c[0].split(/[\s,]+/).filter(Boolean),
+    mark: (c) => !c[0],
+  });
+  // the lists that are tables
   const ROW_TABLES = {
     // Sort list: "client network: preferred, preferred" (the client is "any" for every client); a line that is only a network is for every client
     sortlist: {
@@ -2826,6 +2835,32 @@
       },
       format: (c) => (c[0] ? [c[0] + ": " + c[1].split(/[\s,]+/).filter(Boolean).join(", ")] : c[1].split(/[\s,]+/).filter(Boolean)),
       mark: (c) => !c[1],
+    },
+    servers: oneCol("servers", "Server", "10.0.0.53, 10.0.1.53:5353, tls://dns.example.com, https://dns.example.com/dns-query", "No servers."),
+    fallback: oneCol("fallback", "Fallback server", "8.8.8.8", "No fallback servers."),
+    neighbors: oneCol("neighbors", "Neighbor IP address", "10.0.0.2", "No neighbors: multicast."),
+    morevip4: oneCol("morevip4", "IPv4 address", "10.0.0.11", "No more IPv4 addresses."),
+    morevip6: oneCol("morevip6", "IPv6 address", "2001:db8::11", "No more IPv6 addresses."),
+    // a community string may contain commas: one string to a row, never split
+    community: { ...oneCol("community", "Community string", "", "No community strings: SNMP is off."), format: (c) => [c[0]] },
+    allowdomains: oneCol("allowdomains", "Domain", "example.com", "No always-allowed names."),
+    allowedclients: oneCol("allowedclients", "Network", "10.0.0.0/8, 192.168.1.5, 2001:db8::/32", "No restriction: every client may use the proxy."),
+    exempt: oneCol("exempt", "Network", "10.0.0.0/8", "Nobody is exempt."),
+    // per-client limits: "192.168.1.5 50"
+    limits: {
+      key: "limits", empty: "No per-client limits.",
+      cols: [{ name: "Client address or network", ph: "192.168.1.5" }, { name: "Queries per second", ph: "50" }],
+      parse: (line) => { const f = line.trim().split(/\s+/); return [f[0] || "", f[1] || ""]; },
+      format: (c) => [c[0] + " " + c[1]],
+      mark: (c) => !c[0] || !c[1],
+    },
+    // probe queries: a name and a record type
+    queries: {
+      key: "queries", empty: "No probe queries.",
+      cols: [{ name: "Name", ph: "example.com" }, { name: "Type", opts: ["A", "AAAA", "SOA", "NS", "MX", "TXT", "CNAME", "PTR", "SRV"] }],
+      parse: (q) => (typeof q === "object" ? [q.name || "", (q.type || "A").toUpperCase()] : (() => { const f = String(q).trim().split(/\s+/); return [f[0] || "", (f[1] || "A").toUpperCase()]; })()),
+      obj: (c) => ({ name: c[0], type: c[1] || "A" }),
+      mark: (c) => !c[0],
     },
     // single sign-on users: "alice@example.com rw"
     ssousers: {
@@ -3280,13 +3315,10 @@
       const certBox = h("div", {});
       certBox.addEventListener("change", (e) => e.stopPropagation());
       VIEWS.certificate.mount(certBox);
-      // the Web GUI page is three tabs: General, SSO and Certificates (every card stays in the page, so a save reads all of them)
+      // the Web GUI page is two tabs: General and Certificates (every card stays in the page, so a save reads all of them)
       const webTabs = () => {
         const TABS = [
           ["General", section("Web GUI", web.el)],
-          ["SSO", section("Single sign-on",
-            h("p", { class: "hint" }, "Lets people sign in with a Google or Microsoft account instead of a system password (the password login stays). Register this console with the provider as a web application; its redirect URI is the address of this page followed by /api/sso/callback (https://this-node:53853/api/sso/callback). Only the e-mail addresses in the Users table may sign in, whatever account they use."),
-            sso.el)],
           ["Certificates", certBox],
         ];
         const panes = TABS.map(([, el]) => h("div", { role: "tabpanel" }, el));
@@ -3313,6 +3345,9 @@
         ["groups", "Gateway groups", h("div", {}, groupsEl)],
         ["dns", "DNS", dnsTabs()],
         ["web", "Web GUI", webTabs()],
+        ["sso", "SSO", section("Single sign-on",
+          h("p", { class: "hint" }, "Lets people sign in with a Google or Microsoft account instead of a system password (the password login stays). Register this console with the provider as a web application; its redirect URI is the address of this page followed by /api/sso/callback (https://this-node:53853/api/sso/callback). Only the e-mail addresses in the Users table may sign in, whatever account they use."),
+          sso.el)],
         ["snmp", "SNMP", h("div", {}, (() => { const c = section("SNMP", snmp.el); c.querySelector("h2").append(snmpPill); return c; })())],
         ["cluster", "Cluster", section("Cluster", cluster.el)],
       ];
@@ -3376,7 +3411,7 @@
       },
     };
   };
-  for (const id of ["general", "groups", "dns", "web", "snmp", "cluster"]) VIEWS["cfg_" + id] = makeConfigView(id);
+  for (const id of ["general", "groups", "dns", "web", "sso", "snmp", "cluster"]) VIEWS["cfg_" + id] = makeConfigView(id);
 
   // ── shared helpers for the management pages ───────────────────────────────
   // Nothing is said when every node answered (the Node menu says "Cluster"); when one could not, which and why, since the
@@ -5537,7 +5572,7 @@
   })();
 
   // ── Users  (CLI: --users, --user-add, --user-passwd, --user-expiry, --user-del) ──
-  VIEWS.users = (() => {
+  VIEWS.usersLocal = (() => {
     // Layout: the accounts in a list on the left, the chosen one (or the "new user" / "existing account" form) on the right.
     let status, listBox, detail, filterIn, users = [], others = [], group = "", readGroup = "", sel = null, mode = "user", otherList = null;
     const dateText = (u) => (u.expires ? new Date(u.expires * 1000).toISOString().slice(0, 10) : "never");
@@ -5672,6 +5707,33 @@
         // the panel is left alone on a poll so what is being typed survives, and redrawn when what it should show has changed
         if (!detail.firstChild || shown !== mode + "/" + (mode === "user" ? sel : "")) drawDetail();
       },
+    };
+  })();
+
+  // Configure ▸ Users: two tabs, Local (the accounts of this host) and SSO (Google / Microsoft sign-in and who may use it)
+  VIEWS.users = (() => {
+    return {
+      mount(main) {
+        const TABS = [["Local", VIEWS.usersLocal], ["SSO", VIEWS.cfg_sso]];
+        const panes = TABS.map(([, v]) => { const p = h("div", { role: "tabpanel" }); v.mount(p); return p; });
+        const buttons = TABS.map(([name], i) => h("button", { type: "button", role: "tab", class: "dtab", onclick: () => show(i) }, name));
+        function show(i, focus) {
+          state.usersTab = i;
+          panes.forEach((p, j) => { p.hidden = j !== i; });
+          buttons.forEach((b, j) => { b.setAttribute("aria-selected", j === i ? "true" : "false"); b.tabIndex = j === i ? 0 : -1; b.classList.toggle("on", j === i); });
+          if (focus) buttons[i].focus();
+        }
+        const strip = h("div", { class: "dtabs", role: "tablist", "aria-label": "Users" }, buttons);
+        strip.addEventListener("keydown", (e) => {
+          const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+          if (!d) return;
+          e.preventDefault();
+          show((state.usersTab + d + TABS.length) % TABS.length, true);
+        });
+        main.append(strip, ...panes);
+        show(state.usersTab >= 0 && state.usersTab < TABS.length ? state.usersTab : 0);
+      },
+      poll: () => VIEWS.usersLocal.poll(),
     };
   })();
 

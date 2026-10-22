@@ -670,3 +670,5 @@ table.policy.zones tr.incomplete td:nth-child(2) { box-shadow: inset 0 0 0 2px v
 .f[hidden] { display: none; }
 
 table.zones.one th:first-child, table.zones.one td.grip { width: 6rem; }
+
+.grid .brk { grid-column-start: 1; }   /* a field that starts a new row of the grid */

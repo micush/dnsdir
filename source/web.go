@@ -110,6 +110,7 @@ type session struct {
 	checked  time.Time // last group-membership check
 	ip       string    // the address it signed in from (for the log)
 	readOnly bool      // signed in through the read-only group: may look, not change (see readonly.go)
+	ssoProv  string    // which provider it signed in with (google or entra)
 	sso      bool      // signed in with Google or Entra ID (sso.go): user is an e-mail address, checked against the list of users
 }
 
@@ -473,7 +474,7 @@ func (w *WebServer) lookup(r *http.Request) *session {
 		var ok, ro bool
 		var err error
 		if s.sso {
-			ok, ro = pol.ssoLevel(uname)
+			ok, ro = pol.ssoLevel(uname, s.ssoProv)
 		} else {
 			ok, ro, err = w.access(uname, pol)
 		}

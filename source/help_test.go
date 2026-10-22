@@ -28,8 +28,14 @@ func TestEveryPageHasHelp(t *testing.T) {
 		t.Fatalf("could not read the sidebar: %v", ids)
 	}
 	for _, id := range ids {
-		if !regexp.MustCompile(`(?m)^  ` + id + `: \{`).Match(help) {
-			t.Errorf("no help topic for the %q page", id)
+		topics := []string{id}
+		if id == "users" { // the Users page has a help topic for each of its tabs
+			topics = []string{"users_local", "users_sso"}
+		}
+		for _, tp := range topics {
+			if !regexp.MustCompile(`(?m)^  ` + tp + `: \{`).Match(help) {
+				t.Errorf("no help topic %q for the %q page", tp, id)
+			}
 		}
 	}
 	if strings.Contains(string(app), `"help", "Help"`) || strings.Contains(string(app), "VIEWS.help") {

@@ -63,7 +63,16 @@ var entraTenantRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-
 
 const ssoMaxUsers = 5000
 
-// normalizeSSOUsers returns the list as "email level" lines, lower case, no repeats.
+// ssoProviderToken is the name a provider has in the users list: "google" or "microsoft" (an Entra ID provider is "entra" inside).
+func ssoProviderToken(id string) string {
+	if id == "entra" {
+		return "microsoft"
+	}
+	return id
+}
+
+// normalizeSSOUsers returns the list as "email level [provider]" lines, lower case, no repeats.  The provider (google or
+// microsoft) is optional: without one the address may sign in with either.
 func normalizeSSOUsers(in []string) ([]string, error) {
 	var out []string
 	seen := map[string]int{}
@@ -74,21 +83,35 @@ func normalizeSSOUsers(in []string) ([]string, error) {
 			if at := strings.IndexByte(email, '@'); at < 1 || at == len(email)-1 || strings.Count(email, "@") != 1 || len(email) > 254 || strings.ContainsAny(email, "<>\"'\\/") {
 				return nil, fmt.Errorf("web: single sign-on user %q is not an e-mail address like alice@example.com", f[i])
 			}
-			level := "ro"
-			if i+1 < len(f) {
+			level, prov := "ro", ""
+			for i+1 < len(f) {
 				switch strings.ToLower(f[i+1]) {
 				case "rw", "read-write", "readwrite", "admin":
-					level, i = "rw", i+1
+					level = "rw"
 				case "ro", "read-only", "readonly", "read":
-					level, i = "ro", i+1
+					level = "ro"
+				case "google":
+					prov = "google"
+				case "microsoft", "entra", "azure", "ms":
+					prov = "microsoft"
+				case "any", "both":
+					prov = ""
+				default:
+					goto done
 				}
+				i++
+			}
+		done:
+			l := email + " " + level
+			if prov != "" {
+				l += " " + prov
 			}
 			if j, dup := seen[email]; dup {
-				out[j] = email + " " + level // the last one wins
+				out[j] = l // the last one wins
 				continue
 			}
 			seen[email] = len(out)
-			out = append(out, email+" "+level)
+			out = append(out, l)
 		}
 	}
 	if len(out) > ssoMaxUsers {
@@ -125,13 +148,19 @@ func (c *SSOConfig) validateSSO() error {
 	return nil
 }
 
-// ssoLevel looks an address up in the list: whether it may sign in, and whether read-only.
-func (c SSOConfig) ssoLevel(email string) (ok, readOnly bool) {
+// ssoLevel looks an address up in the list: whether it may sign in with the provider (its id, google or entra), and whether
+// read-only.  An entry that names a provider admits the address only through that one.
+func (c SSOConfig) ssoLevel(email, provider string) (ok, readOnly bool) {
 	email = strings.ToLower(email)
 	for _, l := range c.Users {
-		if f := strings.Fields(l); len(f) >= 1 && f[0] == email {
-			return true, len(f) < 2 || f[1] != "rw"
+		f := strings.Fields(l)
+		if len(f) < 1 || f[0] != email {
+			continue
 		}
+		if len(f) >= 3 && f[2] != ssoProviderToken(provider) {
+			return false, false
+		}
+		return true, len(f) < 2 || f[1] != "rw"
 	}
 	return false, false
 }
@@ -564,14 +593,14 @@ func (w *WebServer) handleSSOCallback(rw http.ResponseWriter, r *http.Request) {
 		ssoFail(rw, r, "The sign-in could not be verified.")
 		return
 	}
-	ok, readOnly := cfg.ssoLevel(email)
+	ok, readOnly := cfg.ssoLevel(email, p.id)
 	if !ok {
 		warnf("web: single sign-on with %s: %q from %s is not on the list of users", p.title, email, ip)
 		ssoFail(rw, r, email+" is not allowed to use this console.")
 		return
 	}
 	now := time.Now()
-	s := &session{user: email, csrf: randToken(), created: now, last: now, checked: now, readOnly: readOnly, ip: ip, sso: true}
+	s := &session{user: email, csrf: randToken(), created: now, last: now, checked: now, readOnly: readOnly, ip: ip, sso: true, ssoProv: p.id}
 	tok := randToken()
 	w.mu.Lock()
 	w.sessions[sessKey(tok)] = s

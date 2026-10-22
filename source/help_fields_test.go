@@ -40,12 +40,20 @@ func TestHelpCoversEveryField(t *testing.T) {
 	if cfgAt < 0 {
 		t.Fatal("cannot find the Settings schema in app.js")
 	}
+	ssoAt := strings.Index(app, "const SSO_FIELDS = [")
+	ssoEnd := ssoAt + strings.Index(app[ssoAt:], "\n  ];")
+	if ssoAt < 0 {
+		t.Fatal("cannot find SSO_FIELDS in app.js")
+	}
 	found := 0
 	for _, m := range regexp.MustCompile(`\bl: "([^"]+)"`).FindAllStringSubmatchIndex(app, -1) {
 		label := app[m[2]:m[3]]
 		tp := "topology"
 		if m[0] > cfgAt {
 			tp = "config"
+		}
+		if m[0] > ssoAt && m[0] < ssoEnd {
+			tp = "users_sso"
 		}
 		found++
 		if !has(tp, label) {
@@ -57,17 +65,17 @@ func TestHelpCoversEveryField(t *testing.T) {
 	}
 
 	extra := map[string][]string{
-		"topology": {"Time range"},
-		"config":   {"Username", "Password", "Update every node automatically when a newer release is staged (one node at a time)", "Certificate", "Private key", "Main name", "Other names (one per line)", "IP addresses (one per line, optional)", "Pending CSR"},
-		"cluster":  {"Node", "Join code"},
-		"updates":  {"Release archive"},
-		"anycast":  {"Local AS number", "Router ID", "New neighbor address", "New neighbor AS", "New neighbor description", "New neighbor password"},
-		"history":  {"Compare version", "Configuration file"},
-		"stats":    {"Time range", "From", "To"},
-		"host":     {"Time range", "From", "To"},
-		"log":      {"Filter text", "Level", "Time range", "Lines", "Live"},
-		"node":     {"Action", "When", "Minutes", "Time of day"},
-		"users":    {"Name", "Password", "Expires"},
+		"topology":    {"Time range"},
+		"config":      {"Username", "Password", "Update every node automatically when a newer release is staged (one node at a time)", "Certificate", "Private key", "Main name", "Other names (one per line)", "IP addresses (one per line, optional)", "Pending CSR"},
+		"cluster":     {"Node", "Join code"},
+		"updates":     {"Release archive"},
+		"anycast":     {"Local AS number", "Router ID", "New neighbor address", "New neighbor AS", "New neighbor description", "New neighbor password"},
+		"history":     {"Compare version", "Configuration file"},
+		"stats":       {"Time range", "From", "To"},
+		"host":        {"Time range", "From", "To"},
+		"log":         {"Filter text", "Level", "Time range", "Lines", "Live"},
+		"node":        {"Action", "When", "Minutes", "Time of day"},
+		"users_local": {"Name", "Password", "Expires"},
 	}
 	for tp, ls := range extra {
 		for _, l := range ls {

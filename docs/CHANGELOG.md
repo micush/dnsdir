@@ -1,5 +1,10 @@
 # Changelog
 
+## [v515] - 2026-10-22 — Help for Local and SSO users
+
+- **Users** has two help pages now, one for the **Local** tab and one for the **SSO** tab, each describing its own settings (the SSO one has the Google and Microsoft set-up steps and how an address is matched to a provider).
+- On the SSO tab the fields are in three rows: the console address; the two Google fields; the three Microsoft fields.
+
 ## [v514] - 2026-10-22 — Tidier tables and SSO page
 
 - The **Add row** button is gone from the list tables; right-click ▸ **Add row** does it (the empty table says so).

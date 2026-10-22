@@ -477,7 +477,7 @@
   }
   function fillHelp() {
     // the DNS proxy page has a help page for each of its tabs
-    const topic = state.tab === "cfg_dns" && DNSDIR_HELP["config_dns" + state.dnsTab] ? "config_dns" + state.dnsTab : state.tab.startsWith("cfg_") ? "config" : state.tab;
+    const topic = state.tab === "cfg_dns" && DNSDIR_HELP["config_dns" + state.dnsTab] ? "config_dns" + state.dnsTab : state.tab.startsWith("cfg_") ? "config" : state.tab === "users" ? (state.usersTab === 1 ? "users_sso" : "users_local") : state.tab;
     const [t, kids] = helpBody(topic);
     document.getElementById("help-title").textContent = t;
     const body = clear(document.getElementById("help-body"));
@@ -2263,10 +2263,10 @@
     { shared: true, k: "min_password_length", l: "Minimum password length", t: "int", min: 0, max: 128, hint: "0 = 8" },
   ];
   const SSO_FIELDS = [
-    { shared: true, k: "sso_base_url", l: "Address of this console", t: "text" },
-    { shared: true, k: "sso_google_client_id", l: "Google client ID", t: "text" },
+    { shared: true, k: "sso_base_url", brk: true, l: "Address of this console", t: "text" },
+    { shared: true, k: "sso_google_client_id", brk: true, l: "Google client ID", t: "text" },
     { shared: true, k: "sso_google_client_secret", l: "Google client secret", t: "secret" },
-    { shared: true, k: "sso_entra_tenant", l: "Microsoft tenant ID", t: "text" },
+    { shared: true, k: "sso_entra_tenant", brk: true, l: "Microsoft tenant ID", t: "text" },
     { shared: true, k: "sso_entra_client_id", l: "Microsoft client ID", t: "text" },
     { shared: true, k: "sso_entra_client_secret", l: "Microsoft client secret", t: "secret" },
     { shared: true, k: "sso_users", l: "Users", t: "rows", rows: "ssousers", wide: true },
@@ -3160,7 +3160,7 @@
         const upd = () => { weak.textContent = isWeakKey(input.value) ? "Well known or short: anyone on the network can take over this gateway." : ""; };
         input.addEventListener("input", upd); upd();
       }
-      grid.append(h("label", { class: "f" + (f.wide ? " wide" : "") }, h("span", {}, f.l, sharedTag(f)), input, f.hint ? h("span", { class: "hint" }, f.hint) : null, weak));
+      grid.append(h("label", { class: "f" + (f.wide ? " wide" : "") + (f.brk ? " brk" : "") }, h("span", {}, f.l, sharedTag(f)), input, f.hint ? h("span", { class: "hint" }, f.hint) : null, weak));
     }
     return { el: wrap, get: () => Object.fromEntries(Object.entries(getters).map(([k, g]) => [k, g()])) };
   }
@@ -5716,6 +5716,7 @@
         const buttons = TABS.map(([name], i) => h("button", { type: "button", role: "tab", class: "dtab", onclick: () => show(i) }, name));
         function show(i, focus) {
           state.usersTab = i;
+          if (document.getElementById("help-panel") && document.getElementById("help-panel").classList.contains("open") && state.tab === "users") queueMicrotask(fillHelp);
           panes.forEach((p, j) => { p.hidden = j !== i; });
           buttons.forEach((b, j) => { b.setAttribute("aria-selected", j === i ? "true" : "false"); b.tabIndex = j === i ? 0 : -1; b.classList.toggle("on", j === i); });
           if (focus) buttons[i].focus();

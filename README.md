@@ -271,7 +271,7 @@ Drag a row by the dots at its left to change its order on the page (the first ro
 
 Some names must go only to the servers that know them: your internal zones to your internal DNS servers, while every other name goes to public resolvers that cannot see those zones. Conditional forwarding does that inside one gateway, with the same health checks, fastest-first ordering, spreading and failover as the rest of the pool.
 
-1. **Make lists of zones** under Configure ▸ DNS proxy ▸ Resolution ▸ **Conditional Forwarding** (`forward_lists`, shared by the cluster), one per line: `corp: corp.example, lab.example, 10.in-addr.arpa`. A zone covers itself and every name below it.
+1. **Make lists of zones** under Configure ▸ DNS proxy ▸ Resolution ▸ **Conditional Forwarding**, in a table like the policy table: one zone to a row, with a **List** and a **Zone** column, and the rows with the same list name are that list. It has a filter box (`test:host.corp.example` shows which zone a name falls in and which is the most specific), paging, drag to reorder, and a right-click menu (Edit, Copy, Paste from a spreadsheet, Add, Move, Delete). A zone covers itself and every name below it. The lists are shared by the cluster and stored as `forward_lists`, one `corp: corp.example, lab.example, 10.in-addr.arpa` line per list.
 2. **Give each server a type and its lists** on the Topology page (Add/Edit DNS server ▸ **Server type** and **Zone lists**, or `--canvas-set server --group N --server ADDRESS --server-type internal --lists corp`):
 
 | Type | Badge | Answers |

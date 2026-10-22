@@ -1,5 +1,10 @@
 # Changelog
 
+## [v499] - 2026-10-21 — Conditional forwarding zone lists as a table
+
+- The zone lists under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding are now a table like the policy table: a **List** and a **Zone** column, one zone to a row, the rows with the same list name being that list. It has the **Filter rows** box (`test:NAME` keeps the zones the name is in and says which is the most specific), paging (25 to 500 rows), drag to reorder, and the right-click menu (Edit, Copy, Paste from a spreadsheet as `list<TAB>zone` or just zones, Add in the same list, Move, Delete). A row with a zone and no list name is outlined and not saved; a list name with no zone keeps an empty list.
+- The stored form is unchanged (`forward_lists`, one `name: zone, zone` line per list, in the order the lists first appear), so saved settings load as they are and the daemon, the command line and the config history are untouched.
+
 ## [v498] - 2026-10-21 — Conditional forwarding: health per zone
 
 - A probe domain that falls inside a zone a server serves (the most specific zone of its lists) now decides that zone only. When it fails the server is taken out of that zone, and the zone's queries go to the other servers that carry it, while the server goes on answering ordinary names; the probes of ordinary names decide whether it answers those, and a zone with no probe of its own follows them. An Internal server, which has only zone probes, is in service for each zone by that zone's probes. The log says when a server goes down or comes back for a zone, `--canvas` tags each probe with its zone, and the server's state says which zones it is out of.

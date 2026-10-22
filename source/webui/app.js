@@ -2173,8 +2173,8 @@
     { shared: true, k: "policy_log", l: "Log policy matches", t: "bool" },
     { shared: true, k: "policy_block_ttl", l: "Blocked answer cache (s)", t: "int", min: 0, max: 604800, hint: "0 = 14400" },
     { shared: true, k: "policy", l: "Policy rows", t: "policy", wide: true },
-    { section: "Conditional Forwarding", note: "Send the names of some zones only to the servers that know them, for example your internal zones to your internal DNS servers, while every other name goes to the public resolvers. Make named lists of zones here; then, on the Topology page, give each server a type (Public, Internal, or Public + Internal) and the lists it serves. A name goes to the servers of the most specific zone it is in; if all of them are down the client gets SERVFAIL (the name is never sent to the other servers)." },
-    { shared: true, k: "forward_lists", l: "Zone lists", t: "list", wide: true, hint: "One list per line: a name, a colon, then its zones separated by commas or spaces. For example  corp: corp.example, lab.example, 10.in-addr.arpa  (a zone covers itself and every name below it)." },
+    { section: "Conditional Forwarding", note: "Send the names of some zones only to the servers that know them, for example your internal zones to your internal DNS servers, while every other name goes to the public resolvers. Make named lists of zones here (one zone to a row); then, on the Topology page, give each server a type (Public, Internal, or Public + Internal) and the lists it serves. A name goes to the servers of the most specific zone it is in; if all of them are down the client gets SERVFAIL (the name is never sent to the other servers)." },
+    { shared: true, k: "forward_lists", l: "Zone lists", t: "zones", wide: true },
     { t: "fwdtest", l: "Test a name", wide: true },
     { section: "Client Rate Limiting", note: "Applies to every gateway that uses these settings, over UDP, TCP, DoT and DoH, before the cache. This node itself is always allowed and never limited. Counters are per node." },
     { shared: true, k: "allowed_clients", l: "Allowed clients", t: "list", wide: true, hint: "Networks that may use the proxy, one per line: 10.0.0.0/8, 192.168.1.5, 2001:db8::/32. Empty = everyone. Anyone else is answered REFUSED (dynamic updates too)." },
@@ -2483,6 +2483,202 @@
     };
   }
 
+  // Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding: the zone lists as a table, one zone to a row (List, Zone).
+  // The rows with the same list name are that list; it is stored as one "name: zone, zone" line per list (forward_lists),
+  // in the order the lists first appear and the zones in row order (the first zone of a list is the one an Internal server is
+  // probed with when it has no probe domain of its own).
+  let zoneClip = null;
+  function zoneTable(lines) {
+    const NAMES = ["List", "Zone"];
+    const data = [];
+    for (const line of lines || []) {
+      const i = line.indexOf(":");
+      if (i < 0) continue;
+      const name = line.slice(0, i).trim(), zs = line.slice(i + 1).split(/[\s,;]+/).filter(Boolean);
+      if (!zs.length) data.push({ v: [name, ""] });   // a list with no zone yet keeps its row
+      for (const z of zs) data.push({ v: [name, z] });
+    }
+    let page = 0, size = 50, dragging = null;
+
+    const tbody = h("tbody", {});
+    const tbl = h("table", { class: "policy zones" },
+      h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number and order" }, "#"), ...NAMES.map((n) => h("th", {}, n)))), tbody);
+    const empty = h("div", { class: "policy-empty" }, "");
+    const wrap = h("div", { class: "policy-wrap" }, tbl, empty);
+
+    const filter = h("input", { type: "text", class: "policy-filter", placeholder: "Filter or test rows", title: "Type text to keep the rows with it in any cell. test:NAME keeps the zones that name is in; the most specific one decides where it goes.", "aria-label": "Filter zone rows", autocomplete: "off", spellcheck: "false" });
+    const count = h("span", { class: "policy-count muted" }, "");
+    const sizeSel = h("select", { "aria-label": "Rows per page" }, [25, 50, 100, 250, 500].map((n) => h("option", { value: String(n) }, n + " per page")));
+    sizeSel.value = String(size);
+    const mkBtn = (label, title) => h("button", { type: "button", class: "btn small", title, "aria-label": title }, label);
+    const first = mkBtn("«", "First page"), prev = mkBtn("‹", "Previous page"), next = mkBtn("›", "Next page"), last = mkBtn("»", "Last page");
+    const pageIn = h("input", { type: "number", min: "1", class: "policy-page", "aria-label": "Page number" });
+    const pages = h("span", { class: "muted" }, "");
+    const pager = h("span", { class: "policy-pager" }, first, prev, pageIn, pages, next, last);
+    const bar = h("div", { class: "policy-bar" }, filter, count, h("span", { class: "grow" }), pager, sizeSel);
+    const box = h("div", { class: "policy-box" }, bar, wrap);
+    bar.addEventListener("change", (e) => e.stopPropagation());   // the filter and paging controls are not settings
+
+    const changed = () => tbl.dispatchEvent(new Event("change", { bubbles: true }));
+    const zoneOf = (cell) => cell.trim().toLowerCase().replace(/^\*\./, "").replace(/\.$/, "");
+    const inZone = (zone, name) => zone !== "" && (name === zone || name.endsWith("." + zone));
+    let testing = null;   // while the filter is a test: the name asked about, and the row that decides it
+    const visible = () => {
+      const raw = filter.value.trim();
+      const tm = /^test:\s*(\S+)$/i.exec(raw);
+      testing = null;
+      if (tm) {
+        const name = tm[1].toLowerCase().replace(/\.$/, "");
+        const rows = data.filter((r) => inZone(zoneOf(r.v[1]), name));
+        const win = rows.reduce((b, r) => (!b || zoneOf(r.v[1]).length > zoneOf(b.v[1]).length ? r : b), null);
+        testing = { name, win };
+        return rows;
+      }
+      const q = raw.toLowerCase();
+      return q ? data.filter((r) => r.v.some((x) => x.toLowerCase().includes(q))) : data;
+    };
+    const mark = (tr, row) => { tr.classList.toggle("incomplete", !row.v[0].trim() && !!row.v[1].trim()); };
+    const copyText = (vals) => vals.join("\t");
+    // pasted rows: "list <tab> zone", or just a zone (it goes in the list of the row pasted below)
+    const parseText = (txt, dflt) => txt.split(/\r?\n/).map((l) => l.split("\t").map((x) => x.trim())).filter((c) => c.some(Boolean))
+      .map((c) => (c.length > 1 ? [c[0], c[1]] : [dflt, c[0]]));
+    const clearMarks = () => tbody.querySelectorAll(".drop-above, .drop-below").forEach((x) => x.classList.remove("drop-above", "drop-below"));
+    const trOf = (row) => [...tbody.children].find((t) => t._row === row);
+
+    function render(follow) {
+      const vis = visible();
+      const n = Math.max(1, Math.ceil(vis.length / size));
+      if (follow) { const i = vis.indexOf(follow); if (i >= 0) page = Math.floor(i / size); }
+      page = Math.min(Math.max(page, 0), n - 1);
+      const from = page * size;
+      tbody.replaceChildren(...vis.slice(from, from + size).map(mk));
+      const filtered = vis.length !== data.length;
+      count.textContent = vis.length
+        ? `${from + 1}–${Math.min(from + size, vis.length)} of ${vis.length}${filtered ? ` (filtered from ${data.length})` : ""}`
+        : (filtered ? `0 of ${data.length}` : "0 rows");
+      pager.hidden = n < 2;
+      pageIn.value = String(page + 1);
+      pageIn.max = String(n);
+      pages.textContent = "of " + n;
+      first.disabled = prev.disabled = page === 0;
+      next.disabled = last.disabled = page >= n - 1;
+      empty.hidden = vis.length > 0;
+      if (testing && testing.win) count.textContent += ` · ${testing.name} goes to the servers of ${zoneOf(testing.win.v[1])} (list ${testing.win.v[0].trim().toLowerCase() || "?"}), the most specific zone`;
+      empty.textContent = testing ? (vis.length ? "" : `${testing.name} is in none of these zones, so it goes to the general servers.`) : data.length ? "No rows match the filter." : "No rows. Right-click here ▸ Add row.";
+    }
+
+    function moveTo(row, target, after) {
+      if (row === target) return;
+      data.splice(data.indexOf(row), 1);
+      const j = data.indexOf(target);
+      data.splice(after ? j + 1 : j, 0, row);
+      render(row);
+      changed();
+    }
+    function mk(row) {
+      const tr = h("tr", {});
+      tr._row = row;
+      const grip = h("span", { class: "grip-h", draggable: "true", title: "Drag to reorder", "aria-hidden": "true" }, "⋮⋮");
+      tr.append(h("td", { class: "grip" }, h("span", { class: "rownum" }, String(data.indexOf(row) + 1)), grip));
+      for (let i = 0; i < 2; i++) {
+        const inp = h("input", { type: "text", autocomplete: "off", spellcheck: "false", "aria-label": NAMES[i], placeholder: i ? "corp.example" : "corp" });
+        inp.value = row.v[i] || "";
+        inp.addEventListener("input", () => { row.v[i] = inp.value; mark(tr, row); });
+        tr.append(h("td", {}, inp));
+      }
+      grip.addEventListener("dragstart", (e) => {
+        dragging = row;
+        e.dataTransfer.effectAllowed = "move";
+        try { e.dataTransfer.setData("text/plain", "zone-row"); e.dataTransfer.setDragImage(tr, 0, 0); } catch (x) { /* a browser without drag images */ }
+        tr.classList.add("dragging");
+      });
+      grip.addEventListener("dragend", () => { dragging = null; tr.classList.remove("dragging"); clearMarks(); });
+      tr.addEventListener("dragover", (e) => {
+        if (!dragging || dragging === row) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        const r = tr.getBoundingClientRect();
+        clearMarks();
+        tr.classList.add(e.clientY > r.top + r.height / 2 ? "drop-below" : "drop-above");
+      });
+      tr.addEventListener("drop", (e) => {
+        if (!dragging || dragging === row) return;
+        e.preventDefault();
+        const below = tr.classList.contains("drop-below");
+        clearMarks();
+        const d = dragging;
+        dragging = null;
+        moveTo(d, row, below);
+      });
+      tr.addEventListener("contextmenu", (e) => rowMenu(menuFor(row))(e));
+      mark(tr, row);
+      return tr;
+    }
+    // add a row after `after` (the end when none); the filter is cleared so the new row shows
+    function insert(vals, after) {
+      const row = { v: [vals[0] || "", vals[1] || ""] };
+      data.splice(after ? data.indexOf(after) + 1 : data.length, 0, row);
+      filter.value = "";
+      render(row);
+      return row;
+    }
+    const focusRow = (row, col) => { const t = trOf(row); if (t) t.querySelectorAll("input")[col || 0].focus(); };
+    const listOf = (row) => (row ? row.v[0] : (data.length ? data[data.length - 1].v[0] : ""));
+    async function paste(after) {
+      let list = [];
+      try { list = parseText(await navigator.clipboard.readText(), listOf(after)); } catch (e) { /* no permission: the last copied row is used */ }
+      if (!list.length && zoneClip) list = [zoneClip];
+      if (!list.length) return;
+      let at = after;
+      for (const v of list) at = insert(v, at);
+      changed();
+    }
+    function menuFor(row) {
+      const vis = visible(), i = vis.indexOf(row), di = data.indexOf(row);
+      return [
+        ["Edit", () => focusRow(row, 1)],
+        ["Copy", () => { zoneClip = row.v.map((x) => x.trim()); try { navigator.clipboard.writeText(copyText(zoneClip)); } catch (e) { /* the row stays in the page's own clipboard */ } }],
+        ["Paste", () => paste(row)],
+        ["Add", () => focusRow(insert([row.v[0], ""], row), 1)],
+        ...(i > 0 ? [["Move up", () => moveTo(row, vis[i - 1], false)]] : []),
+        ...(i >= 0 && i < vis.length - 1 ? [["Move down", () => moveTo(row, vis[i + 1], true)]] : []),
+        ...(di > 0 ? [["Move to top", () => moveTo(row, data[0], false)]] : []),
+        ...(di < data.length - 1 ? [["Move to bottom", () => moveTo(row, data[data.length - 1], true)]] : []),
+        ["Delete", () => { data.splice(data.indexOf(row), 1); render(); changed(); }, "danger"],
+      ];
+    }
+    wrap.addEventListener("contextmenu", rowMenu([
+      ["Add", () => focusRow(insert([listOf(null), ""], null), listOf(null) ? 1 : 0)],
+      ["Paste", () => paste(data[data.length - 1])],
+    ]));
+
+    filter.addEventListener("input", () => { page = 0; render(); });
+    sizeSel.addEventListener("change", () => { size = +sizeSel.value || 50; page = 0; render(); });
+    first.addEventListener("click", () => { page = 0; render(); });
+    prev.addEventListener("click", () => { page--; render(); });
+    next.addEventListener("click", () => { page++; render(); });
+    last.addEventListener("click", () => { page = 1e9; render(); });
+    pageIn.addEventListener("change", () => { page = (parseInt(pageIn.value, 10) || 1) - 1; render(); });
+    pageIn.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); pageIn.blur(); } });
+    filter.addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); });
+    render();
+    return {
+      el: box,
+      // the rows with the same list name are one list, "name: zone, zone"; a row with no list name is not saved (it is marked)
+      get: () => {
+        const order = [], by = new Map();
+        for (const r of data) {
+          const n = r.v[0].trim().toLowerCase();
+          if (!n) continue;
+          if (!by.has(n)) { by.set(n, []); order.push(n); }
+          const z = r.v[1].trim();
+          if (z) by.get(n).push(z);
+        }
+        return order.map((n) => n + ": " + by.get(n).join(", "));
+      },
+    };
+  }
+
   // Build inputs for one object; returns {el, get()} where get() reads values back with types.
   // With asCards, every {section} spec starts a card of its own (title in the header, optional note above the fields).
   // the gateway keys everybody knows, and the shortest key not called short (keep in step with gkey.go)
@@ -2546,6 +2742,13 @@
         get = () => input.checked;
         grid.append(h("label", { class: "f check" }, input, f.l, sharedTag(f)));
         getters[f.k] = get;
+        continue;
+      }
+      if (f.t === "zones") {
+        const zt = zoneTable(v || []);
+        getters[f.k] = zt.get;
+        grid.append(h("div", { class: "f wide" }, h("span", {}, f.l, sharedTag(f)), zt.el,
+          h("span", { class: "hint" }, "One zone to a row; the rows with the same list name are that list. A zone covers itself and every name below it. Give servers their lists on the Topology page. Type test:NAME in the filter to see which zone a name falls in.")));
         continue;
       }
       if (f.t === "fwdtest") {

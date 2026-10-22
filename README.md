@@ -104,13 +104,13 @@ The DNS page (Monitor ▸ DNS, or `dnsdir --show-dns`) shows the ranking, health
 
 ![The DNS page: each server's rank, health, latency and share of the queries, with the answer cache above](snaps/dns.png)
 
-In the GUI, the DNS proxy settings are under Configure ▸ DNS proxy, on six tabs: **Servers**, **Health & balancing**, **Listeners**, **Resolution**, **Cache & ECS** and **Clients**. The help panel (the **?** at the top right) has a page for each tab.
+In the GUI, the DNS proxy settings are under Configure ▸ DNS, on six tabs: **Servers**, **Health & balancing**, **Listeners**, **Resolution**, **Cache & ECS** and **Clients**. The help panel (the **?** at the top right) has a page for each tab.
 
 ### Choosing an upstream server
 
 - **Eligibility.** Every `dns.queries` entry is resolved against every server each `probe_interval_ms`. A query passes with NOERROR and at least one answer. A server keeps getting traffic until `down_percent` (default 100, which means every query) or more of its queries fail. With fewer failing it stays in use and shows amber (degraded), so one dead domain among three does not take a server out. `50` means one of two, or two of four, failing makes it down; `1` means down on any failure. A server is dropped after `fail_threshold` consecutive failed probe rounds (a client query that fails on it never does this) and is re-admitted by the first passing round.
 - **Latency.** Each server has an EWMA of its response time, fed by probe round trips and by live forwarded queries. Eligible servers are tried fastest first. On a timeout, SERVFAIL or REFUSED the next fastest is tried, up to `max_attempts`.
-- **Spread.** The healthy servers whose smoothed latency is within `spread_band` percent of the fastest one's (default 20, range 1–1000) take turns, round-robin, so a pool of equally good servers shares its load. Slower servers stay as fallbacks behind them. Spread is on by default; with `"spread": false` (Configure ▸ DNS proxy) every query goes to the fastest server and the rest are kept as fallbacks. The band is relative, so 0.2 ms against 0.3 ms is not "within 20%". The DNS page and `--show-dns` show whether spread is on, and the Served column shows the real split. On the Topology page, the line from a gateway to each server currently within the band is drawn **blue** (`--canvas` marks them `[spread: takes turns]`).
+- **Spread.** The healthy servers whose smoothed latency is within `spread_band` percent of the fastest one's (default 20, range 1–1000) take turns, round-robin, so a pool of equally good servers shares its load. Slower servers stay as fallbacks behind them. Spread is on by default; with `"spread": false` (Configure ▸ DNS) every query goes to the fastest server and the rest are kept as fallbacks. The band is relative, so 0.2 ms against 0.3 ms is not "within 20%". The DNS page and `--show-dns` show whether spread is on, and the Served column shows the real split. On the Topology page, the line from a gateway to each server currently within the band is drawn **blue** (`--canvas` marks them `[spread: takes turns]`).
 - **No eligible server.** Clients get an immediate SERVFAIL, not a timeout.
 - **Truncated answers.** A truncated (TC) UDP answer is relayed so the client retries over TCP, which the proxy forwards over TCP.
 - **Loops.** A query is never sent back to the server it came from. Without that, a server of the gateway whose own forwarder points at the gateway (or at an anycast address) would make every such query go round until it timed out, and the server would show as down. The log names such a server once a minute.
@@ -119,7 +119,7 @@ In the GUI, the DNS proxy settings are under Configure ▸ DNS proxy, on six tab
 
 ### Fallback servers
 
-`fallback_servers` in the `dns` block lists upstreams that are used **only while no normal server is in service**: every one down or paused, or none listed. Only a paused or stopped gateway serves nothing at all. Set them in the shared block or in a gateway's own (Configure ▸ DNS proxy ▸ Servers ▸ Fallback servers, *Edit* on the gateway's right-click menu, or `--canvas-add fallback --group N --server ADDR` and `--canvas-del fallback …`).
+`fallback_servers` in the `dns` block lists upstreams that are used **only while no normal server is in service**: every one down or paused, or none listed. Only a paused or stopped gateway serves nothing at all. Set them in the shared block or in a gateway's own (Configure ▸ DNS ▸ Servers ▸ Fallback servers, *Edit* on the gateway's right-click menu, or `--canvas-add fallback --group N --server ADDR` and `--canvas-del fallback …`).
 
 Fallbacks are **never probed** and always count as up, because the domains the normal servers are tested with may be internal names that a public resolver knows nothing about, so probing a fallback with them would only mislead. While no normal server is in service, only the fallbacks take queries. As soon as a normal server passes a probe again, the pool goes back to the normal servers and the fallbacks get nothing.
 
@@ -131,19 +131,19 @@ The DNS page marks the fallbacks and says when they are in use, the canvas shows
 
 **Clients to AnyName.** Plain DNS is answered over UDP and TCP on `listen_port` (default 53). Two more listeners are off by default:
 
-- **DNS over TLS.** Set `dot_port` (usually 853) in the `dns` block (shared, or a gateway's own) or under Configure ▸ DNS proxy ▸ Listeners. The VIP, and any anycast address, then also answers DoT (RFC 7858) on that TCP port through the same pool, cache and statistics as plain DNS. The certificate is the web GUI's, whatever Configure ▸ Web GUI shows (the self-signed one until you install a real one), so clients that check certificates need one that is valid for the name or address they connect to. `dot_port` must differ from `listen_port`. If it cannot be opened, the error is logged and plain DNS keeps running. DoT queries count as TCP in the statistics.
+- **DNS over TLS.** Set `dot_port` (usually 853) in the `dns` block (shared, or a gateway's own) or under Configure ▸ DNS ▸ Listeners. The VIP, and any anycast address, then also answers DoT (RFC 7858) on that TCP port through the same pool, cache and statistics as plain DNS. The certificate is the web GUI's, whatever Configure ▸ Web GUI shows (the self-signed one until you install a real one), so clients that check certificates need one that is valid for the name or address they connect to. `dot_port` must differ from `listen_port`. If it cannot be opened, the error is logged and plain DNS keeps running. DoT queries count as TCP in the statistics.
 - **DNS over HTTPS.** Set `doh_port` (usually 443) and the gateway address, and any anycast address of the gateway, also answers DoH (RFC 8484) at `https://<address>:<port>/dns-query`. Use a POST with an `application/dns-message` body, or a GET with the message as the base64url `dns` parameter. HTTP/2 and HTTP/1.1 work, with TLS 1.2 or later and the GUI's certificate, through the same pool, cache and statistics as plain DNS (counted as TCP). Only that path is served: other paths get 404, a wrong method 405, a wrong content type 415 and a bad message 400. `doh_port` must differ from `listen_port` and `dot_port`. If it cannot be opened, the error is logged and the other listeners keep running. Answers carry `Cache-Control: no-store`, and there is no client-certificate or token check, so it is as open as plain DNS on the same address.
 
 **AnyName to upstream servers.** Whatever the client used to ask, a server can be reached over plain DNS, DoT or DoH:
 
 - **DNS over TLS to a server.** List it as `tls://host` or `tls://host:port` (port 853 by default; the host is an IP address or a name), and AnyName probes it and forwards to it over TLS (RFC 7858). The server's certificate must be valid for that host name or IP address and signed by an authority this machine trusts. A certificate that is not is refused, and the server shows as down with the reason.
 - **DNS over HTTPS to a server.** List it as `https://host`, `https://host:port` or `https://host/path` (port 443 and path `/dns-query` unless given), and each query is sent to it as an HTTPS POST of the DNS message (`application/dns-message`, RFC 8484). HTTP/2 is used when the server offers it; redirects are not followed, and no proxy is ever used. The certificate rules are the same as for `tls://`.
-- **`tls_insecure`** (Configure ▸ DNS proxy ▸ Servers, in the shared block or a gateway's own `dns` block; off by default) accepts any certificate from a `tls://` or `https://` server: self-signed, expired, the wrong name. Use it only when you cannot fix the server. The traffic is still encrypted, but the server is not authenticated, so anyone on the path could answer as it. While it is on, the DNS page shows "tls:// certificates not checked", `--show-dns` says so, and the log warns when the pool starts. A DoT listener has no client certificate to skip, so this setting is only about the servers you forward to.
+- **`tls_insecure`** (Configure ▸ DNS ▸ Servers, in the shared block or a gateway's own `dns` block; off by default) accepts any certificate from a `tls://` or `https://` server: self-signed, expired, the wrong name. Use it only when you cannot fix the server. The traffic is still encrypted, but the server is not authenticated, so anyone on the path could answer as it. While it is on, the DNS page shows "tls:// certificates not checked", `--show-dns` says so, and the log warns when the pool starts. A DoT listener has no client certificate to skip, so this setting is only about the servers you forward to.
 - As with DoT, every probe and query to a DoH or DoT server opens a new connection, so its measured latency includes the TLS handshake (and, for DoH, the HTTP request). A plain and a TLS entry for the same host are two servers.
 
 ### Client subnet (ECS)
 
-ECS is on by default (`"ecs": true`). Turn it off in Configure ▸ DNS proxy ▸ Cache & ECS ▸ Client network, or per gateway on the Topology page (edit the gateway, then "Tell the DNS servers which network the client is on").
+ECS is on by default (`"ecs": true`). Turn it off in Configure ▸ DNS ▸ Cache & ECS ▸ Client network, or per gateway on the Topology page (edit the gateway, then "Tell the DNS servers which network the client is on").
 
 With ECS off, every upstream server sees all queries coming from the AnyName node. With it on, the proxy attaches the client's *network* as an EDNS Client Subnet option (RFC 7871): the first `ecs_prefix4` bits (default 24) of an IPv4 client, or `ecs_prefix6` (default 56) of an IPv6 client, and never the full address. Servers that understand it (Google 8.8.8.8, BIND, Unbound, PowerDNS and others) can then log or answer per client network; the rest ignore it.
 
@@ -159,7 +159,7 @@ Set it per gateway (inside the group's `dns` block) or in the shared top-level b
 
 ### The answer cache
 
-A pool answers a repeated query from memory for as long as the records' TTLs allow. The cache is on by default; `"cache": false` or Configure ▸ DNS proxy switches it off, for every gateway, including one with its own `dns` block.
+A pool answers a repeated query from memory for as long as the records' TTLs allow. The cache is on by default; `"cache": false` or Configure ▸ DNS switches it off, for every gateway, including one with its own `dns` block.
 
 **What is kept.** NOERROR answers (also "no data") and NXDOMAIN. A negative answer is kept only with the zone's SOA, whose MINIMUM says how long it is held (RFC 2308). An entry lives for the smallest TTL among its records and at most `cache_max_ttl` seconds (default 3600). The TTLs a client sees count down with the entry's age and are capped to that maximum. At most `cache_entries` answers (100 to 1,000,000,000, default 1,000,000) are kept, and the least recently used leave first. An ordinary answer takes about 360 bytes, so the default is about 360 MB when full; the cache is also held to 4 KB per entry, so very large answers push the oldest out sooner.
 
@@ -177,7 +177,7 @@ A cache hit counts as a handled query in Statistics and on the DNS page, which a
 
 ### Sort list
 
-`sortlist` in the top-level `dns` block (Configure ▸ DNS proxy ▸ Resolution ▸ Sort List) orders the addresses in an answer for each client network. Every gateway uses it.
+`sortlist` in the top-level `dns` block (Configure ▸ DNS ▸ Resolution ▸ Sort List) orders the addresses in an answer for each client network. Every gateway uses it.
 
 It is a list of entries of the form `client-network: preferred-network, preferred-network` (for example `10.1.0.0/16: 10.1.0.0/16, 10.0.0.0/8`), or just a network (`10.20.0.0/16`), which applies to every client; all such entries together give the order, with the one the client is in first. The first entry whose client network contains the asking client is used (`any` matches every client).
 
@@ -187,9 +187,9 @@ The A and AAAA records of a plain answer are put in this order: addresses inside
 
 Policy-Based Resolution decides, per query, who answers it: which servers are asked, whether a different name is asked for, or whether AnyName answers by itself. It looks at **who is asking** and **what is asked**.
 
-It lives in the top-level `dns` block (Configure ▸ DNS proxy ▸ Resolution ▸ Policy-Based Resolution), is shared by the cluster, and applies to every gateway. `policy_on` (default true; the **Policy-Based Resolution enabled** tick box) switches it off without deleting the rows. It works for queries that arrive over UDP, TCP, DoT and DoH, and with DoT and DoH servers.
+It lives in the top-level `dns` block (Configure ▸ DNS ▸ Resolution ▸ Policy-Based Resolution), is shared by the cluster, and applies to every gateway. `policy_on` (default true; the **Policy-Based Resolution enabled** tick box) switches it off without deleting the rows. It works for queries that arrive over UDP, TCP, DoT and DoH, and with DoT and DoH servers.
 
-![Configure ▸ DNS proxy ▸ Resolution: the policy table, with its filter box and a local answer in the Destination name column](snaps/policy.png)
+![Configure ▸ DNS ▸ Resolution: the policy table, with its filter box and a local answer in the Destination name column](snaps/policy.png)
 
 #### The table
 
@@ -271,7 +271,7 @@ Drag a row by the dots at its left to change its order on the page (the first ro
 
 Some names must go only to the servers that know them: your internal zones to your internal DNS servers, while every other name goes to public resolvers that cannot see those zones. Conditional forwarding does that inside one gateway, with the same health checks, fastest-first ordering, spreading and failover as the rest of the pool.
 
-1. **Make lists of zones** under Configure ▸ DNS proxy ▸ Resolution ▸ **Conditional Forwarding**, in a table like the policy table: one zone to a row, with a **List** and a **Zone** column, and the rows with the same list name are that list. It has a filter box (`test:host.corp.example` shows which zone a name falls in and which is the most specific), paging, drag to reorder, and a right-click menu (Edit, Copy, Paste from a spreadsheet, Add, Move, Delete). A zone covers itself and every name below it. The lists are shared by the cluster and stored as `forward_lists`, one `corp: corp.example, lab.example, 10.in-addr.arpa` line per list.
+1. **Make lists of zones** under Configure ▸ DNS ▸ Resolution ▸ **Conditional Forwarding**, in a table like the policy table: one zone to a row, with a **List** and a **Zone** column, and the rows with the same list name are that list. It has a filter box (`test:host.corp.example` shows which zone a name falls in and which is the most specific), paging, drag to reorder, and a right-click menu (Edit, Copy, Paste from a spreadsheet, Add, Move, Delete). A zone covers itself and every name below it. The lists are shared by the cluster and stored as `forward_lists`, one `corp: corp.example, lab.example, 10.in-addr.arpa` line per list.
 2. **Give each server a type and its lists** on the Topology page (Add/Edit DNS server ▸ **Server type** and **Zone lists**, or `--canvas-set server --group N --server ADDRESS --server-type internal --lists corp`):
 
 | Type | Badge | Answers |
@@ -294,13 +294,13 @@ Configure ▸ DNS ▸ Resolution ▸ **Block Lists** refuses the names on well-k
 
 ### Client rate limiting
 
-These settings are in the top-level `dns` block (Configure ▸ DNS proxy ▸ Clients ▸ Client Rate Limiting). Every gateway uses them, including one with its own `dns` block, whose copy of these values is ignored.
+These settings are in the top-level `dns` block (Configure ▸ DNS ▸ Clients ▸ Client Rate Limiting). Every gateway uses them, including one with its own `dns` block, whose copy of these values is ignored.
 
 - **`allowed_clients`** is a list of networks (`10.0.0.0/8`, `192.168.1.5`, `2001:db8::/32`) that may use the proxy. Empty (the default) means everyone. Any other client is answered REFUSED, dynamic updates included.
 - **`client_rate`** is the queries per second one client (an IPv4 address, or an IPv6 /64) may send; 0, the default, means no limit. **`client_burst`** is how many at once (0 means twice the rate, at least 10).
 - **`client_action`** is what a client over its rate gets. `drop` (the default) sends nothing, so a forged source cannot be used to bounce answers at a victim. `truncate` sends a short UDP answer with the TC bit, so a real resolver retries over TCP. `refused` sends REFUSED. Over TCP, DoT and DoH the address is real, and the answer is always REFUSED.
 - **`client_exempt`** lists networks that are never rate limited (they stay subject to `allowed_clients`).
-- **`client_limits`** gives a client or network a rate of its own, one `"ADDRESS RATE"` entry each (`"192.168.1.5 50"`: 50 queries a second, burst twice that, at least 10). It applies even when `client_rate` is 0 and even to a network in `client_exempt`; the most specific entry that contains the client wins (an address beats the network around it, whatever the order; between equal ones the first). Statistics ▸ Top Clients ▸ right-click ▸ **Limit** adds and removes entries (Configure ▸ DNS proxy ▸ Clients ▸ **Per-client limits** is the same list). Shared by the cluster, counted per node.
+- **`client_limits`** gives a client or network a rate of its own, one `"ADDRESS RATE"` entry each (`"192.168.1.5 50"`: 50 queries a second, burst twice that, at least 10). It applies even when `client_rate` is 0 and even to a network in `client_exempt`; the most specific entry that contains the client wins (an address beats the network around it, whatever the order; between equal ones the first). Statistics ▸ Top Clients ▸ right-click ▸ **Limit** adds and removes entries (Configure ▸ DNS ▸ Clients ▸ **Per-client limits** is the same list). Shared by the cluster, counted per node.
 
 The node itself (loopback) is always allowed and never limited. Both checks run before the cache. The DNS page and `--show-dns` show the limit and how many queries were refused or turned away, and the log says so at most once a minute.
 
@@ -318,7 +318,7 @@ An UPDATE message sent to the VIP (from `nsupdate`, a DHCP server, or Windows an
 
 Every update is logged (INFO when the primary accepted it, WARN otherwise) and counted in Statistics as the type **UPDATE** under the zone name, with its own **Updates** tile (the count and how many failed) and a chart line. Updates are counted in the total but not again under No Error or Refused. Click the **Updates** tile to see only updates (chart, who sent them, which zones), and the last 200 under **Recent dynamic updates** (also `dnsdir --dns-updates`): time, client, zone, what it changed (`add host1.example.com A 192.0.2.7`, `delete old.example.com A`), the primary and its answer.
 
-Switch it off with `"forward_updates": false` (Configure ▸ DNS proxy ▸ Listeners); updates are then answered REFUSED. Note that anyone who can reach the VIP can send updates to your primary this way, so the primary's own authorisation (TSIG, ACL) is what decides.
+Switch it off with `"forward_updates": false` (Configure ▸ DNS ▸ Listeners); updates are then answered REFUSED. Note that anyone who can reach the VIP can send updates to your primary this way, so the primary's own authorisation (TSIG, ACL) is what decides.
 
 ### Per-server probe domains and reloading
 
@@ -888,7 +888,7 @@ The range is Last Hour, Last Day, Last Week, Last Month, or a custom start and e
 
 **Filtering the lists.** The Filter box of Top Clients and Top Domains lists every client address or domain that contains what you type (any case, from everything counted in the range, not just the ten shown; a client also matches by its reverse-DNS host name, which fills in over the next refreshes for clients that have not been looked up yet); Esc empties it. The box on one list does not change the other.
 
-**Answering a name yourself.** Right-click a name in Top Domains ▸ **Block** adds a NODATA row (any client, that exact name) at the end of the Policy-Based Resolution table and saves it, so the proxy answers that name itself from then on and no longer asks the servers (to answer NXDOMAIN or REFUSED instead, change the row on Configure ▸ DNS proxy ▸ Resolution). The statistics still count the answer under its kind. A name that already has such a row shows a 🚫, and its menu item reads **Unblock**, which removes the row. **Rewrite** next to it (a rewritten name shows a ✏️ and its item reads **Remove rewrite**) asks what to answer the name with (an address, records such as `A 10.5.5.5; TTL 300` or `CNAME host.example.com`, or another name to ask the servers for) and adds that as a row (any client, that exact name) at the end of the table; change or delete it on Configure ▸ DNS proxy ▸ Resolution.
+**Answering a name yourself.** Right-click a name in Top Domains ▸ **Block** adds a NODATA row (any client, that exact name) at the end of the Policy-Based Resolution table and saves it, so the proxy answers that name itself from then on and no longer asks the servers (to answer NXDOMAIN or REFUSED instead, change the row on Configure ▸ DNS ▸ Resolution). The statistics still count the answer under its kind. A name that already has such a row shows a 🚫, and its menu item reads **Unblock**, which removes the row. **Rewrite** next to it (a rewritten name shows a ✏️ and its item reads **Remove rewrite**) asks what to answer the name with (an address, records such as `A 10.5.5.5; TTL 300` or `CNAME host.example.com`, or another name to ask the servers for) and adds that as a row (any client, that exact name) at the end of the table; change or delete it on Configure ▸ DNS ▸ Resolution.
 
 **Silencing a client.** Right-click a client in Top Clients ▸ **Block** (a client that is blocked, and a domain that has such a row of its own, have a 🚫 after the name (a `*.domain.com` or pattern row marks every domain it covers, dull, and a row for the exact name bright; the same goes for the ✏️ of a rewrite); every client a Block row covers is marked, also by a network, a list or a `!` row, though the table is read from the top (a row above that lets a client through means no icon) and **Unblock** removes only a row written for that address, and its item reads **Unblock**, which removes that row) puts a NODATA row for that client (any name) at the end of the table, so nothing it asks reaches the servers any more and it gets no answers.
 

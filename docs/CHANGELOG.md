@@ -1,5 +1,9 @@
 # Changelog
 
+## [v509] - 2026-10-22 — The menu item is DNS
+
+- Configure ▸ **DNS proxy** is now Configure ▸ **DNS** (menu, page heading, help titles and the paths named in the help and README).
+
 ## [v508] - 2026-10-22 — Block lists, an Always allow list, and a tab for each Resolution function
 
 - Configure ▸ DNS ▸ Resolution now has a tab for each function: Policy-Based Resolution, Sort List, Conditional Forwarding and **Block Lists**.

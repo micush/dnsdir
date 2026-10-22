@@ -480,7 +480,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 	// a name for an address (reverse DNS) or an address for a name, for the Add DNS server form
 	case "dns.lookup":
 		return hostLookup(a.Lookup)
-	// block lists (Configure ▸ DNS proxy ▸ Resolution ▸ Block Lists, --block-status, --block-update, --block-test)
+	// block lists (Configure ▸ DNS ▸ Resolution ▸ Block Lists, --block-status, --block-update, --block-test)
 	case "blocklists.status":
 		if bm := theBlocks.Load(); bm != nil {
 			return bm.Report(), nil
@@ -505,7 +505,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 			return nil, err
 		}
 		return dc.DNS.BlockTest(n), nil
-	// where a name would go with conditional forwarding: its zone, lists and servers (Configure ▸ DNS proxy ▸ Conditional Forwarding, --fwd-route)
+	// where a name would go with conditional forwarding: its zone, lists and servers (Configure ▸ DNS ▸ Conditional Forwarding, --fwd-route)
 	case "fwd.route":
 		gid, err := strconv.Atoi(strings.TrimSpace(a.QGW))
 		if err != nil {

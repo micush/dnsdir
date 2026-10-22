@@ -258,7 +258,7 @@
   // Topology comes first; its items are the gateways themselves (filled in from the daemon).
   const TOPO = "Topology";
   const NAV_GROUPS = [
-    ["Configure", [["cfg_general", "General"], ["cfg_groups", "Gateway groups"], ["cfg_dns", "DNS proxy"], ["cfg_web", "Web GUI"], ["cfg_snmp", "SNMP"], ["cfg_cluster", "Cluster"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
+    ["Configure", [["cfg_general", "General"], ["cfg_groups", "Gateway groups"], ["cfg_dns", "DNS"], ["cfg_web", "Web GUI"], ["cfg_snmp", "SNMP"], ["cfg_cluster", "Cluster"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
     ["Operate", [["node", "Node"], ["cluster", "Cluster"], ["anycastop", "Anycast"], ["scheduler", "Scheduler"], ["updates", "Upgrade"]]],
     ["Monitor", [["stats", "Statistics"], ["host", "Host"], ["gateways", "Gateways"], ["nodes", "Cluster"], ["dns", "DNS"], ["anycaststatus", "Anycast"], ["capture", "Capture"], ["log", "Log"]]],
   ];
@@ -1804,7 +1804,7 @@
         { k: "addr", l: "IP address or host name", v: edit ? shortAddr(edit) : "", ph: "8.8.8.8", hint: "Add :port for a port other than 53. Write tls://host for DNS over TLS (port 853) or https://host/path for DNS over HTTPS (port 443).", on: lk.addr },
         { k: "label", l: "Name (optional)", v: edit ? srvName(g, edit) : "", ph: "e.g. dns-a", hint: "Shown under the address on the diagram. Fill in the address and its name is looked up; fill in a host name here and its address is.", on: lk.label },
         { k: "ftype", l: "Server type", v: fwdTypeOf(srvForward(g, edit || "")), options: FWD_TYPES, initOn: true, on: (els) => { const pub = els.ftype.value === FWD_TYPES[0]; els.flists.setDisabled(pub); els.flists.parentElement.style.display = pub ? "none" : ""; }, hint: "Public resolver: answers everything except the zones other servers carry. Internal: answers only the zones of its lists (never other names). Public + Internal: answers its zones and everything else." },
-        { k: "flists", l: "Zone lists", v: (srvForward(g, edit || "") || {}).lists || [], checks: forwardListNames(), none: "There are no zone lists yet. Make them under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding.", hint: "For an Internal or Public + Internal server: type to find the zone lists it serves and add them (they are made under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding). A Public resolver has none." },
+        { k: "flists", l: "Zone lists", v: (srvForward(g, edit || "") || {}).lists || [], checks: forwardListNames(), none: "There are no zone lists yet. Make them under Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding.", hint: "For an Internal or Public + Internal server: type to find the zone lists it serves and add them (they are made under Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding). A Public resolver has none." },
         ...(edit ? [] : [
           { k: "name", l: "Domain to ask it about", v: "", ph: "google.com", hint: "A server is checked by asking it a question; add more domains afterwards. For an Internal server, use a name in one of its zones (its zone itself with type SOA works). A domain inside one of its zones decides that zone only." },
           { k: "type", l: "Record type", v: "A", options: QTYPES }]),
@@ -1814,10 +1814,10 @@
         if (!/^[A-Za-z0-9_.\-:\[\]]+$/.test(v.addr)) return "That doesn't look like an IP address or host name.";
         const flists = (v.flists || "").toLowerCase().split(/[\s,]+/).filter(Boolean);
         const haveLists = forwardListNames();
-        if (v.ftype !== FWD_TYPES[0] && !flists.length) return (v.ftype === FWD_TYPES[1] ? "An Internal" : "A Public + Internal") + " server needs at least one zone list. Pick its zone lists (make them under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding), or choose Public resolver.";
+        if (v.ftype !== FWD_TYPES[0] && !flists.length) return (v.ftype === FWD_TYPES[1] ? "An Internal" : "A Public + Internal") + " server needs at least one zone list. Pick its zone lists (make them under Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding), or choose Public resolver.";
         if (v.ftype === FWD_TYPES[0] && flists.length) return "A public resolver has no zone lists: choose Internal or Public + Internal, or clear the lists.";
         const missing = flists.filter((l) => !haveLists.includes(l));
-        if (missing.length) return "There is no zone list called " + missing.join(", ") + (haveLists.length ? " (the lists are: " + haveLists.join(", ") + ")." : " — there are no zone lists yet. Make them under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding.");
+        if (missing.length) return "There is no zone list called " + missing.join(", ") + (haveLists.length ? " (the lists are: " + haveLists.join(", ") + ")." : " — there are no zone lists yet. Make them under Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding.");
         const nm = (v.label || "").trim();
         const full = nm.toLowerCase();
         const ip = (/^\[([0-9a-f:.]+)\](:\d+)?$/i.exec(v.addr) || /^(\d+\.\d+\.\d+\.\d+)(:\d+)?$/.exec(v.addr) || /^([0-9a-f:]*:[0-9a-f:]*)$/i.exec(v.addr) || [])[1] || "";
@@ -2524,7 +2524,7 @@
     };
   }
 
-  // Configure ▸ DNS proxy ▸ Resolution ▸ Block Lists: the lists on offer, grouped, each with a tick; your own lists (a name and an
+  // Configure ▸ DNS ▸ Resolution ▸ Block Lists: the lists on offer, grouped, each with a tick; your own lists (a name and an
   // address) below them.  The tick state is what is saved (block_lists: [{id}] and [{name, url}]); the numbers beside each list
   // are this node's own (it downloads its own copy), read from /api/blocklists.
   // what /api/blocktest says, in a sentence (the saved settings and the lists downloaded on this node; policy rows are not looked at)
@@ -2633,7 +2633,7 @@
     };
   }
 
-  // Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding: the zone lists as a table, one zone to a row (List, Zone).
+  // Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding: the zone lists as a table, one zone to a row (List, Zone).
   // The rows with the same list name are that list; it is stored as one "name: zone, zone" line per list (forward_lists),
   // in the order the lists first appear and the zones in row order (the first zone of a list is the one an Internal server is
   // probed with when it has no probe domain of its own).
@@ -2988,7 +2988,7 @@
           if (focus) buttons[i].focus();
           if (document.getElementById("help-panel") && document.getElementById("help-panel").classList.contains("open")) fillHelp();
         }
-        const strip = h("div", { class: "dtabs", role: "tablist", "aria-label": "DNS proxy settings" }, buttons);
+        const strip = h("div", { class: "dtabs", role: "tablist", "aria-label": "DNS settings" }, buttons);
         strip.addEventListener("keydown", (e) => {
           const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
           if (!d) return;
@@ -3069,7 +3069,7 @@
       const panels = [
         ["general", "General", h("div", {}, section("General", general.el), updatesCard())],
         ["groups", "Gateway groups", h("div", {}, groupsEl)],
-        ["dns", "DNS proxy", dnsTabs()],
+        ["dns", "DNS", dnsTabs()],
         ["web", "Web GUI", h("div", {}, section("Web GUI", web.el), certBox)],
         ["snmp", "SNMP", h("div", {}, (() => { const c = section("SNMP", snmp.el); c.querySelector("h2").append(snmpPill); return c; })())],
         ["cluster", "Cluster", section("Cluster", cluster.el)],
@@ -3981,12 +3981,12 @@
         cfg.dns = cfg.dns || {};
         const list = cfg.dns.policy || [];
         const same = list.findIndex((r) => (r.client || "*") === client && String(r.name || "*").toLowerCase() === name.toLowerCase());
-        if (same >= 0) { say(status, "bad", "There already is a policy row for " + (client === "*" ? name : client + " asking for " + name) + " (row " + (same + 1) + ", " + ((list[same].servers || []).join(", ") || "no servers") + "). Edit it on Configure ▸ DNS proxy ▸ Resolution."); return; }
+        if (same >= 0) { say(status, "bad", "There already is a policy row for " + (client === "*" ? name : client + " asking for " + name) + " (row " + (same + 1) + ", " + ((list[same].servers || []).join(", ") || "no servers") + "). Edit it on Configure ▸ DNS ▸ Resolution."); return; }
         list.push(dest ? { client, name, servers: [], dest } : { client, name, servers: [keyword] });
         cfg.dns.policy = list;
         await api("PUT", "/api/config", { config: cfg, note: "Policy row from Statistics: " + (dest ? "rewrite to " + dest : keyword) + " for " + (client === "*" ? name : client + " / " + name) });
         await load();
-        say(status, cfg.dns.policy_on === false ? "warn" : "info", "Added policy row 1: " + (client === "*" ? name : client + " asking for " + name) + " → " + (dest || keyword) + "." + (cfg.dns.policy_on === false ? " Policy-Based Resolution is switched off, so it does nothing until you switch it on (Configure ▸ DNS proxy ▸ Resolution)." : ""));
+        say(status, cfg.dns.policy_on === false ? "warn" : "info", "Added policy row 1: " + (client === "*" ? name : client + " asking for " + name) + " → " + (dest || keyword) + "." + (cfg.dns.policy_on === false ? " Policy-Based Resolution is switched off, so it does nothing until you switch it on (Configure ▸ DNS ▸ Resolution)." : ""));
       } catch (e) { if (e.message !== "unauthenticated") say(status, "bad", "Not added: " + e.message); }
     }
 
@@ -4298,15 +4298,15 @@
                   const marks = withHost ? [
                     blk ? h("span", { class: "qblocked" + (blk.host ? "" : " qdim"), role: "img", "aria-label": "blocked",
                       title: blk.text === e.name ? "Blocked: this client gets no answers (a Policy-Based Resolution row). Right-click ▸ Unblock to remove it."
-                        : "Blocked: this client gets no answers (the Policy-Based Resolution row for " + blk.text + "). Edit it on Configure ▸ DNS proxy ▸ Resolution." }, "🚫") : null,
+                        : "Blocked: this client gets no answers (the Policy-Based Resolution row for " + blk.text + "). Edit it on Configure ▸ DNS ▸ Resolution." }, "🚫") : null,
                     lim ? h("span", { class: "qblocked" + (lim.host ? "" : " qdim"), role: "img", "aria-label": "rate limited",
-                      title: "Rate limited to " + lim.rate + " queries per second" + (lim.text === e.name ? ". Right-click ▸ Limit to change or remove it." : " (" + lim.text + "). Edit it on Configure ▸ DNS proxy ▸ Clients ▸ Per-client limits.") }, gaugeIcon()) : null,
+                      title: "Rate limited to " + lim.rate + " queries per second" + (lim.text === e.name ? ". Right-click ▸ Limit to change or remove it." : " (" + lim.text + "). Edit it on Configure ▸ DNS ▸ Clients ▸ Per-client limits.") }, gaugeIcon()) : null,
                   ].filter(Boolean) : [];
                   return marks.length
                     ? h("div", { class: "qname" }, b, ...marks)
                     : nd ? h("div", { class: "qname" }, b, h("span", { class: "qblocked" + (nd.exact ? "" : " qdim"), role: "img", "aria-label": nd.kind === "block" ? "in the Policy-Based Resolution table" : "rewritten",
                       title: (nd.kind === "block" ? "Answered by the Policy-Based Resolution table: " + nd.dest.toUpperCase() + " for every client" : "Rewritten by the Policy-Based Resolution table: answered with " + nd.dest + " for every client") +
-                        (nd.exact ? ". " + (nd.kind === "block" ? "Edit it on Configure ▸ DNS proxy ▸ Resolution." : "Right-click ▸ Remove rewrite to undo it.") : " (the row for " + nd.text + "). Edit it on Configure ▸ DNS proxy ▸ Resolution.") }, nd.kind === "block" ? "🚫" : "✏️"))
+                        (nd.exact ? ". " + (nd.kind === "block" ? "Edit it on Configure ▸ DNS ▸ Resolution." : "Right-click ▸ Remove rewrite to undo it.") : " (the row for " + nd.text + "). Edit it on Configure ▸ DNS ▸ Resolution.") }, nd.kind === "block" ? "🚫" : "✏️"))
                     : b;
                 })(),
                 e.host ? h("div", { class: "muted small" }, e.host) : null),

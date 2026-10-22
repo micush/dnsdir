@@ -1,6 +1,6 @@
 package main
 
-// The block lists dnsdir knows by name (Configure ▸ DNS proxy ▸ Resolution ▸ Block Lists).  Only the address of each is
+// The block lists dnsdir knows by name (Configure ▸ DNS ▸ Resolution ▸ Block Lists).  Only the address of each is
 // kept here: every node downloads the lists itself, from the publisher, when they are switched on.  Addresses change now and
 // then (OISD moved its lists to another format once), so a list's address can be replaced in its row, and a list that
 // cannot be downloaded says why instead of failing quietly.

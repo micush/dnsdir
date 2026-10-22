@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Conditional forwarding: named lists of zones (Configure ▸ DNS proxy ▸ Conditional Forwarding, shared by every
+// Conditional forwarding: named lists of zones (Configure ▸ DNS ▸ Conditional Forwarding, shared by every
 // gateway) and, per server, which lists it serves.  A query whose name falls under a zone of a list goes only to the
 // servers that carry that list (the most specific zone wins); every other query goes to the servers that also serve
 // everything else.  Inside either set the pool works as it always did: health probes, fastest first, spread, failover.
@@ -219,7 +219,7 @@ func (d *DNSConfig) checkForwardLists(shared *DNSConfig, where string) error {
 	for _, a := range addrs {
 		for _, ln := range d.ServerForward[a].Lists {
 			if _, ok := have[ln]; !ok {
-				return fmt.Errorf("%s: server %s serves the zone list %q, which does not exist (Configure ▸ DNS proxy ▸ Conditional Forwarding)", where, a, ln)
+				return fmt.Errorf("%s: server %s serves the zone list %q, which does not exist (Configure ▸ DNS ▸ Conditional Forwarding)", where, a, ln)
 			}
 		}
 	}
@@ -479,7 +479,7 @@ func setServerForward(dc *DaemonConfig, d *DNSConfig, addr, typ, lists string) (
 			for _, f := range strings.FieldsFunc(l, func(r rune) bool { return r == ',' || r == ' ' }) {
 				f = strings.ToLower(f)
 				if _, ok := have[f]; !ok {
-					return "", fmt.Errorf("there is no zone list %q (Configure ▸ DNS proxy ▸ Conditional Forwarding)", f)
+					return "", fmt.Errorf("there is no zone list %q (Configure ▸ DNS ▸ Conditional Forwarding)", f)
 				}
 				if !containsStr(cur.Lists, f) {
 					cur.Lists = append(cur.Lists, f)

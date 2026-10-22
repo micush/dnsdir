@@ -630,7 +630,7 @@ type DNSConfig struct {
 	LB *LBConfig `json:"lb,omitempty"`
 }
 
-// LBConfig is the set of load-balancing settings (Configure ▸ DNS proxy ▸ Load Balancing): how servers share the
+// LBConfig is the set of load-balancing settings (Configure ▸ DNS ▸ Load Balancing): how servers share the
 // queries and when one counts as down.  A gateway that has its own pool follows the shared values unless its own
 // pool carries an LBConfig.
 type LBConfig struct {

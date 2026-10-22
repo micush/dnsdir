@@ -22,7 +22,7 @@ import (
 	"time"
 )
 
-// Block lists: well-known lists of domains to refuse (Configure ▸ DNS proxy ▸ Resolution ▸ Block Lists), and a list of
+// Block lists: well-known lists of domains to refuse (Configure ▸ DNS ▸ Resolution ▸ Block Lists), and a list of
 // domains that are never refused (Always allow).
 //
 // Every node downloads the lists it is told to use, keeps the last good copy in its state directory (so a download that

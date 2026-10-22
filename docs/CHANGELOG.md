@@ -1,5 +1,9 @@
 # Changelog
 
+## [v506] - 2026-10-21 — Delete a cluster member in one step
+
+- Cluster ▸ Members: right-click a member ▸ **Delete** drops it from the cluster and leaves nothing behind (before, **Remove** put its address on a removed list and a second step, **Allow again**, was needed to clear it). A member that is still running resets itself to a cluster of one. The removed-nodes card now has a **Delete** button on each address to forget one that is already there. Command line: `--cluster-delete ADDR`. `--cluster-remove` and `--cluster-unremove` are unchanged, for blocking a node that must not come back.
+
 ## [v505] - 2026-10-21 — Gateway is amber, not red, when only the zone servers are up
 
 - Topology: when no server for ordinary names is in use but a server for a zone still is (every Public and Public + Internal server is down for ordinary names, the Internal ones are up), the gateway square is now **amber** ("only the zones that have a server are answered") instead of red. Red now means nothing can be answered at all. Nothing else changes: the routing is the same, and the anycast address is still announced.

@@ -143,6 +143,9 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 	case "cluster.remove":
 		err := m.cl.RemovePeer(a.Addr, actor)
 		return m.cl.View(), err
+	case "cluster.delete":
+		err := m.cl.DeletePeer(a.Addr, actor)
+		return m.cl.View(), err
 	case "cluster.unremove":
 		err := m.cl.UnremovePeer(a.Addr, actor)
 		return m.cl.View(), err

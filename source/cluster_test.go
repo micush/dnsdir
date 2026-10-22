@@ -1030,3 +1030,49 @@ func TestClusterServerStatsCountNodesWithHistory(t *testing.T) {
 		t.Fatalf("op: %+v %v", res, err)
 	}
 }
+
+// Delete drops a member for good and keeps no block on its address on any node; an address that is only on the removed list
+// (put there by Remove) is cleared by it.
+func TestClusterDeletePeerLeavesNothing(t *testing.T) {
+	a, b, c := newTNode(t, "A"), newTNode(t, "B"), newTNode(t, "C")
+	b.join(a)
+	c.join(a)
+	a.sync()
+	b.sync()
+	c.sync()
+	if !hasPeer(a, c.addr) || !hasPeer(b, c.addr) {
+		t.Fatal("C must be a member everywhere before it is deleted")
+	}
+	if err := a.mg.cl.DeletePeer(c.addr, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []*tnode{a, b} {
+		if hasPeer(n, c.addr) {
+			t.Errorf("%s still lists the deleted member", n.name)
+		}
+		if r := n.mg.cl.Snapshot().Removed; len(r) != 0 {
+			t.Errorf("%s keeps %v on its removed list after a delete", n.name, r)
+		}
+	}
+	c.mg.cl.SyncOnce(context.Background())
+	if s := c.mg.cl.Snapshot(); s.Role != RolePrimary || len(s.Peers) != 0 {
+		t.Fatalf("a deleted node that is still running must reset to a single-node cluster: %+v", s)
+	}
+	if err := a.mg.cl.DeletePeer(c.addr, "admin"); err == nil {
+		t.Fatal("deleting something that is neither a member nor on the removed list must be refused")
+	}
+
+	// Remove blocks the address; Delete on it then clears the block everywhere
+	if err := a.mg.cl.RemovePeer(b.addr, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if r := a.mg.cl.Snapshot().Removed; len(r) != 1 {
+		t.Fatalf("Remove must put the address on the removed list: %v", r)
+	}
+	if err := a.mg.cl.DeletePeer(b.addr, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if r := a.mg.cl.Snapshot().Removed; len(r) != 0 {
+		t.Fatalf("Delete must clear the removed list: %v", r)
+	}
+}

@@ -1120,6 +1120,40 @@ func (c *Cluster) RemovePeer(addr, by string) error {
 	return nil
 }
 
+// DeletePeer removes a member for good and keeps nothing about it: the member is dropped cluster-wide (a copy of it that is
+// still running resets itself to a cluster of one) and its address is then taken off the removed list on every node, so no
+// block is left behind. An address that is only on the removed list is cleared from it.
+func (c *Cluster) DeletePeer(addr, by string) error {
+	if err := c.requireEnabled(); err != nil {
+		return err
+	}
+	snap := c.node.Snapshot()
+	member := false
+	var others []ClusterPeer
+	for _, p := range snap.Peers {
+		if p.Addr == addr {
+			member = true
+		} else {
+			others = append(others, p)
+		}
+	}
+	if !member {
+		if !c.node.UnremovePeer(addr) {
+			return fmt.Errorf("%s is not a member", addr)
+		}
+		c.broadcast(snap.Peers, "/cluster/peers/unremove", map[string]string{"addr": addr})
+		warnf("cluster: %s forgotten by %s", addr, by)
+		return nil
+	}
+	if err := c.RemovePeer(addr, by); err != nil {
+		return err
+	}
+	c.node.UnremovePeer(addr)
+	c.broadcast(others, "/cluster/peers/unremove", map[string]string{"addr": addr})
+	warnf("cluster: %s deleted by %s", addr, by)
+	return nil
+}
+
 func (c *Cluster) UnremovePeer(addr, by string) error {
 	if err := c.requireEnabled(); err != nil {
 		return err

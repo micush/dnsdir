@@ -126,7 +126,7 @@ the web GUI):
                    --cluster-promote  --cluster-remove ADDR
                    --cluster-failover auto|on|off   (the primary promotes a replica by itself
                                                  after 5 minutes offline; auto = on from 3 members)
-                   --cluster-unremove ADDR  --cluster-leave  --cluster-sync
+                   --cluster-delete ADDR  --cluster-unremove ADDR  --cluster-leave  --cluster-sync
                    (GUI: the Node menu, top right, configures any member)
   Upgrade          --update-status  --update-history  --update-upload FILE
                    --update-apply  --update-push all|ADDR,...

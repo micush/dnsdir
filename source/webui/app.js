@@ -623,6 +623,7 @@
     const srvTitle = (g, addr) => (srvName(g, addr) ? srvName(g, addr) + " (" + shortAddr(addr) + ")" : shortAddr(addr));
     // what a server serves in conditional forwarding (dns.server_forward): P public, I internal (its zones only), P+I both
     const FWD_TYPES = ["Public resolver", "Internal (zones only)", "Public + Internal resolver"];
+    const forwardListNames = () => ((cv.cfg.dns || {}).forward_lists || []).map((l) => l.split(":")[0].trim().toLowerCase()).filter(Boolean);
     const srvForward = (g, addr) => ((g.dns || cv.cfg.dns || {}).server_forward || {})[addr] || null;
     const fwdTypeOf = (f) => (!f || !(f.lists || []).length ? FWD_TYPES[0] : f.zones_only ? FWD_TYPES[1] : FWD_TYPES[2]);
     const fwdBadge = (f) => ({ [FWD_TYPES[0]]: "P", [FWD_TYPES[1]]: "I", [FWD_TYPES[2]]: "P+I" })[fwdTypeOf(f)];
@@ -1139,14 +1140,29 @@
     }
     function form(title, fields, onOk, okLabel) {
       const els = {}, hints = {};
+      // f.checks: a little tag for each of the names, f.v the ones switched on (click a tag to switch it); its value is the
+      // chosen names joined by commas, and setDisabled(true) hides the whole field and makes the value empty
+      const checkGroup = (f) => {
+        const boxes = f.checks.map((n) => h("input", { type: "checkbox", value: n, checked: (f.v || []).includes(n) }));
+        const wrapEl = h("div", { class: "checks", role: "group", "aria-label": f.l },
+          f.checks.length ? f.checks.map((n, i) => {
+            const tag = h("label", { class: "tag" + (boxes[i].checked ? " on" : "") }, boxes[i], n);
+            boxes[i].addEventListener("change", () => tag.classList.toggle("on", boxes[i].checked));
+            return tag;
+          }) : h("span", { class: "hint" }, f.none || "Nothing to choose from yet."));
+        let off = false;
+        Object.defineProperty(wrapEl, "value", { get: () => (off ? "" : boxes.filter((b) => b.checked).map((b) => b.value).join(",")) });
+        wrapEl.setDisabled = (d) => { off = d; boxes.forEach((b) => { b.disabled = d; }); if (wrapEl.parentElement) wrapEl.parentElement.hidden = d; };
+        return wrapEl;
+      };
       const grid = h("div", { class: "grid" }, fields.map((f) => {
-        els[f.k] = f.options
+        els[f.k] = f.checks ? checkGroup(f) : f.options
           ? h("select", {}, f.options.map((o) => h("option", { value: o, selected: o === f.v }, o)))
           : h("input", { type: "text", autocomplete: "off", spellcheck: "false", value: f.v || "", disabled: f.disabled, placeholder: f.ph || "" });
         hints[f.k] = h("span", { class: "hint" }, f.hint || "");
         // a field may react when it is left (f.on): it gets the fields, and note(key, text) to say something under a field
         if (f.on) els[f.k].addEventListener("change", () => f.on(els, (k, t) => { const o = fields.find((x) => x.k === k); hints[k].textContent = (o && o.hint ? o.hint : "") + (t ? (o && o.hint ? " " : "") + t : ""); }));
-        return h("label", { class: "f" + (fields.length === 1 ? " wide" : "") }, f.l, els[f.k], f.hint || f.on ? hints[f.k] : null);
+        return h(f.checks ? "div" : "label", { class: "f" + (fields.length === 1 ? " wide" : "") }, f.checks ? h("span", {}, f.l) : f.l, els[f.k], f.hint || f.on ? hints[f.k] : null);
       }));
       for (const f of fields) if (f.on && f.initOn) f.on(els, () => {});
       const err = h("div", { "aria-live": "polite" });
@@ -1766,8 +1782,8 @@
       form(edit ? "Edit DNS server" : "Add DNS server", [
         { k: "addr", l: "IP address or host name", v: edit ? shortAddr(edit) : "", ph: "8.8.8.8", hint: "Add :port for a port other than 53. Write tls://host for DNS over TLS (port 853) or https://host/path for DNS over HTTPS (port 443).", on: lk.addr },
         { k: "label", l: "Name (optional)", v: edit ? srvName(g, edit) : "", ph: "e.g. dns-a", hint: "Shown under the address on the diagram. Fill in the address and its name is looked up; fill in a host name here and its address is.", on: lk.label },
-        { k: "ftype", l: "Server type", v: fwdTypeOf(srvForward(g, edit || "")), options: FWD_TYPES, hint: "Public resolver: answers everything except the zones other servers carry. Internal: answers only the zones of its lists (never other names). Public + Internal: answers its zones and everything else." },
-        { k: "flists", l: "Zone lists", v: ((srvForward(g, edit || "") || {}).lists || []).join(", "), ph: "corp, dev", hint: "For an Internal or Public + Internal server: the names of its zone lists (Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding), separated by commas." },
+        { k: "ftype", l: "Server type", v: fwdTypeOf(srvForward(g, edit || "")), options: FWD_TYPES, initOn: true, on: (els) => { const pub = els.ftype.value === FWD_TYPES[0]; els.flists.setDisabled(pub); els.flists.parentElement.style.display = pub ? "none" : ""; }, hint: "Public resolver: answers everything except the zones other servers carry. Internal: answers only the zones of its lists (never other names). Public + Internal: answers its zones and everything else." },
+        { k: "flists", l: "Zone lists", v: (srvForward(g, edit || "") || {}).lists || [], checks: forwardListNames(), none: "There are no zone lists yet. Make them under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding.", hint: "For an Internal or Public + Internal server: click the zone lists it serves to switch them on (they are made under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding). A Public resolver has none." },
         ...(edit ? [] : [
           { k: "name", l: "Domain to ask it about", v: "", ph: "google.com", hint: "A server is checked by asking it a question; add more domains afterwards. For an Internal server, use a name in one of its zones (its zone itself with type SOA works). A domain inside one of its zones decides that zone only." },
           { k: "type", l: "Record type", v: "A", options: QTYPES }]),
@@ -1776,8 +1792,8 @@
         if (!edit && !/^[A-Za-z0-9_.\-]+$/.test(v.name)) return "Enter a domain name such as google.com.";
         if (!/^[A-Za-z0-9_.\-:\[\]]+$/.test(v.addr)) return "That doesn't look like an IP address or host name.";
         const flists = (v.flists || "").toLowerCase().split(/[\s,]+/).filter(Boolean);
-        const haveLists = ((cv.cfg.dns || {}).forward_lists || []).map((l) => l.split(":")[0].trim().toLowerCase());
-        if (v.ftype !== FWD_TYPES[0] && !flists.length) return "A " + v.ftype.replace(/ \(.*/, "").toLowerCase() + " server needs at least one zone list. Make the lists under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding, or choose Public resolver.";
+        const haveLists = forwardListNames();
+        if (v.ftype !== FWD_TYPES[0] && !flists.length) return (v.ftype === FWD_TYPES[1] ? "An Internal" : "A Public + Internal") + " server needs at least one zone list. Pick its zone lists (make them under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding), or choose Public resolver.";
         if (v.ftype === FWD_TYPES[0] && flists.length) return "A public resolver has no zone lists: choose Internal or Public + Internal, or clear the lists.";
         const missing = flists.filter((l) => !haveLists.includes(l));
         if (missing.length) return "There is no zone list called " + missing.join(", ") + (haveLists.length ? " (the lists are: " + haveLists.join(", ") + ")." : " — there are no zone lists yet. Make them under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding.");

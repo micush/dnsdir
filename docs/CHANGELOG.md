@@ -1,5 +1,10 @@
 # Changelog
 
+## [v500] - 2026-10-21 — Zone lists are picked as tags, not typed
+
+- In Topology ▸ Add/Edit DNS server, **Zone lists** is no longer a free-text box. Each list made under Conditional Forwarding shows as a little tag; click a tag to switch it on (it fills in) or off, so a list can no longer be misspelled. A Public resolver has no zones, so the field is hidden for that type and appears when the type is Internal or Public + Internal; with no lists made yet it says so. The stored form, the daemon and the command line are unchanged.
+- The "needs at least one zone list" message now reads "An Internal server ..." instead of "A internal server ...".
+
 ## [v499] - 2026-10-21 — Conditional forwarding zone lists as a table
 
 - The zone lists under Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding are now a table like the policy table: a **List** and a **Zone** column, one zone to a row, the rows with the same list name being that list. It has the **Filter rows** box (`test:NAME` keeps the zones the name is in and says which is the most specific), paging (25 to 500 rows), drag to reorder, and the right-click menu (Edit, Copy, Paste from a spreadsheet as `list<TAB>zone` or just zones, Add in the same list, Move, Delete). A row with a zone and no list name is outlined and not saved; a list name with no zone keeps an empty list.

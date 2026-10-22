@@ -5151,7 +5151,7 @@
         ["Local AS", String(c.asn) + (c.router_id ? " · router id " + c.router_id : "")],
         ["FRR", st.installed ? pill("installed", "ok") : pill("not installed", "bad")],
         st.installed ? ["bgpd", st.running ? pill("answering", "ok") : pill("not answering", "bad")] : null,
-        ["Last apply", h("span", {}, pill(st.applied.ok ? "ok" : "failed", st.applied.ok ? "ok" : "bad"), " ", st.applied.detail || "–")],
+        ["Last apply", h("span", {}, pill(st.applied.ok ? "ok" : "failed", st.applied.ok ? "ok" : "bad"), ...(st.applied.ok ? [] : [" ", st.applied.detail || "–"]))],
       ]), ...(st.notes || []).map((n) => h("div", { class: "muted" }, n))));
 
       const live = new Map(st.peers.map((p) => [p.peer, p]));

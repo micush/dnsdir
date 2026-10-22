@@ -1,5 +1,9 @@
 # Changelog
 
+## [v518] - 2026-10-22 — Last apply shows just the tag
+
+- **Anycast ▸ Last apply** shows only the **ok** tag when the last apply worked (no "FRR is configured" beside it); a failure still shows its message.
+
 ## [v517] - 2026-10-22 — Empty new rows go away
 
 - In the list tables, a row added with right-click ▸ **Add** and left empty disappears again when you press Esc or click elsewhere. A row with anything in it stays.

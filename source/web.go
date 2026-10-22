@@ -110,6 +110,7 @@ type session struct {
 	checked  time.Time // last group-membership check
 	ip       string    // the address it signed in from (for the log)
 	readOnly bool      // signed in through the read-only group: may look, not change (see readonly.go)
+	sso      bool      // signed in with Google or Entra ID (sso.go): user is an e-mail address, checked against the list of users
 }
 
 type failRec struct {
@@ -138,6 +139,7 @@ type WebServer struct {
 	lockSeen map[string]time.Time // when a refusal for a locked-out address was last logged (one line a minute, not one per try)
 	loginQ   chan struct{}        // bounds the logins waiting for PAM
 
+	sso     *ssoState
 	applyMu sync.Mutex
 	running *WebConfig
 	srv     *http.Server
@@ -148,7 +150,7 @@ func NewWebServer(mg *Mgmt, status *StatusServer, auth Authenticator) *WebServer
 	w := &WebServer{
 		mg: mg, confPath: mg.confPath, certs: mg.certs, status: status, auth: auth,
 		sessions: map[string]*session{}, fails: map[string]*failRec{}, lockSeen: map[string]time.Time{},
-		loginQ: make(chan struct{}, maxLoginQueue),
+		loginQ: make(chan struct{}, maxLoginQueue), sso: newSSOState(),
 	}
 	d := defaultWeb()
 	w.policy.Store(&d)
@@ -324,6 +326,8 @@ func (w *WebServer) Handler() http.Handler {
 
 	mux.HandleFunc("POST /api/login", w.handleLogin)
 	mux.HandleFunc("GET /api/login/state", w.handleLoginState)
+	mux.HandleFunc("GET /api/sso/start", w.handleSSOStart)
+	mux.HandleFunc("GET /api/sso/callback", w.handleSSOCallback)
 	mux.HandleFunc("POST /api/logout", w.authed(w.handleLogout))
 	mux.HandleFunc("GET /api/session", w.authed(w.handleSession))
 	mux.HandleFunc("GET /api/gateways", w.authed(w.handleGateways))
@@ -466,7 +470,13 @@ func (w *WebServer) lookup(r *http.Request) *session {
 	w.mu.Unlock()
 
 	if recheck {
-		ok, ro, err := w.access(uname, pol)
+		var ok, ro bool
+		var err error
+		if s.sso {
+			ok, ro = pol.ssoLevel(uname)
+		} else {
+			ok, ro, err = w.access(uname, pol)
+		}
 		if err != nil || !ok {
 			warnf("web: session for %q ended — no longer in group %q (signed in from %s)", uname, pol.Group, firstNonEmpty(s.ip, "an unknown address"))
 			w.mu.Lock()
@@ -661,6 +671,13 @@ func (w *WebServer) handleLoginState(rw http.ResponseWriter, r *http.Request) {
 	// Only whether this address is locked and for how long: the thresholds of the policy are not
 	// told to someone who is not logged in.
 	out := map[string]any{"ok": true, "locked": locked}
+	var sso []map[string]string
+	for _, p := range w.ssoCfg().providers() {
+		sso = append(sso, map[string]string{"id": p.id, "title": p.title})
+	}
+	if len(sso) > 0 {
+		out["sso"] = sso
+	}
 	if locked {
 		out["retry_after"] = int(wait.Seconds()) + 1
 	}
@@ -789,7 +806,7 @@ func (w *WebServer) sessionInfo(s *session) map[string]any {
 	return map[string]any{
 		"ok": true, "user": s.user, "csrf": s.csrf, "version": version(),
 		"hostname": host, "config_path": w.confPath,
-		"idle_minutes": w.policy.Load().SessionIdleMinutes, "read_only": w.ro(s),
+		"idle_minutes": w.policy.Load().SessionIdleMinutes, "read_only": w.ro(s), "sso": s.sso,
 	}
 }
 

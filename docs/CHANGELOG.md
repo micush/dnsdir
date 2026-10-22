@@ -1,5 +1,11 @@
 # Changelog
 
+## [v510] - 2026-10-22 — Sign in with Google or Microsoft
+
+- Single sign-on with **Google** and **Microsoft Entra ID** (OpenID Connect, authorization code flow with PKCE). Set it up under Configure ▸ Web GUI ▸ Single sign-on: the client ID and secret of a web application registered with the provider (Microsoft also needs the tenant ID), and a list of **Users**: an e-mail address and `rw` or `ro` for each. The login page then offers **Sign in with Google** / **Sign in with Microsoft**. Password login through PAM is unchanged.
+- Only addresses on the Users list get in. The ID token's signature (RS256 against the provider's published keys), issuer, audience, expiry and nonce are checked; Microsoft is tied to one tenant; Google addresses must be verified. An SSO session follows the list: removing an address ends its sessions, changing `rw` to `ro` makes them read-only, within a minute.
+- Settings are shared by the cluster; the redirect URI to register is the node's address plus `/api/sso/callback` (or the fixed address in **Address of this console**). The secrets are not shown to read-only accounts.
+
 ## [v509] - 2026-10-22 — The menu item is DNS
 
 - Configure ▸ **DNS proxy** is now Configure ▸ **DNS** (menu, page heading, help titles and the paths named in the help and README).

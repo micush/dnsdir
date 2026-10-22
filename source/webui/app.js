@@ -241,15 +241,24 @@
       h("label", { class: "f" }, "Username", user),
       h("label", { class: "f" }, "Password", pass),
       btn);
+    const ssoBox = h("div", { class: "sso-buttons hidden" });
     root.append(h("div", { class: "login-wrap" }, h("div", { class: "login" },
       h("div", { class: "card" }, h("div", { class: "body" },
         h("h1", {}, "AnyName DNS Director"),
         h("p", { class: "sub" }, "Sign in with your system account"),
-        err, form)))));
+        err, form, ssoBox)))));
     user.focus();
+    // back from a failed single sign-on: say why
+    try {
+      const sp = new URLSearchParams(location.search);
+      if (sp.get("sso_error")) { err.textContent = sp.get("sso_error"); err.classList.remove("hidden"); history.replaceState(null, "", location.pathname); }
+    } catch (_) { /* no message */ }
     // already locked out (page reloaded)? show it before anything is typed
     fetch("/api/login/state", { credentials: "same-origin" }).then((r) => r.json()).then((d) => {
       if (d.locked && d.retry_after) lockFor(d.retry_after);
+      // the providers that are set up: a full-page trip to the provider and back (no script on the way)
+      for (const p of d.sso || []) ssoBox.append(h("a", { class: "btn sso", href: "/api/sso/start?p=" + encodeURIComponent(p.id) }, "Sign in with " + p.title));
+      if ((d.sso || []).length) ssoBox.classList.remove("hidden");
     }).catch(() => { /* the form still works */ });
   }
 
@@ -2252,6 +2261,14 @@
     { shared: true, k: "failed_login_window_minutes", l: "…within this many minutes", t: "int", min: 1 },
     { shared: true, k: "lockout_minutes", l: "Lockout lasts (minutes)", t: "int", min: 1 },
     { shared: true, k: "min_password_length", l: "Minimum password length", t: "int", min: 0, max: 128, hint: "0 = 8" },
+    { section: "Single sign-on", note: "Lets people sign in with a Google or Microsoft account instead of a system password (the password login stays). Register this console with the provider as a web application; its redirect URI is the address of this page followed by /api/sso/callback (https://this-node:53853/api/sso/callback). Only the e-mail addresses in the Users box below may sign in, whatever account they use." },
+    { shared: true, k: "sso_base_url", l: "Address of this console", t: "text", hint: "Optional, https://name:port with no path. Use it when the provider is to send the browser back to one fixed address (a cluster behind one name); empty uses the address the browser used." },
+    { shared: true, k: "sso_google_client_id", l: "Google client ID", t: "text" },
+    { shared: true, k: "sso_google_client_secret", l: "Google client secret", t: "secret" },
+    { shared: true, k: "sso_entra_tenant", l: "Microsoft tenant ID", t: "text", hint: "The Directory (tenant) ID, a GUID. Only accounts of this organisation can sign in." },
+    { shared: true, k: "sso_entra_client_id", l: "Microsoft client ID", t: "text", hint: "The Application (client) ID." },
+    { shared: true, k: "sso_entra_client_secret", l: "Microsoft client secret", t: "secret" },
+    { shared: true, k: "sso_users", l: "Users", t: "list", wide: true, hint: "One per line: the e-mail address, then rw (may change settings) or ro (may only look). No level means ro. Example: alice@example.com rw" },
   ];
   const SNMP_FIELDS = [
     { shared: true, k: "snmp_communities", l: "Community strings", t: "list", wide: true },
@@ -2892,6 +2909,10 @@
           if (f.t === "list") return ls;
           return ls.map((s) => { const p = s.split(/\s+/); return { name: p[0], type: (p[1] || "A").toUpperCase() }; });
         };
+      } else if (f.t === "secret") {
+        input = h("input", { type: "password", autocomplete: "new-password", spellcheck: "false" });
+        input.value = v == null ? "" : v;
+        get = () => input.value.trim();
       } else if (f.t === "port") {
         // a listen address kept as ":53853" in the file is shown as the port alone; one with a host in front is shown as it is
         input = h("input", { type: "text", inputmode: "numeric", autocomplete: "off", spellcheck: "false" });

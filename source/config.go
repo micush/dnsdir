@@ -1329,6 +1329,8 @@ type WebConfig struct {
 	// --user-password) may have.  0, which is also what an absent key means and what is not written to the file
 	// (so a config that never set it stays readable by older versions), is the default, 8.
 	MinPasswordLength int `json:"min_password_length,omitempty"`
+	// SSOConfig is single sign-on with Google or Microsoft Entra ID (sso.go); its keys are flat in the web block.
+	SSOConfig
 }
 
 const (
@@ -1394,6 +1396,9 @@ func (w *WebConfig) Validate() error {
 	}
 	if w.LockoutMinutes < 1 || w.LockoutMinutes > 10080 {
 		return errors.New("web: lockout_minutes must be 1-10080")
+	}
+	if err := w.SSOConfig.validateSSO(); err != nil {
+		return err
 	}
 	if w.MinPasswordLength < 0 || w.MinPasswordLength > maxMinPasswordLength {
 		return fmt.Errorf("web: min_password_length must be 1-%d (empty or 0 means the default, %d)", maxMinPasswordLength, defaultMinPassword)

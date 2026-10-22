@@ -208,6 +208,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 pre.help { margin: 0; padding: 1rem; overflow-x: auto; white-space: pre; line-height: 1.5; }
 
 /* ── login ── */
+.sso-buttons { display: grid; gap: .5rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.sso-buttons a.btn { text-align: center; text-decoration: none; }
 .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 1rem; }
 .login { width: 100%; max-width: 360px; }
 .login .card { margin: 0; }

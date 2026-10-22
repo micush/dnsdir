@@ -359,7 +359,7 @@ func buildCanvas(dc *DaemonConfig, rows []SnapshotRow, pools []poolInfo) []Canva
 			case len(cg.Servers) > 0 && nPaused == len(cg.Servers):
 				cf.Status, cf.Detail = "bad", "every DNS server is paused, so clients cannot be answered"
 			case !fbUp && generalN > 0 && generalUp == 0 && generalN < len(cg.Servers):
-				cf.Status, cf.Detail = "bad", "no DNS server for ordinary names is in use (only servers for zones are), so most queries cannot be answered"
+				cf.Status, cf.Detail = "warn", "no DNS server for ordinary names is in use, so only the zones that have a server are answered (the rest get SERVFAIL)"
 			case !active:
 				cf.Status, cf.Detail = "warn", "this node is not serving the gateway yet (state: "+state+")"
 			case !answering:

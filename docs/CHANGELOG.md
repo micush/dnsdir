@@ -1,5 +1,9 @@
 # Changelog
 
+## [v505] - 2026-10-21 — Gateway is amber, not red, when only the zone servers are up
+
+- Topology: when no server for ordinary names is in use but a server for a zone still is (every Public and Public + Internal server is down for ordinary names, the Internal ones are up), the gateway square is now **amber** ("only the zones that have a server are answered") instead of red. Red now means nothing can be answered at all. Nothing else changes: the routing is the same, and the anycast address is still announced.
+
 ## [v504] - 2026-10-21 — Test a name box removed
 
 - Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding no longer has a **Test a name** box; the `test:NAME` filter on the Zone lists table shows the zone and list a name falls in. The servers a name would use are still available on the command line (`--fwd-route NAME --group N`), which the help now says.

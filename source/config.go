@@ -567,6 +567,14 @@ type DNSConfig struct {
 	// type that has no null address): the answer carries a made-up SOA whose TTL and MINIMUM are this (RFC 2308), so a
 	// client that caches negative answers stops asking.  0 means the default, 14400 (4 hours).
 	PolicyBlockTTL int `json:"policy_block_ttl,omitempty"`
+	// BlockLists are the block lists in use (blocklists.go): lists on offer by id, and lists of your own by name and
+	// address.  Every node downloads them itself.  BlockAction is the answer a blocked name gets: "" or "null" (0.0.0.0
+	// and ::), "nxdomain", "nodata" or "refused".  BlockUpdateHours is how often the lists are fetched again (0 = 24).
+	// AllowDomains are names (and everything below them) that no block list and no blocking policy row refuses.
+	BlockLists       []BlockListRef `json:"block_lists,omitempty"`
+	BlockAction      string         `json:"block_action,omitempty"`
+	BlockUpdateHours int            `json:"block_update_hours,omitempty"`
+	AllowDomains     []string       `json:"allow_domains,omitempty"`
 	// ClientRate limits each client (an IPv4 address or an IPv6 /64) to this many queries a second; 0 (the default)
 	// is no limit. ClientBurst is how many it may send at once (0 = twice the rate, at least 10). ClientAction is what
 	// a client over its rate gets: "drop" (the default, kept as empty in the file), "truncate" (UDP: a short answer
@@ -1093,6 +1101,9 @@ func (c *DNSConfig) followSettings(shared DNSConfig) {
 	}
 	c.PolicyOn, c.PolicyLog, c.PolicyBlockTTL = shared.PolicyOn, shared.PolicyLog, shared.PolicyBlockTTL
 	c.Policy = clonePolicy(shared.Policy)
+	c.BlockLists = append([]BlockListRef(nil), shared.BlockLists...)
+	c.BlockAction, c.BlockUpdateHours = shared.BlockAction, shared.BlockUpdateHours
+	c.AllowDomains = append([]string(nil), shared.AllowDomains...)
 	c.ForwardLists = append([]string(nil), shared.ForwardLists...)
 	if len(c.ForwardLists) == 0 {
 		c.ForwardLists = nil
@@ -1641,6 +1652,9 @@ func (d *DNSConfig) validateClientNames() error {
 	}
 	if d.PolicyBlockTTL < 0 || d.PolicyBlockTTL > 604800 {
 		return errors.New("dns: policy_block_ttl is 0-604800 seconds (0: 14400)")
+	}
+	if err := d.validateBlocking(); err != nil {
+		return err
 	}
 	if d.RegisterTTL < 0 || d.RegisterTTL > 86400 {
 		return errors.New("dns: register_ttl is 0-86400 seconds (0: 300)")

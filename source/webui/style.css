@@ -511,6 +511,8 @@ table.policy tr.incomplete td:nth-child(4) { box-shadow: inset 0 0 0 2px var(--a
 /* Configure ▸ DNS proxy: tabs */
 .dtabs { display: flex; flex-wrap: wrap; gap: .25rem; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
 .dtab { background: transparent; border: 0; border-bottom: 3px solid transparent; color: var(--muted); font: inherit; padding: .6rem 1rem; margin-bottom: -1px; cursor: pointer; min-height: 44px; }
+.dtabs.sub { margin-top: -.25rem; }
+.dtab.sub { padding: .4rem .8rem; min-height: 36px; font-size: .92rem; }
 .dtab:hover { color: var(--text); }
 .dtab.on { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
 .dtab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
@@ -638,6 +640,18 @@ svg.cv text.srvtype { font-size: 11px; font-weight: 700; fill: var(--muted); let
 table.policy.zones th:nth-child(2) { width: 30%; }
 table.policy.zones th:nth-child(3) { width: auto; }
 table.policy.zones tr.incomplete td:nth-child(2) { box-shadow: inset 0 0 0 2px var(--amber); }
+.blocklists .bl-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-bottom: .4rem; }
+.blocklists .bl-bar .hint { margin: 0; }
+.blocklists input.bl-probe { width: 22rem; max-width: 100%; }
+.blocklists .bl-group { margin: .6rem 0; }
+.blocklists .bl-group h4 { margin: .2rem 0 .3rem; font-size: .9rem; }
+.blocklists .bl-row { display: flex; gap: .6rem; align-items: flex-start; padding: .3rem 0; border-top: 1px solid var(--line, rgba(128,128,128,.25)); cursor: pointer; }
+.blocklists .bl-row input { margin-top: .25rem; flex: 0 0 auto; }
+.blocklists .bl-row .pill { margin-left: .5rem; }
+.blocklists .bl-state { font-size: .8rem; }
+.blocklists .bl-err { color: var(--warn, #b26a00); }
+.blocklists .bl-custom { display: grid; grid-template-columns: 12rem 1fr auto; gap: .4rem; margin: .3rem 0; align-items: center; }
+.blocklists .bl-custom .bl-state { grid-column: 1 / -1; }
 .checks { position: relative; padding: .35rem 0; }
 .checks .tags { display: flex; flex-wrap: wrap; gap: .35rem; max-height: 8rem; overflow-y: auto; }
 .checks .tags:not(:empty) { margin-bottom: .4rem; }

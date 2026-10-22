@@ -2212,6 +2212,11 @@
     { shared: true, k: "policy", l: "Policy rows", t: "policy", wide: true },
     { section: "Conditional Forwarding" },
     { shared: true, k: "forward_lists", l: "Zone lists", t: "zones", wide: true },
+    { section: "Block Lists", note: "Tick the lists to block. Every node downloads its own copy (and keeps the last good one if a download fails). A listed domain and every name below it gets the answer chosen below. Order for a query: Always allow, then the policy rows (a row that blocks is skipped for an allowed name), then the block lists, then the servers." },
+    { shared: true, k: "block_lists", l: "Lists", t: "blocklists", wide: true },
+    { shared: true, k: "block_action", l: "Blocked answer", t: "select", options: ["null", "nxdomain", "nodata", "refused"], hint: "null = 0.0.0.0 and ::, the default. nxdomain = the name does not exist. nodata = no records. refused = REFUSED." },
+    { shared: true, k: "block_update_hours", l: "Update every (hours)", t: "int", min: 0, max: 720, hint: "0 = 24" },
+    { shared: true, k: "allow_domains", l: "Always allow", t: "list", wide: true, hint: "One domain per line. A name here, and every name below it, is never blocked by a block list or by a policy row that blocks (null, nxdomain, nodata, refused). Rows that forward or rewrite still apply." },
     { section: "Client Rate Limiting", note: "Applies to every gateway that uses these settings, over UDP, TCP, DoT and DoH, before the cache. This node itself is always allowed and never limited. Counters are per node." },
     { shared: true, k: "allowed_clients", l: "Allowed clients", t: "list", wide: true, hint: "Networks that may use the proxy, one per line: 10.0.0.0/8, 192.168.1.5, 2001:db8::/32. Empty = everyone. Anyone else is answered REFUSED (dynamic updates too)." },
     { shared: true, k: "client_rate", l: "Queries per second", t: "int", min: 0, max: 10000000, hint: "0 = no limit. A client is one IPv4 address or one IPv6 /64." },
@@ -2519,6 +2524,115 @@
     };
   }
 
+  // Configure ▸ DNS proxy ▸ Resolution ▸ Block Lists: the lists on offer, grouped, each with a tick; your own lists (a name and an
+  // address) below them.  The tick state is what is saved (block_lists: [{id}] and [{name, url}]); the numbers beside each list
+  // are this node's own (it downloads its own copy), read from /api/blocklists.
+  // what /api/blocktest says, in a sentence (the saved settings and the lists downloaded on this node; policy rows are not looked at)
+  function blockVerdictText(t) {
+    if (t.allowed) return t.list ? t.name + " is on the Always allow list, so " + t.title + " does not block it." : t.name + " is on the Always allow list; no block list has it.";
+    return t.list ? t.name + " is blocked by " + t.title + " (answer: " + t.action + ")." : t.name + " is on no block list.";
+  }
+  function blockListsEditor(refs) {
+    const sel = new Set(), urls = {}, customs = [];
+    for (const r of refs || []) {
+      if (r.id) { sel.add(r.id); if (r.url) urls[r.id] = r.url; } else customs.push({ name: r.name || "", url: r.url || "" });
+    }
+    let report = null, failed = "";
+    const cells = new Map();   // list id (or custom address) -> the cell that shows its state
+    const root = h("div", { class: "blocklists" });
+    const msg = h("p", { class: "hint" }, "Reading the lists on offer…");
+    const num = (n) => Number(n || 0).toLocaleString();
+    const stateOf = (l, k) => {
+      if (!l) return h("span", { class: "muted" }, sel.has(k) || k.includes("://") ? "not saved yet" : "");
+      const bits = [];
+      if (l.error) bits.push(h("span", { class: "bl-err" }, (l.entries ? "last download failed, the older copy is in use: " : "download failed: ") + l.error));
+      else if (l.updated) bits.push(h("span", { class: "muted" }, "updated " + new Date(l.updated * 1000).toLocaleString()));
+      else bits.push(h("span", { class: "muted" }, "waiting for the first download"));
+      if (l.entries) bits.push(h("span", { class: "muted" }, " · " + num(l.entries) + " domains"));
+      if (l.blocked) bits.push(h("span", { class: "muted" }, " · " + num(l.blocked) + " blocked here"));
+      return h("span", {}, ...bits);
+    };
+    const paint = () => {
+      for (const [k, td] of cells) {
+        const l = report && report.lists.find((x) => (x.custom ? x.url === k : x.id === k));
+        td.replaceChildren(stateOf(l, k));
+      }
+      if (report) msg.textContent = report.error ? report.error : (report.domains ? num(report.domains) + " different domains are blocked on this node." : "No list is downloaded on this node yet.");
+    };
+    const risk = { low: "", moderate: "may break some sites", high: "breaks sites" };
+    function build() {
+      cells.clear();
+      const parts = [];
+      if (!report) { root.replaceChildren(msg); return; }
+      let group = null, box = null;
+      for (const c of report.catalog) {
+        if (c.group !== group) { group = c.group; box = h("div", { class: "bl-group" }, h("h4", {}, group)); parts.push(box); }
+        const cb = h("input", { type: "checkbox", checked: sel.has(c.id), "aria-label": c.name });
+        cb.addEventListener("change", () => { if (cb.checked) sel.add(c.id); else sel.delete(c.id); });
+        const st = h("div", { class: "bl-state" });
+        cells.set(c.id, st);
+        box.append(h("label", { class: "bl-row" }, cb,
+          h("div", {}, h("b", {}, c.name), c.risk && risk[c.risk] ? h("span", { class: "pill warn" }, risk[c.risk]) : null,
+            h("div", { class: "hint" }, c.desc + (c.entries ? " About " + num(c.entries) + " domains." : "")), st)));
+      }
+      const cbox = h("div", { class: "bl-group" }, h("h4", {}, "Your own lists"));
+      const addRow = (c) => {
+        const name = h("input", { type: "text", placeholder: "Name", "aria-label": "List name", autocomplete: "off", spellcheck: "false", value: c.name });
+        const url = h("input", { type: "text", placeholder: "https://example.com/list.txt (hosts file, domain list or ad-block rules)", "aria-label": "List address", autocomplete: "off", spellcheck: "false", value: c.url });
+        name.addEventListener("input", () => { c.name = name.value; });
+        url.addEventListener("input", () => { c.url = url.value; });
+        const del = h("button", { type: "button", class: "btn small", title: "Remove this list", "aria-label": "Remove this list" }, "✕");
+        const st = h("div", { class: "bl-state" });
+        if (c.url) cells.set(c.url.trim(), st);
+        const row = h("div", { class: "bl-custom" }, name, url, del, st);
+        del.addEventListener("click", () => { customs.splice(customs.indexOf(c), 1); row.remove(); row.dispatchEvent(new Event("change", { bubbles: true })); });
+        cbox.insertBefore(row, add);
+      };
+      const add = h("button", { type: "button", class: "btn small" }, "Add a list");
+      cbox.append(add);
+      add.addEventListener("click", () => { const c = { name: "", url: "" }; customs.push(c); addRow(c); });
+      customs.forEach(addRow);
+      const upd = h("button", { type: "button", class: "btn small", title: "Download every list now instead of waiting for the next update" }, "Update now");
+      upd.addEventListener("click", async () => {
+        upd.disabled = true;
+        try { await api("POST", "/api/blocklists/update", { name: "" }); msg.textContent = "Downloading…"; } catch (e) { msg.textContent = e.message; }
+        for (const ms of [3000, 10000, 30000]) setTimeout(load, ms);
+        setTimeout(() => { upd.disabled = false; }, 3000);
+      });
+      const probe = h("input", { type: "text", class: "bl-probe", placeholder: "Check a name, e.g. ads.example.com", "aria-label": "Check a name against the block lists", autocomplete: "off", spellcheck: "false" });
+      const verdict = h("span", { class: "hint" }, "");
+      probe.addEventListener("change", (e) => e.stopPropagation());   // not a setting
+      probe.addEventListener("keydown", async (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        const n = probe.value.trim();
+        if (!n) { verdict.textContent = ""; return; }
+        try { verdict.textContent = blockVerdictText((await api("GET", "/api/blocktest?name=" + encodeURIComponent(n))).data); } catch (er) { verdict.textContent = er.message; }
+      });
+      root.replaceChildren(h("div", { class: "bl-bar" }, upd, msg), h("div", { class: "bl-bar" }, probe, verdict), ...parts, cbox);
+      paint();
+    }
+    async function load() {
+      try { report = (await api("GET", "/api/blocklists")).data; failed = ""; } catch (e) { failed = e.message; }
+      if (!root.isConnected && cells.size) return;
+      if (!report) { msg.textContent = "The lists on offer could not be read: " + failed; return; }
+      if (!cells.size) build(); else paint();
+    }
+    root.replaceChildren(msg);
+    load();
+    return {
+      el: root,
+      get: () => {
+        const out = [];
+        // lists on offer in the order they are shown, then your own; when the catalog could not be read the saved ones stay as they were
+        const ids = report ? report.catalog.map((c) => c.id) : [...sel];
+        for (const id of ids) if (sel.has(id)) out.push(urls[id] ? { id, url: urls[id] } : { id });
+        for (const c of customs) if (c.name.trim() || c.url.trim()) out.push({ name: c.name.trim(), url: c.url.trim() });
+        return out;
+      },
+    };
+  }
+
   // Configure ▸ DNS proxy ▸ Resolution ▸ Conditional Forwarding: the zone lists as a table, one zone to a row (List, Zone).
   // The rows with the same list name are that list; it is stored as one "name: zone, zone" line per list (forward_lists),
   // in the order the lists first appear and the zones in row order (the first zone of a list is the one an Internal server is
@@ -2754,6 +2868,12 @@
           h("span", { class: "hint" }, "One zone to a row; the rows with the same list name are that list. A zone covers itself and every name below it. Give servers their lists on the Topology page. Type test:NAME in the filter to see which zone a name falls in.")));
         continue;
       }
+      if (f.t === "blocklists") {
+        const bl = blockListsEditor(v || []);
+        getters[f.k] = bl.get;
+        grid.append(h("div", { class: "f wide" }, h("span", {}, f.l, sharedTag(f)), bl.el));
+        continue;
+      }
       if (f.t === "policy") {
         const pol = policyTable(v || []);
         getters[f.k] = pol.get;
@@ -2831,7 +2951,7 @@
           ["Servers", ["Upstream servers"]],
           ["Health & balancing", ["Load Balancing", "Timing"]],
           ["Listeners", ["Listeners"]],
-          ["Resolution", ["Policy-Based Resolution", "Sort List", "Conditional Forwarding"]],
+          ["Resolution", ["Policy-Based Resolution", "Sort List", "Conditional Forwarding", "Block Lists"]],
           ["Cache & ECS", ["Cache", "Client network (ECS)"]],
           ["Clients", ["Client Rate Limiting"]],
         ];
@@ -2841,6 +2961,25 @@
           const i = TABS.findIndex(([, names]) => names.some((n) => n.toLowerCase() === titleOf(c).toLowerCase()));   // the headings are in title case ("Upstream Servers"), the lists here are not
           panes[i < 0 ? TABS.length - 1 : i].append(c);
         }
+        // Resolution holds four functions: each gets a tab of its own under the main ones (every card stays in the page)
+        const resI = TABS.findIndex(([n]) => n === "Resolution");
+        const subCards = TABS[resI][1].map((n) => [...panes[resI].children].find((c) => titleOf(c).toLowerCase() === n.toLowerCase())).filter(Boolean);
+        const subBtns = subCards.map((c, j) => h("button", { type: "button", role: "tab", class: "dtab sub", onclick: () => showSub(j) }, titleOf(c)));
+        function showSub(j, focus) {
+          state.resTab = j;
+          subCards.forEach((c, k) => { c.hidden = k !== j; });
+          subBtns.forEach((b, k) => { b.setAttribute("aria-selected", k === j ? "true" : "false"); b.tabIndex = k === j ? 0 : -1; b.classList.toggle("on", k === j); });
+          if (focus) subBtns[j].focus();
+        }
+        const subStrip = h("div", { class: "dtabs sub", role: "tablist", "aria-label": "Resolution functions" }, subBtns);
+        subStrip.addEventListener("keydown", (e) => {
+          const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+          if (!d) return;
+          e.preventDefault();
+          showSub((state.resTab + d + subCards.length) % subCards.length, true);
+        });
+        panes[resI].prepend(subStrip);
+        showSub(state.resTab >= 0 && state.resTab < subCards.length ? state.resTab : 0);
         const buttons = TABS.map(([name], i) => h("button", { type: "button", role: "tab", class: "dtab", onclick: () => show(i) }, name));
         function show(i, focus) {
           state.dnsTab = i;

@@ -1,5 +1,12 @@
 # Changelog
 
+## [v508] - 2026-10-22 — Block lists, an Always allow list, and a tab for each Resolution function
+
+- Configure ▸ DNS ▸ Resolution now has a tab for each function: Policy-Based Resolution, Sort List, Conditional Forwarding and **Block Lists**.
+- Configure ▸ DNS ▸ Resolution ▸ **Block Lists**: tick well-known block lists (HaGeZi Light to Ultimate and its threat-intelligence lists, OISD, StevenBlack, Frogeye) or add your own by address. Each node downloads its own copy every 24 hours (**Update every**, **Update now**), keeps the last good copy on disk when a download fails, and shows the update time, size and number of queries blocked for each list. A listed domain blocks itself and everything below it. **Blocked answer** is null (default), nxdomain, nodata or refused.
+- **Always allow**: names that no block list and no blocking policy row (null, nxdomain, nodata, refused) refuses. Forwarding, rewriting and `pool` rows still apply. Order for a query: Always allow, policy rows, block lists, conditional forwarding and servers.
+- **Check a name** box and `--block-status`, `--block-update ID|all`, `--block-test NAME`. New settings `block_lists`, `block_action`, `block_update_hours`, `allow_domains` are shared by the cluster. The address of a list is the publisher's and may change: a list that cannot be downloaded says why on its row.
+
 ## [v507] - 2026-10-21 — Rank and blue lines per group of servers
 
 - Topology: with conditional forwarding on, the **#** under a server and the blue (spread) lines were worked out over every server at once, so an internal server that was the fastest overall took the only blue line and the public servers got none, although queries are spread within each group separately. Now each server is ranked in its own group (the servers for ordinary names, or the servers of its zones) and the fastest of each group gets a blue line: the fastest public server and the fastest internal one, as the daemon really routes. Without conditional forwarding nothing changes. The routing itself is unchanged; this only fixes the drawing and the Statistics rank column.

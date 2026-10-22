@@ -288,6 +288,10 @@ A name goes to the servers of the **most specific zone** it is in (a list for `d
 - **Test a name** in the same section (or `dnsdir --fwd-route NAME --group N`) shows the zone, the lists and the servers a name would use on this node, in the order they would be tried. It reads the running settings and sends nothing.
 - The gateway shows red ("no DNS server for ordinary names is in use") when only Internal servers are up, because most queries cannot be answered.
 
+### Block lists
+
+Configure ▸ DNS ▸ Resolution ▸ **Block Lists** refuses the names on well-known lists (HaGeZi, OISD, StevenBlack and others; tick the ones you want) and any list of your own (a name and an address). Every node downloads its own copy every 24 hours (`block_update_hours`), keeps the last good copy under its state directory (`blocklists/`) when a download fails, and shows each list's update time, size and blocked count. A listed domain blocks itself and every name below it; hosts files, plain domain lists, `*.domain` and `||domain^` rules are read. The answer is `block_action`: `null` (default, `0.0.0.0` and `::`), `nxdomain`, `nodata` or `refused`. **Always allow** (`allow_domains`) names that are never blocked, by a list or by a blocking policy row. Order: Always allow, policy rows (blocking rows skipped for allowed names), block lists, then conditional forwarding and the servers. Settings are shared by the cluster; downloads and counters are per node. Not included: regex rules, per-client lists, CNAME-cloak blocking. CLI: `--block-status`, `--block-update ID|all`, `--block-test NAME`.
+
 ### Client rate limiting
 
 These settings are in the top-level `dns` block (Configure ▸ DNS proxy ▸ Clients ▸ Client Rate Limiting). Every gateway uses them, including one with its own `dns` block, whose copy of these values is ignored.
@@ -453,6 +457,7 @@ dnsdir --canvas-set server --group 1 --server 10.0.0.53 --label dns-a   # a serv
 dnsdir --canvas-set server --group 1 --server 10.0.0.53 --label dns-a.example.com   # a full name is also registered in DNS for 10.0.0.53 (RFC 2136); the previous full name's record is removed
 dnsdir --canvas-set server --group 1 --server 10.0.0.53 --server-type internal --lists corp,dev   # conditional forwarding: public | internal | both (--lists - clears)
 dnsdir --fwd-route host.corp.example --group 1   # where a name would go: its zone, lists and servers
+dnsdir --block-status                  # block lists in use on this node: domains, last update, queries blocked (also --block-update ID|all, --block-test NAME)
 dnsdir --canvas-add anycast --group 1 --address 203.0.113.53   # an anycast address (--canvas-del anycast removes one)
 dnsdir --canvas-set gateway --group 1 --anycast A,B             # or replace the whole list (--anycast - clears)
 dnsdir --canvas-del gateway --group 1 --yes

@@ -480,6 +480,31 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 	// a name for an address (reverse DNS) or an address for a name, for the Add DNS server form
 	case "dns.lookup":
 		return hostLookup(a.Lookup)
+	// block lists (Configure ▸ DNS proxy ▸ Resolution ▸ Block Lists, --block-status, --block-update, --block-test)
+	case "blocklists.status":
+		if bm := theBlocks.Load(); bm != nil {
+			return bm.Report(), nil
+		}
+		return BlockReport{Catalog: blockCatalog, Lists: []BlockStatus{}}, nil
+	case "blocklists.update":
+		bm := theBlocks.Load()
+		if bm == nil {
+			return nil, errors.New("block lists are not available on this node")
+		}
+		if err := bm.UpdateNow(strings.TrimSpace(a.QName)); err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true}, nil
+	case "blocklists.test":
+		n := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(a.QName), "."))
+		if n == "" {
+			return nil, errors.New("which name? give a domain name")
+		}
+		dc, _, err := m.LiveConfig()
+		if err != nil {
+			return nil, err
+		}
+		return dc.DNS.BlockTest(n), nil
 	// where a name would go with conditional forwarding: its zone, lists and servers (Configure ▸ DNS proxy ▸ Conditional Forwarding, --fwd-route)
 	case "fwd.route":
 		gid, err := strconv.Atoi(strings.TrimSpace(a.QGW))

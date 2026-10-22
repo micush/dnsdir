@@ -31,7 +31,7 @@ type cliFlags struct {
 	userAdd, userPasswd, userExpiry, userDel, userGrant, userRevoke, expires, hostname                                                                                                                                                               *string
 	power, powerAt                                                                                                                                                                                                                                   *string
 	powerIn                                                                                                                                                                                                                                          *int
-	bgp, bgpDisable, bgpEnable, logShow, statsShow, statsClear, cacheClear, hostShow, dnsUpdates, nodePause, nodeResume, nodeStatus, allNodes, captureList                                                                                           *bool
+	blockStatus, bgp, bgpDisable, bgpEnable, logShow, statsShow, statsClear, cacheClear, hostShow, dnsUpdates, nodePause, nodeResume, nodeStatus, allNodes, captureList                                                                              *bool
 	logMin, logGrep, logSince, logLines, statsRange, statsRcode, statsClient, statsDomain, whoisName, scanAddr, pingAddr, traceAddr, lookupAddr, cacheFlush, dnsLookup, hostRange, captureIface, captureSecs, captureFilter, captureFile, tshootFile *string
 	asn, routerID, asPrepend, nbrAdd, nbrDel, nbrDisable, nbrEnable, remoteAS, descr, passwd, multihop, keepalive, hold                                                                                                                              *string
 	updateUpload, updatePush, updateCancel, updateAuto, updateRepo, clusterFailover                                                                                                                                                                  *string
@@ -39,7 +39,7 @@ type cliFlags struct {
 	canvasPause, canvasResume, canvasMove, canvasAdd, canvasDel, canvasSet, vip, vip6, ifname, server, name, qtype, ecs, label, anycast, address, scope, node, realMACs                                                                              *string
 	pos, group, ecsV4, ecsV6, spreadBand, downPercent, failThreshold, maxAttempts                                                                                                                                                                    *int
 	serverStats, gatewayStats, spread, lbMode                                                                                                                                                                                                        *string
-	serverType, serverLists, fwdRoute                                                                                                                                                                                                                *string
+	serverType, serverLists, fwdRoute, blockUpdate, blockTest                                                                                                                                                                                        *string
 	latencyAlpha                                                                                                                                                                                                                                     *float64
 }
 
@@ -60,7 +60,7 @@ func registerCLIFlags(fs *flag.FlagSet) *cliFlags {
 		canvas: b("canvas"), vmacTest: b("test-vmac"), tshoot: b("tshoot"), tshootCapture: b("tshoot-capture"), tshootFile: s("tshoot-file"), realMACs: s("real-macs"), canvasAdd: s("canvas-add"), canvasDel: s("canvas-del"),
 		canvasSet: s("canvas-set"), canvasMove: s("canvas-move"), pos: fs.Int("to", 0, ""), canvasPause: s("canvas-pause"), canvasResume: s("canvas-resume"), vip6: s("vip6"), ecs: s("ecs"), label: s("label"), anycast: s("anycast"), address: s("address"), scope: s("scope"), node: s("node"),
 		ecsV4: fs.Int("ecs-v4", 0, ""), ecsV6: fs.Int("ecs-v6", 0, ""),
-		serverType: s("server-type"), serverLists: s("lists"), fwdRoute: s("fwd-route"),
+		serverType: s("server-type"), serverLists: s("lists"), fwdRoute: s("fwd-route"), blockUpdate: s("block-update"), blockTest: s("block-test"), blockStatus: b("block-status"),
 		serverStats: s("server-stats"), gatewayStats: s("gateway-stats"), spread: s("spread"), lbMode: s("lb"), spreadBand: fs.Int("spread-band", 0, ""), downPercent: fs.Int("down-percent", 0, ""),
 		failThreshold: fs.Int("fail-threshold", 0, ""), maxAttempts: fs.Int("max-attempts", 0, ""), latencyAlpha: fs.Float64("latency-alpha", 0, ""),
 		vip: s("vip"), ifname: s("interface"), server: s("server"), name: s("name"), qtype: s("type"),
@@ -363,6 +363,21 @@ func (f *cliFlags) run(sock string) bool {
 		runServerStats(sock, f)
 	case *f.dnsUpdates:
 		runDNSUpdates(sock)
+	case *f.blockStatus:
+		var r BlockReport
+		decode(op(sock, "blocklists.status", nil), &r)
+		printBlockReport(r)
+	case *f.blockUpdate != "":
+		id := *f.blockUpdate
+		if id == "all" {
+			id = ""
+		}
+		op(sock, "blocklists.update", map[string]string{"name": id})
+		fmt.Println("downloading in the background; --block-status shows the result")
+	case *f.blockTest != "":
+		var r BlockTest
+		decode(op(sock, "blocklists.test", map[string]string{"name": *f.blockTest}), &r)
+		fmt.Println(r.Text())
 	case *f.fwdRoute != "":
 		var r FwdRoute
 		decode(op(sock, "fwd.route", map[string]string{"name": *f.fwdRoute, "gw": strconv.Itoa(*f.group)}), &r)

@@ -128,6 +128,9 @@ the web GUI):
                                                  after 5 minutes offline; auto = on from 3 members)
                    --cluster-delete ADDR  --cluster-unremove ADDR  --cluster-leave  --cluster-sync
                    (GUI: the Node menu, top right, configures any member)
+  Block lists      --block-status  --block-update ID|all  --block-test NAME
+                   (lists, their answer, and the always-allow names are set in the GUI:
+                   Configure > DNS proxy > Resolution > Block Lists)
   Upgrade          --update-status  --update-history  --update-upload FILE
                    --update-apply  --update-push all|ADDR,...
                    --update-cancel all|ADDR,...  --update-auto on|off

@@ -23,6 +23,7 @@ import (
 type Mgmt struct {
 	confPath string
 	stateDir string
+	blocks   *BlockManager // this node's block lists (blocklists.go)
 
 	capture captureState // this node's Capture page
 	capjobs capJobs      // the cluster-wide capture
@@ -84,6 +85,10 @@ func NewMgmt(confPath, stateDir string, dc *DaemonConfig) (*Mgmt, error) {
 	m.sched = newScheduler(m, stateDir)
 	m.sched.SetTasks(dc.DNS.Schedule)
 	m.bgp = NewBGPManager(stateDir)
+	hn, _ := os.Hostname()
+	m.blocks = NewBlockManager(filepath.Join(stateDir, "blocklists"), hn+"|"+stateDir)
+	theBlocks.Store(m.blocks)
+	m.blocks.Apply(dc.DNS.BlockLists, dc.DNS.BlockUpdateHours)
 	w := dc.Web
 	m.webPolicy.Store(&w)
 	var err error
@@ -120,6 +125,7 @@ func (m *Mgmt) OnConfigLoaded(dc *DaemonConfig) {
 	m.webPolicy.Store(&w)
 	m.bgp.Apply(dc)
 	m.sched.SetTasks(dc.DNS.Schedule)
+	m.blocks.Apply(dc.DNS.BlockLists, dc.DNS.BlockUpdateHours)
 	m.certs.Refresh()
 	if _, raw, err := m.LiveConfig(); err == nil {
 		if _, err := os.Stat(m.confPath); err == nil { // don't version a config that doesn't exist yet

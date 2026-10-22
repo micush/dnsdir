@@ -348,6 +348,8 @@ type Pool struct {
 	logSec   atomic.Int64 // the second policy matches are being counted for, how many were logged, how many were not
 	logN     atomic.Int64
 	logSupp  atomic.Int64
+	allow    nameSet       // names no block list or blocking policy row refuses (blocklists.go)
+	blockRow sync.Map      // block list key -> *policyRule that answers for it
 	lim      *clientLimits // nil when no client list or rate is configured (clientlimit.go)
 	fwd      *fwdRouter    // nil when no server carries a zone list (fwdzones.go)
 }
@@ -360,6 +362,7 @@ func NewPool(cfg DNSConfig) *Pool {
 	if cfg.PolicyOn {
 		p.policy = buildPolicy(cfg.Policy)
 	}
+	p.allow = newNameSet(cfg.AllowDomains)
 	if cfg.Cache {
 		p.cache = newRespCache(cfg.CacheEntries, cfg.CacheMaxTTL)
 	}

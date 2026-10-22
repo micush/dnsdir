@@ -59,7 +59,9 @@ type policyRule struct {
 	srcSuf    []string
 	rename    bool
 	rec       *localData // local records in place of servers (action polRecord)
-	idx       int        // 1-based place in the table, for the log
+	idx       int        // 1-based place in the table, for the log (0: a block list's row)
+	blockKey  string     // the list that has the name
+	blockList bool       // not a table row: a block list refuses the name
 	desc      string     // what the row does, for the log
 	action    string     // a keyword in place of servers (policyAction): the row answers itself, or hands the query to the pool
 	tag       string     // the servers and destination, as the cache key part for answers that came from them
@@ -391,11 +393,58 @@ func (p *Pool) pindex() *policyIndex {
 // lookup returns the first row, in table order, that applies to a query from client for the question in qi, whatever
 // it does (a "pool" row included), or nil.  Queries the daemon makes itself (no client) never match.
 func (p *Pool) lookup(client netip.Addr, qi *qinfo) *policyRule {
-	if len(p.policy) == 0 || !client.IsValid() || !qi.ok {
+	if !client.IsValid() || !qi.ok {
 		return nil
 	}
 	client = client.Unmap()
 	name := strings.ToLower(strings.TrimSuffix(qi.name(), "."))
+	allowed := p.allow.has(name)
+	if r := p.lookupRow(client, name, allowed); r != nil {
+		return r
+	}
+	if allowed {
+		return nil
+	}
+	return p.blockVerdict(name)
+}
+
+// blockVerdict is the row that answers for name when a block list has it, or nil.  (The list's counter goes up in logPolicy,
+// which runs once for each query a client sends; the lookup runs again when the answer is made.)
+func (p *Pool) blockVerdict(name string) *policyRule {
+	m := theBlocks.Load()
+	if m == nil {
+		return nil
+	}
+	key, ok := m.Lookup(name)
+	if !ok {
+		return nil
+	}
+	if v, ok := p.blockRow.Load(key); ok {
+		return v.(*policyRule)
+	}
+	act := p.cfg.BlockAction
+	if act == "" {
+		act = polNull
+	}
+	r := &policyRule{anyClient: true, anyName: true, action: act, tag: "block", desc: "block list " + m.titleOf(key) + ": " + act, blockList: true, blockKey: key}
+	v, _ := p.blockRow.LoadOrStore(key, r)
+	return v.(*policyRule)
+}
+
+// blocking says whether a row refuses the name (as opposed to forwarding or rewriting it).
+func (r *policyRule) blocking() bool {
+	switch r.action {
+	case polNull, polNXDomain, polNoData, polRefused:
+		return true
+	}
+	return false
+}
+
+// lookupRow is the first policy row that applies; allowed names skip the rows that refuse.
+func (p *Pool) lookupRow(client netip.Addr, name string, allowed bool) *policyRule {
+	if len(p.policy) == 0 {
+		return nil
+	}
 	ix := p.pindex()
 	lists := make([][]int, 0, 8)
 	if l := ix.exact[name]; len(l) > 0 {
@@ -434,6 +483,9 @@ func (p *Pool) lookup(client netip.Addr, qi *qinfo) *policyRule {
 			continue
 		}
 		if p.policy[i].clientMatches(client) {
+			if allowed && p.policy[i].blocking() {
+				continue
+			}
 			return &p.policy[i]
 		}
 	}
@@ -449,6 +501,11 @@ func (p *Pool) policyFor(client netip.Addr, qi *qinfo) *policyRule {
 
 // logPolicy writes one line for a query a row applied to (at most 100 a second; the rest are counted).
 func (p *Pool) logPolicy(r *policyRule, client netip.Addr, qi *qinfo) {
+	if r.blockList {
+		if m := theBlocks.Load(); m != nil {
+			m.Hit(r.blockKey)
+		}
+	}
 	if !p.cfg.PolicyLog {
 		return
 	}
@@ -461,6 +518,10 @@ func (p *Pool) logPolicy(r *policyRule, client netip.Addr, qi *qinfo) {
 	}
 	if p.logN.Add(1) > 100 {
 		p.logSupp.Add(1)
+		return
+	}
+	if r.blockList {
+		infof("dns: %s asked %s %s: %s", client.Unmap(), strings.TrimSuffix(qi.name(), "."), qtypeName(qi.qtype), r.desc)
 		return
 	}
 	infof("dns: policy row %d: %s asked %s %s: %s", r.idx, client.Unmap(), strings.TrimSuffix(qi.name(), "."), qtypeName(qi.qtype), r.desc)

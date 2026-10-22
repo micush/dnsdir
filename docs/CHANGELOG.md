@@ -1,5 +1,11 @@
 # Changelog
 
+## [v511] - 2026-10-22 — Web GUI in three tabs; Sort list and SSO users as tables
+
+- Configure ▸ Web GUI is now three tabs: **General**, **SSO** and **Certificates**.
+- **Sort list** is a table (Client network, Preferred networks) like the Conditional Forwarding one: edit in place, drag to reorder, right-click menu, filter, paging and an **Add row** button. A blank client network is a rule for every client. The file format is unchanged.
+- The single sign-on **Users** are a table too (E-mail address, Access ro/rw); a new row starts as read-only.
+
 ## [v510] - 2026-10-22 — Sign in with Google or Microsoft
 
 - Single sign-on with **Google** and **Microsoft Entra ID** (OpenID Connect, authorization code flow with PKCE). Set it up under Configure ▸ Web GUI ▸ Single sign-on: the client ID and secret of a web application registered with the provider (Microsoft also needs the tenant ID), and a list of **Users**: an e-mail address and `rw` or `ro` for each. The login page then offers **Sign in with Google** / **Sign in with Microsoft**. Password login through PAM is unchanged.

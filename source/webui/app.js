@@ -2213,7 +2213,7 @@
     { shared: true, k: "forward_updates", l: "Forward dynamic DNS updates to the zone's primary server", t: "bool" },
     { section: "Sort List" },
     { shared: true, k: "sortlist_on", l: "Sort list enabled", t: "bool" },
-    { shared: true, k: "sortlist", l: "Sort list", t: "list", wide: true },
+    { shared: true, k: "sortlist", l: "Sort list", t: "rows", rows: "sortlist", wide: true, hint: "Rows are read from the top: the first whose client network contains the asking client is used, and the answer's addresses are put in the order of its preferred networks (a blank client network is a rule for every client)." },
     { section: "Policy-Based Resolution" },
     { shared: true, k: "policy_on", l: "Policy-Based Resolution enabled", t: "bool" },
     { shared: true, k: "policy_log", l: "Log policy matches", t: "bool" },
@@ -2261,14 +2261,15 @@
     { shared: true, k: "failed_login_window_minutes", l: "…within this many minutes", t: "int", min: 1 },
     { shared: true, k: "lockout_minutes", l: "Lockout lasts (minutes)", t: "int", min: 1 },
     { shared: true, k: "min_password_length", l: "Minimum password length", t: "int", min: 0, max: 128, hint: "0 = 8" },
-    { section: "Single sign-on", note: "Lets people sign in with a Google or Microsoft account instead of a system password (the password login stays). Register this console with the provider as a web application; its redirect URI is the address of this page followed by /api/sso/callback (https://this-node:53853/api/sso/callback). Only the e-mail addresses in the Users box below may sign in, whatever account they use." },
+  ];
+  const SSO_FIELDS = [
     { shared: true, k: "sso_base_url", l: "Address of this console", t: "text", hint: "Optional, https://name:port with no path. Use it when the provider is to send the browser back to one fixed address (a cluster behind one name); empty uses the address the browser used." },
     { shared: true, k: "sso_google_client_id", l: "Google client ID", t: "text" },
     { shared: true, k: "sso_google_client_secret", l: "Google client secret", t: "secret" },
     { shared: true, k: "sso_entra_tenant", l: "Microsoft tenant ID", t: "text", hint: "The Directory (tenant) ID, a GUID. Only accounts of this organisation can sign in." },
     { shared: true, k: "sso_entra_client_id", l: "Microsoft client ID", t: "text", hint: "The Application (client) ID." },
     { shared: true, k: "sso_entra_client_secret", l: "Microsoft client secret", t: "secret" },
-    { shared: true, k: "sso_users", l: "Users", t: "list", wide: true, hint: "One per line: the e-mail address, then rw (may change settings) or ro (may only look). No level means ro. Example: alice@example.com rw" },
+    { shared: true, k: "sso_users", l: "Users", t: "rows", rows: "ssousers", wide: true, hint: "rw may change settings; ro may only look. Only these addresses can sign in with a provider." },
   ];
   const SNMP_FIELDS = [
     { shared: true, k: "snmp_communities", l: "Community strings", t: "list", wide: true },
@@ -2650,6 +2651,192 @@
     };
   }
 
+  // A small table for a list of lines made of a few columns (Sort list, single sign-on users): rows to edit in place, drag to
+  // reorder, a filter box, paging, a right-click menu (Edit, Copy, Paste, Add, Move, Delete) and an Add row button.
+  // spec: {cols: [{name, ph, opts?}], parse(line) -> [cell, ...], format(cells) -> [line, ...], mark(cells) -> true when the row is
+  // not complete (outlined and not saved), empty: text for no rows}.
+  const rowClips = {};
+  function rowTable(spec, lines) {
+    const N = spec.cols.length;
+    const data = (lines || []).map((l) => ({ v: spec.parse(l) }));
+    let page = 0, size = 50, dragging = null;
+    const tbody = h("tbody", {});
+    const tbl = h("table", { class: "policy zones" },
+      h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number and order" }, "#"), ...spec.cols.map((c) => h("th", {}, c.name)))), tbody);
+    const empty = h("div", { class: "policy-empty" }, "");
+    const wrap = h("div", { class: "policy-wrap" }, tbl, empty);
+    const filter = h("input", { type: "text", class: "policy-filter", placeholder: "Filter rows", "aria-label": "Filter rows", autocomplete: "off", spellcheck: "false" });
+    const count = h("span", { class: "policy-count muted" }, "");
+    const addBtn = h("button", { type: "button", class: "btn small" }, "Add row");
+    const sizeSel = h("select", { "aria-label": "Rows per page" }, [25, 50, 100, 250, 500].map((n) => h("option", { value: String(n) }, n + " per page")));
+    sizeSel.value = String(size);
+    const mkBtn = (label, title) => h("button", { type: "button", class: "btn small", title, "aria-label": title }, label);
+    const first = mkBtn("«", "First page"), prev = mkBtn("‹", "Previous page"), next = mkBtn("›", "Next page"), last = mkBtn("»", "Last page");
+    const pageIn = h("input", { type: "number", min: "1", class: "policy-page", "aria-label": "Page number" });
+    const pages = h("span", { class: "muted" }, "");
+    const pager = h("span", { class: "policy-pager" }, first, prev, pageIn, pages, next, last);
+    const bar = h("div", { class: "policy-bar" }, addBtn, filter, count, h("span", { class: "grow" }), pager, sizeSel);
+    const box = h("div", { class: "policy-box" }, bar, wrap);
+    bar.addEventListener("change", (e) => e.stopPropagation());   // the filter and paging controls are not settings
+    const changed = () => tbl.dispatchEvent(new Event("change", { bubbles: true }));
+    const visible = () => { const q = filter.value.trim().toLowerCase(); return q ? data.filter((r) => r.v.some((x) => x.toLowerCase().includes(q))) : data; };
+    const clearMarks = () => tbody.querySelectorAll(".drop-above, .drop-below").forEach((x) => x.classList.remove("drop-above", "drop-below"));
+    const trOf = (row) => [...tbody.children].find((t) => t._row === row);
+    const cells = (row) => row.v.map((x) => x.trim());
+    const mark = (tr, row) => { tr.classList.toggle("incomplete", !!spec.mark(cells(row))); };
+
+    function render(follow) {
+      const vis = visible();
+      const n = Math.max(1, Math.ceil(vis.length / size));
+      if (follow) { const i = vis.indexOf(follow); if (i >= 0) page = Math.floor(i / size); }
+      page = Math.min(Math.max(page, 0), n - 1);
+      const from = page * size;
+      tbody.replaceChildren(...vis.slice(from, from + size).map(mk));
+      const filtered = vis.length !== data.length;
+      count.textContent = vis.length
+        ? `${from + 1}–${Math.min(from + size, vis.length)} of ${vis.length}${filtered ? ` (filtered from ${data.length})` : ""}`
+        : (filtered ? `0 of ${data.length}` : "0 rows");
+      pager.hidden = n < 2;
+      pageIn.value = String(page + 1);
+      pageIn.max = String(n);
+      pages.textContent = "of " + n;
+      first.disabled = prev.disabled = page === 0;
+      next.disabled = last.disabled = page >= n - 1;
+      empty.hidden = vis.length > 0;
+      empty.textContent = data.length ? "No rows match the filter." : (spec.empty || "No rows.") + " Add row, or right-click here.";
+    }
+    function moveTo(row, target, after) {
+      if (row === target) return;
+      data.splice(data.indexOf(row), 1);
+      const j = data.indexOf(target);
+      data.splice(after ? j + 1 : j, 0, row);
+      render(row);
+      changed();
+    }
+    function mk(row) {
+      const tr = h("tr", {});
+      tr._row = row;
+      const grip = h("span", { class: "grip-h", draggable: "true", title: "Drag to reorder", "aria-hidden": "true" }, "⋮⋮");
+      tr.append(h("td", { class: "grip" }, h("span", { class: "rownum" }, String(data.indexOf(row) + 1)), grip));
+      spec.cols.forEach((c, i) => {
+        let inp;
+        if (c.opts) {
+          inp = h("select", { "aria-label": c.name }, c.opts.map((o) => h("option", { value: o }, o)));
+          if (!c.opts.includes(row.v[i])) row.v[i] = c.opts[0];
+          inp.value = row.v[i];
+          inp.addEventListener("change", () => { row.v[i] = inp.value; mark(tr, row); });
+        } else {
+          inp = h("input", { type: "text", autocomplete: "off", spellcheck: "false", "aria-label": c.name, placeholder: c.ph || "" });
+          inp.value = row.v[i] || "";
+          inp.addEventListener("input", () => { row.v[i] = inp.value; mark(tr, row); });
+        }
+        tr.append(h("td", {}, inp));
+      });
+      grip.addEventListener("dragstart", (e) => {
+        dragging = row;
+        e.dataTransfer.effectAllowed = "move";
+        try { e.dataTransfer.setData("text/plain", "row"); e.dataTransfer.setDragImage(tr, 0, 0); } catch (x) { /* a browser without drag images */ }
+        tr.classList.add("dragging");
+      });
+      grip.addEventListener("dragend", () => { dragging = null; tr.classList.remove("dragging"); clearMarks(); });
+      tr.addEventListener("dragover", (e) => {
+        if (!dragging || dragging === row) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        const r = tr.getBoundingClientRect();
+        clearMarks();
+        tr.classList.add(e.clientY > r.top + r.height / 2 ? "drop-below" : "drop-above");
+      });
+      tr.addEventListener("drop", (e) => {
+        if (!dragging || dragging === row) return;
+        e.preventDefault();
+        const below = tr.classList.contains("drop-below");
+        clearMarks();
+        const d = dragging;
+        dragging = null;
+        moveTo(d, row, below);
+      });
+      tr.addEventListener("contextmenu", (e) => rowMenu(menuFor(row))(e));
+      mark(tr, row);
+      return tr;
+    }
+    function insert(vals, after) {
+      const row = { v: Array.from({ length: N }, (_, i) => vals[i] || "") };
+      data.splice(after ? data.indexOf(after) + 1 : data.length, 0, row);
+      filter.value = "";
+      render(row);
+      return row;
+    }
+    const focusRow = (row, col) => { const t = trOf(row); const el = t && t.querySelectorAll("input, select")[col || 0]; if (el) el.focus(); };
+    // pasted rows: the cells separated by tabs, one row to a line (the lines of a spreadsheet), or one line of the list's own form
+    const parseText = (txt) => txt.split(/\r?\n/).filter((l) => l.trim()).map((l) => (l.includes("\t") ? l.split("\t").map((x) => x.trim()) : spec.parse(l.trim())));
+    async function paste(after) {
+      let list = [];
+      try { list = parseText(await navigator.clipboard.readText()); } catch (e) { /* no permission: the last copied row is used */ }
+      if (!list.length && rowClips[spec.key]) list = [rowClips[spec.key]];
+      if (!list.length) return;
+      let at = after;
+      for (const v of list) at = insert(v, at);
+      changed();
+    }
+    function menuFor(row) {
+      const vis = visible(), i = vis.indexOf(row), di = data.indexOf(row);
+      return [
+        ["Edit", () => focusRow(row, 0)],
+        ["Copy", () => { rowClips[spec.key] = cells(row); try { navigator.clipboard.writeText(cells(row).join("\t")); } catch (e) { /* the row stays in the page's own clipboard */ } }],
+        ["Paste", () => paste(row)],
+        ["Add", () => focusRow(insert([], row), 0)],
+        ...(i > 0 ? [["Move up", () => moveTo(row, vis[i - 1], false)]] : []),
+        ...(i >= 0 && i < vis.length - 1 ? [["Move down", () => moveTo(row, vis[i + 1], true)]] : []),
+        ...(di > 0 ? [["Move to top", () => moveTo(row, data[0], false)]] : []),
+        ...(di < data.length - 1 ? [["Move to bottom", () => moveTo(row, data[data.length - 1], true)]] : []),
+        ["Delete", () => { data.splice(data.indexOf(row), 1); render(); changed(); }, "danger"],
+      ];
+    }
+    wrap.addEventListener("contextmenu", rowMenu([
+      ["Add", () => focusRow(insert([], null), 0)],
+      ["Paste", () => paste(data[data.length - 1])],
+    ]));
+    addBtn.addEventListener("click", () => focusRow(insert([], null), 0));
+    filter.addEventListener("input", () => { page = 0; render(); });
+    sizeSel.addEventListener("change", () => { size = +sizeSel.value || 50; page = 0; render(); });
+    first.addEventListener("click", () => { page = 0; render(); });
+    prev.addEventListener("click", () => { page--; render(); });
+    next.addEventListener("click", () => { page++; render(); });
+    last.addEventListener("click", () => { page = 1e9; render(); });
+    pageIn.addEventListener("change", () => { page = (parseInt(pageIn.value, 10) || 1) - 1; render(); });
+    pageIn.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); pageIn.blur(); } });
+    filter.addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); });
+    render();
+    return {
+      el: box,
+      get: () => data.flatMap((r) => (spec.mark(cells(r)) ? [] : spec.format(cells(r)))),
+    };
+  }
+
+  // the two lists that are tables
+  const ROW_TABLES = {
+    // Sort list: "client network: preferred, preferred" (the client is "any" for every client); a line that is only a network is for every client
+    sortlist: {
+      key: "sortlist", empty: "No sort rules.",
+      cols: [{ name: "Client network", ph: "blank = every client" }, { name: "Preferred networks, in order", ph: "10.1.0.0/16, 10.0.0.0/8" }],
+      parse: (line) => {
+        const t = line.trim(), m = /^any:/i.test(t) ? t.indexOf(":") : t.indexOf(": ");
+        return m < 0 ? ["", t] : [t.slice(0, m).trim(), t.slice(m + 1).trim()];
+      },
+      format: (c) => (c[0] ? [c[0] + ": " + c[1].split(/[\s,]+/).filter(Boolean).join(", ")] : c[1].split(/[\s,]+/).filter(Boolean)),
+      mark: (c) => !c[1],
+    },
+    // single sign-on users: "alice@example.com rw"
+    ssousers: {
+      key: "ssousers", empty: "Nobody may sign in with single sign-on yet.",
+      cols: [{ name: "E-mail address", ph: "alice@example.com" }, { name: "Access", opts: ["ro", "rw"] }],
+      parse: (line) => { const f = line.trim().split(/\s+/); return [f[0] || "", f[1] === "rw" ? "rw" : "ro"]; },
+      format: (c) => [c[0] + " " + (c[1] || "ro")],
+      mark: (c) => !c[0],
+    },
+  };
+
   // Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding: the zone lists as a table, one zone to a row (List, Zone).
   // The rows with the same list name are that list; it is stored as one "name: zone, zone" line per list (forward_lists),
   // in the order the lists first appear and the zones in row order (the first zone of a list is the one an Internal server is
@@ -2885,6 +3072,12 @@
           h("span", { class: "hint" }, "One zone to a row; the rows with the same list name are that list. A zone covers itself and every name below it. Give servers their lists on the Topology page. Type test:NAME in the filter to see which zone a name falls in.")));
         continue;
       }
+      if (f.t === "rows") {
+        const rt = rowTable(ROW_TABLES[f.rows], v || []);
+        getters[f.k] = rt.get;
+        grid.append(h("div", { class: "f wide" }, h("span", {}, f.l, sharedTag(f)), rt.el, f.hint ? h("span", { class: "hint" }, f.hint) : null));
+        continue;
+      }
       if (f.t === "blocklists") {
         const bl = blockListsEditor(v || []);
         getters[f.k] = bl.get;
@@ -2951,6 +3144,7 @@
     function renderForm(cfg) {
       const general = fieldset(GENERAL_FIELDS, cfg);
       const web = fieldset(WEB_FIELDS, cfg.web);
+      const sso = fieldset(SSO_FIELDS, cfg.web);
       const dns = fieldset(DNS_FIELDS, cfg.dns, true);
       const snmp = fieldset(SNMP_FIELDS, { snmp_communities: cfg.dns.snmp_communities, snmp_contact: cfg.dns.snmp_contact, location: (cfg.snmp || {}).location });
       // what snmpd is doing, under the form (refreshed after every save)
@@ -3045,7 +3239,7 @@
         groups: groups.map((g) => ({ ...(g.orig.dns ? { dns: g.orig.dns } : {}), ...(g.orig.paused ? { paused: true } : {}), ...(g.orig.paused_all ? { paused_all: true } : {}), ...(g.orig.excluded_nodes ? { excluded_nodes: g.orig.excluded_nodes } : {}), ...(g.orig.node_order ? { node_order: g.orig.node_order } : {}), ...(g.orig.paused_vips ? { paused_vips: g.orig.paused_vips } : {}), ...(g.orig.paused_vips_here ? { paused_vips_here: g.orig.paused_vips_here } : {}), ...(g.orig.extra_vips ? { extra_vips: g.orig.extra_vips } : {}), ...g.fs.get() })),
         dns: { ...(cfg.dns.schedule ? { schedule: cfg.dns.schedule } : {}), ...(cfg.dns.server_queries ? { server_queries: cfg.dns.server_queries } : {}), ...(cfg.dns.server_names ? { server_names: cfg.dns.server_names } : {}), ...(cfg.dns.server_forward ? { server_forward: cfg.dns.server_forward } : {}), ...(cfg.dns.paused_servers ? { paused_servers: cfg.dns.paused_servers } : {}), ...(cfg.dns.paused_queries ? { paused_queries: cfg.dns.paused_queries } : {}), ...dns.get(), ...snmpShared() },
         // the certificate is managed under Web GUI; keep any file paths already in the config
-        web: { cert_file: cfg.web.cert_file || "", key_file: cfg.web.key_file || "", ...web.get() },
+        web: { cert_file: cfg.web.cert_file || "", key_file: cfg.web.key_file || "", ...web.get(), ...sso.get() },
         cluster: cluster.get(),
         snmp: snmpLocal(),
         ...(cfg.bgp ? { bgp: cfg.bgp } : {}), // edited on the Anycast page
@@ -3086,12 +3280,39 @@
       const certBox = h("div", {});
       certBox.addEventListener("change", (e) => e.stopPropagation());
       VIEWS.certificate.mount(certBox);
+      // the Web GUI page is three tabs: General, SSO and Certificates (every card stays in the page, so a save reads all of them)
+      const webTabs = () => {
+        const TABS = [
+          ["General", section("Web GUI", web.el)],
+          ["SSO", section("Single sign-on",
+            h("p", { class: "hint" }, "Lets people sign in with a Google or Microsoft account instead of a system password (the password login stays). Register this console with the provider as a web application; its redirect URI is the address of this page followed by /api/sso/callback (https://this-node:53853/api/sso/callback). Only the e-mail addresses in the Users table may sign in, whatever account they use."),
+            sso.el)],
+          ["Certificates", certBox],
+        ];
+        const panes = TABS.map(([, el]) => h("div", { role: "tabpanel" }, el));
+        const buttons = TABS.map(([name], i) => h("button", { type: "button", role: "tab", class: "dtab", onclick: () => show(i) }, name));
+        function show(i, focus) {
+          state.webTab = i;
+          panes.forEach((p, j) => { p.hidden = j !== i; });
+          buttons.forEach((b, j) => { b.setAttribute("aria-selected", j === i ? "true" : "false"); b.tabIndex = j === i ? 0 : -1; b.classList.toggle("on", j === i); });
+          if (focus) buttons[i].focus();
+        }
+        const strip = h("div", { class: "dtabs", role: "tablist", "aria-label": "Web GUI settings" }, buttons);
+        strip.addEventListener("keydown", (e) => {
+          const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+          if (!d) return;
+          e.preventDefault();
+          show((state.webTab + d + TABS.length) % TABS.length, true);
+        });
+        show(state.webTab >= 0 && state.webTab < TABS.length ? state.webTab : 0);
+        return h("div", {}, strip, ...panes);
+      };
       // one card per tab; every tab stays in the page (the hidden ones are just not shown) so a save reads all of them
       const panels = [
         ["general", "General", h("div", {}, section("General", general.el), updatesCard())],
         ["groups", "Gateway groups", h("div", {}, groupsEl)],
         ["dns", "DNS", dnsTabs()],
-        ["web", "Web GUI", h("div", {}, section("Web GUI", web.el), certBox)],
+        ["web", "Web GUI", webTabs()],
         ["snmp", "SNMP", h("div", {}, (() => { const c = section("SNMP", snmp.el); c.querySelector("h2").append(snmpPill); return c; })())],
         ["cluster", "Cluster", section("Cluster", cluster.el)],
       ];

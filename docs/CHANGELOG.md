@@ -1,5 +1,9 @@
 # Changelog
 
+## [v519] - 2026-10-22 — No filter or paging on the short lists
+
+- The short list tables (servers, fallback servers, neighbors, more VIP addresses, community strings, probe queries, never limited) no longer have the filter box and page controls; the long ones (clients, domains, users and the like) keep them.
+
 ## [v518] - 2026-10-22 — Last apply shows just the tag
 
 - **Anycast ▸ Last apply** shows only the **ok** tag when the last apply worked (no "FRR is configured" beside it); a failure still shows its message.

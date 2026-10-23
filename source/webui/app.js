@@ -2656,10 +2656,13 @@
   // spec: {cols: [{name, ph, opts?}], parse(line) -> [cell, ...], format(cells) -> [line, ...], mark(cells) -> true when the row is
   // not complete (outlined and not saved), empty: text for no rows}.
   const rowClips = {};
+  // the short lists (a handful of rows) have no filter box and no paging; the long ones (clients, domains, users) do
+  const SMALL_TABLES = new Set(["servers", "fallback", "neighbors", "morevip4", "morevip6", "community", "queries", "exempt"]);
   function rowTable(spec, lines) {
     const N = spec.cols.length;
+    const small = SMALL_TABLES.has(spec.key);
     const data = (lines || []).map((l) => ({ v: spec.parse(l) }));
-    let page = 0, size = 50, dragging = null;
+    let page = 0, size = small ? 1e9 : 50, dragging = null;
     const tbody = h("tbody", {});
     const tbl = h("table", { class: "policy zones rows" + (N === 1 ? " one" : "") },
       h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number and order" }, "#"), ...spec.cols.map((c) => h("th", {}, c.name)))), tbody);
@@ -2675,7 +2678,7 @@
     const pages = h("span", { class: "muted" }, "");
     const pager = h("span", { class: "policy-pager" }, first, prev, pageIn, pages, next, last);
     const bar = h("div", { class: "policy-bar" }, filter, count, h("span", { class: "grow" }), pager, sizeSel);
-    const box = h("div", { class: "policy-box rows" }, bar, wrap);
+    const box = h("div", { class: "policy-box rows" }, ...(small ? [] : [bar]), wrap);
     bar.addEventListener("change", (e) => e.stopPropagation());   // the filter and paging controls are not settings
     const changed = () => tbl.dispatchEvent(new Event("change", { bubbles: true }));
     const visible = () => { const q = filter.value.trim().toLowerCase(); return q ? data.filter((r) => r.v.some((x) => x.toLowerCase().includes(q))) : data; };

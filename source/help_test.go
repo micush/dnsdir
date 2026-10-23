@@ -39,6 +39,10 @@ func expectedHelpTopics(sidebar []string) []string {
 			want = append(want, "users_local", "users_sso0", "users_sso1", "users_sso2", "users_sso3", "users_ldap")
 		case "anycast":
 			want = append(want, "anycast_bgp", "anycast_ospf")
+		case "anycastop":
+			want = append(want, "anycastop_bgp", "anycastop_ospf")
+		case "anycaststatus":
+			want = append(want, "anycaststatus_bgp", "anycaststatus_ospf")
 		case "cfg_general":
 			want = append(want, "config_general")
 		case "cfg_groups":

@@ -568,7 +568,7 @@ dnsdir --ospf-disable                                            # stop OSPF on 
 dnsdir --ospf-interface-disable eth0                             # make one interface passive, kept (--ospf-interface-enable)
 ```
 
-**Where to look.** **Monitor ▸ Anycast** shows the OSPF neighbors per interface (`show ip ospf neighbor json`, `show ipv6 ospf6 neighbor json`) with their state and BFD, next to the BGP neighbors. The generated OSPF part of `frr.conf` looks like this:
+**Where to look.** **Monitor ▸ Anycast** shows the OSPF neighbors per interface (`show ip ospf neighbor json`, `show ipv6 ospf6 neighbor json`) with their state and BFD, on its own **OSPF** tab (the BGP neighbors are on the **BGP** tab). **Operate ▸ Anycast** has the same two tabs. The generated OSPF part of `frr.conf` looks like this:
 
 ```
 route-map DNSDIR-OSPF-V4 permit 10

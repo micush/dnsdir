@@ -1,5 +1,10 @@
 # Changelog
 
+## [v528] - 2026-10-23 — Operate ▸ Anycast and Monitor ▸ Anycast get BGP and OSPF tabs
+
+- **Operate ▸ Anycast** and **Monitor ▸ Anycast** now have a **BGP** tab and an **OSPF** tab (BGP first), like Configure ▸ Anycast. Before, OSPF appeared as extra sections on the same page. Nothing else changes: the same buttons, tables and live state, and the *Anycast addresses* table is on both Monitor tabs.
+- **Help:** each of the two pages now has two panels (`BGP` and `OSPF`), and the panel follows the tab.
+
 ## [v527] - 2026-10-23 — Anycast over OSPF, and Configure ▸ Anycast split into BGP and OSPF tabs
 
 - **OSPF as a second way to announce the anycast addresses.** New **OSPF** tab on **Configure ▸ Anycast** (the **BGP** tab is first): router ID, hello and dead interval, metric, and a table of interfaces (name, area, link type, optional OSPFv2 MD5 key, enabled). OSPFv2 carries the IPv4 addresses and OSPFv3 the IPv6 ones. The settings are per node and not replicated (`ospf` block in the config, written only when used).

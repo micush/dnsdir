@@ -9,7 +9,7 @@ import (
 )
 
 // A DNS server's name (the Name on its form, --label) that is a full host name (it has a dot, such as dns-a.example.com) is
-// also registered in DNS: it gets the server's address (A or AAAA, and the PTR record), with the same RFC 2136 update a client
+// also registered in DNS when an existing server is renamed (not when one is added): it gets the server's address (A or AAAA, and the PTR record), with the same RFC 2136 update a client
 // name gets, and the record of the server's previous name is removed when that was a full name too.  A short name is only a
 // label, as before; clearing a name leaves DNS alone, like Remove name for a client.
 
@@ -43,10 +43,10 @@ func fullName(s string) (string, bool) {
 	return n, err == nil
 }
 
-// planServerRegistration says what a canvas edit registers in DNS: nil unless it adds or names a server that has an IP
-// address with a full host name.
+// planServerRegistration says what a canvas edit registers in DNS: nil unless it names (renames) a server that already
+// exists and has an IP address, with a full host name.  Adding a server sends nothing.
 func planServerRegistration(dc *DaemonConfig, e canvasEdit) *serverRegistration {
-	if e.Kind != "server" || (e.Action != "add" && e.Action != "set") {
+	if e.Kind != "server" || e.Action != "set" {
 		return nil
 	}
 	fqdn, ok := fullName(e.Label)

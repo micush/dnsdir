@@ -35,6 +35,10 @@ func TestPlanServerRegistration(t *testing.T) {
 	if r == nil || r.fqdn != "dns-b.corp.example" || r.old != "dns-a.corp.example" || r.addr != netip.MustParseAddr("5.5.5.5") {
 		t.Fatalf("a full name is registered and the old full name removed: %+v", r)
 	}
+	// adding a server sends nothing, whatever its name
+	if r := planServerRegistration(dc, add); r != nil {
+		t.Fatalf("adding a server registers nothing: %+v", r)
+	}
 	// the same name again: nothing old to remove
 	set.Label = "dns-a.corp.example"
 	if r := planServerRegistration(dc, set); r == nil || r.old != "" {

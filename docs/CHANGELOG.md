@@ -1,5 +1,29 @@
 # Changelog
 
+## [v534] - 2026-10-23 — Adding a DNS server no longer registers its name in DNS
+
+### Changed
+- A full host name given as the **Name** of a **new** DNS server (Topology ▸ Add DNS server, or `--canvas-add server --label`) is only a label now: nothing is sent to DNS. Before, the form saved the server and then sent a dynamic update, and stayed open until that update finished; when it failed or was slow the popup stayed on screen under a "Saved, but DNS: …" line even though the server was already added. Renaming a server that already exists (Edit DNS server ▸ Name, or `--canvas-set server --label`) still registers a full name and removes the previous full name's record, as before. Node Rename is unchanged.
+- Help, README and `--help` say so. `TestPlanServerRegistration` checks that adding sends nothing and a rename still does.
+
+### Verified
+- `gofmt`, `go vet`, `go test` on the full suite, `node --check`.
+
+### Not verified
+- A rename against a real DNS server that accepts dynamic updates; the add path in a browser with a full name (the popup now closes at once because there is no second step).
+
+## [v533] - 2026-10-23 — Scheduler: "Ignore the exit status" for shell tasks
+
+### Added
+- A shell task has a new option, **Ignore the exit status** (`ignore_exit` in the task, so `--schedule-set` takes it too). A command that ran and exited with any status then counts as done, and its output ends with `(exit status N, ignored)`. A command that cannot start, or that the time limit stops, still fails. Before, any non-zero exit marked the run failed, which made commands like `systemctl status` on a stopped service or `grep` unusable as tasks. Without the option nothing changes.
+- Help (Operate ▸ Scheduler ▸ Good to know) and README describe it. The scheduler test covers exit 3 with and without the option, and a timeout with it.
+
+### Verified
+- `gofmt`, `go vet`, `go test` on the full suite.
+
+### Not verified
+- A live multi-node run with the option on a real cluster.
+
 ## [v532] - 2026-10-23 — Configure ▸ Cluster moved to Configure ▸ Settings ▸ Cluster
 
 - The **Cluster** settings (binding address, advertised address, sync interval) are now the **Cluster** tab of **Configure ▸ Settings**, after General, Logs and Upgrades. The *Cluster* entry under Configure is gone; an old `#cfg_cluster` bookmark opens the new tab. Nothing else changes, and the help panel follows the tab.

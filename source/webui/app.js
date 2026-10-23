@@ -1881,7 +1881,7 @@
         if (nm) { g.dns.server_names = g.dns.server_names || {}; g.dns.server_names[a] = nm; }
         else if (g.dns.server_names) { delete g.dns.server_names[a]; if (!Object.keys(g.dns.server_names).length) delete g.dns.server_names; }
         const isFull = (s) => s.includes(".") && s.split(".").every((l) => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(l)) && s.length <= 253;
-        if (!ip || !isFull(full) || full === oldNm.toLowerCase() || nm === lk.auto.label) return null;   // a short name is only a label; a name already there, or one the reverse lookup filled in, is not registered again
+        if (!edit || !ip || !isFull(full) || full === oldNm.toLowerCase() || nm === lk.auto.label) return null;   // a short name is only a label; a name already there, or one the reverse lookup filled in, is not registered again
         const old = isFull(oldNm.toLowerCase()) && oldNm.toLowerCase() !== full ? oldNm.toLowerCase() : "";
         return (async () => {
           try {
@@ -5839,8 +5839,10 @@
       const action = h("select", { "aria-label": "Action" }, acts.map(([k, l]) => h("option", { value: k, selected: k === t.action }, l)), h("option", { value: "shell", selected: t.action === "shell" }, "Run a shell command"));
       const cmd = h("textarea", { rows: "4", spellcheck: "false", maxlength: "4096", "aria-label": "Command", class: "mono" }); cmd.value = t.command || "";
       const tmo = h("input", { type: "number", min: "1", max: "86400", value: String(t.timeout_sec || 300), "aria-label": "Time limit in seconds" });
+      const ign = h("input", { type: "checkbox", checked: !!t.ignore_exit });
       const shellBox = h("div", {}, h("label", { class: "f wide" }, "Command", cmd),
-        h("label", { class: "f" }, "Stop it after (seconds)", tmo));
+        h("label", { class: "f" }, "Stop it after (seconds)", tmo),
+        h("label", { class: "f check" }, ign, "Ignore the exit status"));
       const allNodes = h("input", { type: "radio", name: "sched-where", checked: !(t.nodes || []).length });
       const someNodes = h("input", { type: "radio", name: "sched-where", checked: (t.nodes || []).length > 0 });
       const nodeBoxes = state.nodes.map((n) => ({ n, el: h("input", { type: "checkbox", checked: (t.nodes || []).includes(n.node_id), disabled: !n.node_id }) }));
@@ -5915,7 +5917,7 @@
         const f = freq.value;
         const task = { id: isNew ? "" : t.id, name: name.value.trim(), action: action.value, freq: f, every: f === "once" ? 1 : Math.max(1, +every.value || 1),
           window_sec: (f === "hourly" ? untilMin.value !== "" : until.value !== "") ? 0 : (f === "hourly" && legacyWin >= 3600 ? 0 : legacyWin), disabled: !enabled.checked };
-        if (action.value === "shell") { task.command = cmd.value; task.timeout_sec = +tmo.value || 300; }
+        if (action.value === "shell") { task.command = cmd.value; task.timeout_sec = +tmo.value || 300; task.ignore_exit = ign.checked; }
         if (f === "hourly") { const m = Math.min(59, Math.max(0, +minute.value || 0)); task.at = "00:" + String(m).padStart(2, "0") + ":00"; } else task.at = at.value.length === 5 ? at.value + ":00" : at.value;
         if (f === "once") { if (!dateIn.value) { errorBox(err, "Pick the date."); return; } task.date = dateIn.value; }
         if (f === "weekly") task.days = days.filter((x) => x.el.checked).map((x) => x.i);

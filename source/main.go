@@ -84,7 +84,8 @@ the web GUI):
                                          When it says "not delivered": --canvas-set gateway --group N --real-macs on)
                    --canvas-set server  --group N --server ADDR --label NAME|-   (name shown instead of the address on the
                                          Topology page; - clears; a full name such as dns-a.example.com is also registered
-                                         in DNS for the server's IP address; also on --canvas-add server)
+                                         in DNS for the server's IP address when an existing server is named;
+                                         --canvas-add server sends nothing)
                    --canvas-pause|--canvas-resume gateway --group N   (this node stops/starts serving it)
                    --canvas-pause|--canvas-resume server --group N --server ADDR  (no queries/probes)
                    --canvas-del node --group N --node NODE   (remove a cluster node from the gateway: it stops serving it, on every

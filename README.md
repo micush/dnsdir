@@ -1085,7 +1085,7 @@ When a controller stops (a restart, an update, **Pause this node**), it tells th
 
 Right-click a node in the Topology ▸ **Rename** (or `dnsdir --hostname NAME`) changes the host name of that node: the operating-system name (`hostnamectl set-hostname`) and the name on its line in `/etc/hosts`; if the file cannot be updated the old name is put back, and a host with no line for its name gets none. The drawing shows the new name once the node reports it. A full name (it has a dot, such as `ns1.example.com`) is also registered in DNS with the same RFC 2136 update as a client name: A and PTR for the node's first IPv4 address, and for its first global IPv6 address if it has one; the old name's address record is removed (the old host name when that was a full name, otherwise its short name in the new name's domain). The zone and its primary are found from the SOA records. A short name only renames the host and sends nothing to DNS. A DNS failure is reported but the rename stays.
 
-A DNS server's name (Topology ▸ Add/Edit DNS server ▸ Name, or `--label`) works the same way: a full name on a server with an IP address is registered for that address, and the previous full name's record is removed; a short name is only a label, and clearing a name leaves DNS alone.
+A DNS server's name works the same way when an existing server is renamed (Topology ▸ Edit DNS server ▸ Name, or `--canvas-set server --label`); adding a server (Add DNS server, `--canvas-add server`) sends nothing. A full name on a server with an IP address is registered for that address, and the previous full name's record is removed; a short name is only a label, and clearing a name leaves DNS alone.
 
 Operate ▸ Node ▸ *Maintenance* (or `dnsdir --node-pause`, `--node-resume`, `--node-status`) pauses every gateway on the node in one step. It resigns, stops answering DNS and stops probing, and the other nodes carry the traffic. Nothing is shut down.
 
@@ -1117,6 +1117,8 @@ dnsdir --power cancel
 Operate ▸ **Scheduler** runs tasks on every node of the cluster, or on the nodes you pick: restart dnsdir, empty the answer cache, pause or resume the node, clear the statistics, or a **shell command** (`/bin/sh -c`, as root; anyone who can sign in to the GUI can therefore run commands on every node). The task list is part of the shared settings, so every node has it; what ran is kept per node (the last 300 runs, with the output of a command) and shown for the node picked at the top right.
 
 A task repeats **hourly, daily, weekly, monthly or yearly**, every N of them if you like. A monthly or yearly task can be on a day of the month (the 31st means the last day in a shorter month, `-1` the last day) or on the **1st to 4th or last** occurrence of one or more weekdays — "the 3rd Saturday of every month", or "the 2nd or 3rd Saturday or Sunday". The window is a **To** time next to **At** ("any time between 01:00 and 10:00": At 01:00, To 10:00; for an hourly task, a minute past the hour). **All times are UTC**, on every node.
+
+A shell command **fails** when it exits with anything but 0, or when the time limit stops it. Tick **Ignore the exit status** (`"ignore_exit":true` on the command line) for a command whose non-zero exit is an answer, such as `systemctl status` on a stopped service: the run then counts as ok and its output ends with the exit status. A command that cannot start, or that the time limit stops, still fails.
 
 A **once** task runs a single time, on the date you give (`"freq":"once","date":"2026-11-14"`, UTC) at the *At* time, and never again.
 

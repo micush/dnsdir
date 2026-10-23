@@ -35,6 +35,9 @@ type SchedTask struct {
 	Action     string `json:"action"`
 	Command    string `json:"command,omitempty"`
 	TimeoutSec int    `json:"timeout_sec,omitempty"` // shell: stopped after this long (default 300)
+	// IgnoreExit (shell): a command that ran and exited with any status counts as done; only a command that could not start
+	// or was stopped by the time limit fails.
+	IgnoreExit bool `json:"ignore_exit,omitempty"`
 	// Nodes are the node IDs that run it; empty means every node.
 	Nodes []string `json:"nodes,omitempty"`
 	// Freq is once, hourly, daily, weekly, monthly or yearly; Every N of them (0 or 1 = each).  A once task runs on Date
@@ -152,7 +155,7 @@ func (t *SchedTask) validate() error {
 			return fmt.Errorf("scheduler: %q: the time limit must be 1 to 86400 seconds", t.Name)
 		}
 	case schedActions[t.Action] != "":
-		t.Command, t.TimeoutSec = "", 0
+		t.Command, t.TimeoutSec, t.IgnoreExit = "", 0, false
 	default:
 		return fmt.Errorf("scheduler: %q: unknown action %q", t.Name, t.Action)
 	}
@@ -912,6 +915,10 @@ func (s *Scheduler) execute(t SchedTask, actor string) (string, error) {
 	lw.mu.Unlock()
 	if ctx.Err() != nil {
 		return out, fmt.Errorf("stopped after %d s", t.TimeoutSec)
+	}
+	var ee *exec.ExitError
+	if t.IgnoreExit && errors.As(err, &ee) {
+		return strings.TrimRight(out, "\n") + fmt.Sprintf("\n(exit status %d, ignored)", ee.ExitCode()), nil
 	}
 	return out, err
 }

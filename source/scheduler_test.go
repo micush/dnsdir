@@ -199,7 +199,9 @@ func TestSchedulerShellCommand(t *testing.T) {
 	ok := mustTask(t, SchedTask{ID: "s1", Name: "echo", Action: "shell", Command: "echo hello; echo oops >&2", Freq: "daily"})
 	slow := mustTask(t, SchedTask{ID: "s2", Name: "slow", Action: "shell", Command: "sleep 30", TimeoutSec: 1, Freq: "daily"})
 	bad := mustTask(t, SchedTask{ID: "s3", Name: "bad", Action: "shell", Command: "exit 3", Freq: "daily"})
-	h.s.SetTasks([]SchedTask{ok, slow, bad})
+	ign := mustTask(t, SchedTask{ID: "s4", Name: "ign", Action: "shell", Command: "echo stopped; exit 3", IgnoreExit: true, Freq: "daily"})
+	ignSlow := mustTask(t, SchedTask{ID: "s5", Name: "ignslow", Action: "shell", Command: "sleep 30", TimeoutSec: 1, IgnoreExit: true, Freq: "daily"})
+	h.s.SetTasks([]SchedTask{ok, slow, bad, ign, ignSlow})
 	idle := func() bool {
 		for _, r := range h.s.Status().History {
 			if r.Status == "running" {
@@ -208,7 +210,7 @@ func TestSchedulerShellCommand(t *testing.T) {
 		}
 		return true
 	}
-	for _, id := range []string{"s1", "s2", "s3"} { // one at a time
+	for _, id := range []string{"s1", "s2", "s3", "s4", "s5"} { // one at a time
 		if err := h.s.RunNow(id, "test"); err != nil {
 			t.Fatal(err)
 		}
@@ -226,6 +228,12 @@ func TestSchedulerShellCommand(t *testing.T) {
 	}
 	if by["s3"].Status != "failed" {
 		t.Errorf("exit 3: %+v", by["s3"])
+	}
+	if by["s4"].Status != "ok" || !strings.Contains(by["s4"].Output, "stopped") || !strings.Contains(by["s4"].Output, "exit status 3, ignored") {
+		t.Errorf("exit 3 with the status ignored: %+v", by["s4"])
+	}
+	if by["s5"].Status != "failed" {
+		t.Errorf("a command over its limit fails even when the status is ignored: %+v", by["s5"])
 	}
 }
 

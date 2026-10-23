@@ -2251,6 +2251,34 @@
     { shared: true, k: "register_key", l: "Registration key (base64)", t: "text", hint: "the key's secret as base64 (HMAC-SHA256)" },
     { shared: true, k: "register_ttl", l: "Registered record TTL (s)", t: "int", min: 0, max: 604800, hint: "0 = 300" },
   ];
+  // Configure ▸ Users ▸ SSO: a tab for the settings every provider shares (the console's address, who may sign in) and one for each provider
+  const SSO_TABS = [
+    ["General", ["sso_base_url", "sso_users"]],
+    ["Google", ["sso_google_client_id", "sso_google_client_secret"]],
+    ["Microsoft", ["sso_entra_tenant", "sso_entra_client_id", "sso_entra_client_secret"]],
+    ["OpenID Connect", ["sso_oidc_name", "sso_oidc_issuer", "sso_oidc_client_id", "sso_oidc_client_secret"]],
+  ];
+  function ssoTabs(obj) {
+    const sets = SSO_TABS.map(([, keys]) => fieldset(SSO_FIELDS.filter((f) => keys.includes(f.k)).map((f) => ({ ...f, brk: false })), obj));
+    const panes = sets.map((fs) => h("div", { role: "tabpanel" }, fs.el));
+    const buttons = SSO_TABS.map(([name], i) => h("button", { type: "button", role: "tab", class: "dtab sub", onclick: () => show(i) }, name));
+    function show(i, focus) {
+      state.ssoTab = i;
+      panes.forEach((pn, j) => { pn.hidden = j !== i; });
+      buttons.forEach((b, j) => { b.setAttribute("aria-selected", j === i ? "true" : "false"); b.tabIndex = j === i ? 0 : -1; b.classList.toggle("on", j === i); });
+      if (focus) buttons[i].focus();
+    }
+    const strip = h("div", { class: "dtabs sub", role: "tablist", "aria-label": "Single sign-on" }, buttons);
+    strip.addEventListener("keydown", (e) => {
+      const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      if (!d) return;
+      e.preventDefault();
+      show((state.ssoTab + d + SSO_TABS.length) % SSO_TABS.length, true);
+    });
+    show(state.ssoTab >= 0 && state.ssoTab < SSO_TABS.length ? state.ssoTab : 0);
+    return { el: h("div", {}, strip, ...panes), get: () => Object.assign({}, ...sets.map((fs) => fs.get())) };
+  }
+
   const WEB_FIELDS = [
     { k: "listen", l: "Listen address", t: "port", hint: "the port, default 53853 (all addresses); to listen on one address only, write it with the port: 10.0.0.1:53853" },
     { shared: true, k: "group", l: "Login groups", t: "text", hint: "one or more, separated by commas: a member of any may sign in. The first one that is a local group is the one the Users page manages; the others can be directory (Active Directory) groups" },
@@ -2269,6 +2297,10 @@
     { shared: true, k: "sso_entra_tenant", brk: true, l: "Microsoft tenant ID", t: "text" },
     { shared: true, k: "sso_entra_client_id", l: "Microsoft client ID", t: "text" },
     { shared: true, k: "sso_entra_client_secret", l: "Microsoft client secret", t: "secret" },
+    { shared: true, k: "sso_oidc_name", brk: true, l: "OpenID Connect button name", t: "text" },
+    { shared: true, k: "sso_oidc_issuer", l: "OpenID Connect issuer", t: "text" },
+    { shared: true, k: "sso_oidc_client_id", l: "OpenID Connect client ID", t: "text" },
+    { shared: true, k: "sso_oidc_client_secret", l: "OpenID Connect client secret", t: "secret" },
     { shared: true, k: "sso_users", l: "Users", t: "rows", rows: "ssousers", wide: true },
   ];
   const SNMP_FIELDS = [
@@ -2881,9 +2913,21 @@
     // single sign-on users: "alice@example.com rw"
     ssousers: {
       key: "ssousers", empty: "Nobody may sign in with single sign-on yet.",
-      cols: [{ name: "E-mail address", ph: "alice@example.com" }, { name: "Access", opts: ["ro", "rw"] }],
-      parse: (line) => { const f = line.trim().split(/\s+/); return [f[0] || "", f[1] === "rw" ? "rw" : "ro"]; },
-      format: (c) => [c[0] + " " + (c[1] || "ro")],
+      cols: [{ name: "E-mail address", ph: "alice@example.com" }, { name: "Access", opts: ["ro", "rw"] }, { name: "Provider", opts: ["any", "google", "microsoft", "oidc"] }],
+      parse: (line) => {
+        const f = line.trim().split(/\s+/);
+        let level = "ro", prov = "any";
+        for (const t of f.slice(1).map((x) => x.toLowerCase())) {
+          if (["rw", "read-write", "readwrite", "admin"].includes(t)) level = "rw";
+          else if (["ro", "read-only", "readonly", "read"].includes(t)) level = "ro";
+          else if (t === "google") prov = "google";
+          else if (["microsoft", "entra", "azure", "ms"].includes(t)) prov = "microsoft";
+          else if (["oidc", "openid", "generic"].includes(t)) prov = "oidc";
+          else if (["any", "both"].includes(t)) prov = "any";
+        }
+        return [f[0] || "", level, prov];
+      },
+      format: (c) => [c[0] + " " + (c[1] || "ro") + (c[2] && c[2] !== "any" ? " " + c[2] : "")],
       mark: (c) => !c[0],
     },
   };
@@ -3195,7 +3239,7 @@
     function renderForm(cfg) {
       const general = fieldset(GENERAL_FIELDS, cfg);
       const web = fieldset(WEB_FIELDS, cfg.web);
-      const sso = fieldset(SSO_FIELDS, cfg.web);
+      const sso = ssoTabs(cfg.web);
       const dns = fieldset(DNS_FIELDS, cfg.dns, true);
       const snmp = fieldset(SNMP_FIELDS, { snmp_communities: cfg.dns.snmp_communities, snmp_contact: cfg.dns.snmp_contact, location: (cfg.snmp || {}).location });
       // what snmpd is doing, under the form (refreshed after every save)

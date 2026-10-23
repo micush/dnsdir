@@ -53,7 +53,7 @@ func readOnlyDenied(r *http.Request) bool {
 }
 
 // secretKeys are the configuration keys whose values a read-only account is not shown.
-var secretKeys = map[string]bool{"key": true, "password": true, "register_key": true, "secret": true, "sso_google_client_secret": true, "sso_entra_client_secret": true}
+var secretKeys = map[string]bool{"key": true, "password": true, "register_key": true, "secret": true, "sso_google_client_secret": true, "sso_entra_client_secret": true, "sso_oidc_client_secret": true}
 
 // redactSecrets returns v (a configuration) as generic JSON with the values of secretKeys replaced.
 func redactSecrets(v any) any {

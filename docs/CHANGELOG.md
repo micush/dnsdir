@@ -1,5 +1,14 @@
 # Changelog
 
+## [v521] - 2026-10-22 — A tab for each sign-in provider
+
+- **Configure ▸ Users ▸ SSO** has a tab for each provider: **General** (the console's address and the table of users), **Google**, **Microsoft** and **OpenID Connect**.
+
+## [v520] - 2026-10-22 — Sign in with any OpenID Connect provider
+
+- **A third sign-in provider: any OpenID Connect provider** (Authentik, Keycloak, Authelia, Zitadel and the like), for an internal tool that cannot use Google or Microsoft. On Configure ▸ Users ▸ SSO: a button name, the issuer address, the client ID and secret. The login page gets a button with that name. The same checks as the other two (signature RS256, issuer, audience, expiry, nonce, PKCE), and the provider must say the e-mail address is verified.
+- **The Users table has a Provider column**: `any` (the default) or `google`, `microsoft` or `oidc`, which admits the address through that provider only. (The file already allowed this, as a word after the level; the table dropped it, now it keeps it.)
+
 ## [v519] - 2026-10-22 — No filter or paging on the short lists
 
 - The short list tables (servers, fallback servers, neighbors, more VIP addresses, community strings, probe queries, never limited) no longer have the filter box and page controls; the long ones (clients, domains, users and the like) keep them.

@@ -138,6 +138,7 @@ func ssoEnv(t *testing.T, users ...string) (*webEnv, *fakeIdP) {
 	p := defaultWeb()
 	p.GoogleClientID, p.GoogleClientSecret = "gid", f.secret
 	p.EntraTenant, p.EntraClientID, p.EntraClientSecret = "11111111-2222-3333-4444-555555555555", "eid", f.secret
+	p.OIDCName, p.OIDCIssuer, p.OIDCClientID, p.OIDCClientSecret = "Company SSO", f.srv.URL, "oid", f.secret
 	p.Users = users
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
@@ -153,10 +154,10 @@ func sessionOf(e *webEnv, cookie string) resp {
 func TestSSOSignIn(t *testing.T) {
 	e, f := ssoEnv(t, "alice@example.com rw", "Bob@Example.com")
 	// the login page learns which buttons to show
-	if r := e.do("GET", "/api/login/state", nil); len(r.body["sso"].([]any)) != 2 {
+	if r := e.do("GET", "/api/login/state", nil); len(r.body["sso"].([]any)) != 3 {
 		t.Fatalf("login state: %v", r.body)
 	}
-	for _, prov := range []string{"google", "entra"} {
+	for _, prov := range []string{"google", "entra", "oidc"} {
 		back, ck := f.signIn(e, prov, nil)
 		if back.StatusCode != 302 || back.Header.Get("Location") != "/" || ck == "" {
 			t.Fatalf("%s: %d %q %q", prov, back.StatusCode, back.Header.Get("Location"), ck)
@@ -195,6 +196,10 @@ func TestSSORefusals(t *testing.T) {
 		"alg HS256":               {"google", func(c, h map[string]any) { h["alg"] = "HS256" }, false},
 		"unknown key id":          {"google", func(c, h map[string]any) { h["kid"] = "zzz" }, false},
 		"bad signature":           {"google", nil, true},
+		"oidc unverified email":   {"oidc", func(c, h map[string]any) { delete(c, "email_verified") }, false},
+		"oidc other audience":     {"oidc", func(c, h map[string]any) { c["aud"] = "gid" }, false},
+		"oidc other issuer":       {"oidc", func(c, h map[string]any) { c["iss"] = "https://evil.example" }, false},
+		"oidc not on the list":    {"oidc", func(c, h map[string]any) { c["email"] = "mallory@example.com" }, false},
 		"other tenant":            {"entra", func(c, h map[string]any) { c["tid"] = "99999999-2222-3333-4444-555555555555" }, false},
 	} {
 		f.badSig = c.bad
@@ -322,5 +327,46 @@ func TestSSOConfigRules(t *testing.T) {
 	red, _ := json.Marshal(redactSecrets(dc.Web))
 	if strings.Contains(string(red), `"s"`) && strings.Contains(string(red), "sso_google_client_secret\":\"s") {
 		t.Fatalf("secret shown: %s", red)
+	}
+}
+
+// An address that names a provider may sign in only through it; the generic provider has a name of its own and its own rules.
+func TestSSOGenericProvider(t *testing.T) {
+	e, f := ssoEnv(t, "alice@example.com rw oidc", "bob@example.com rw google", "carol@example.com ro")
+	if r := e.do("GET", "/api/login/state", nil); !strings.Contains(string(r.raw), "Company SSO") {
+		t.Fatalf("the button's name is missing: %s", r.raw)
+	}
+	for _, c := range []struct {
+		prov, email string
+		ok          bool
+	}{
+		{"oidc", "alice@example.com", true}, {"google", "alice@example.com", false},
+		{"google", "bob@example.com", true}, {"oidc", "bob@example.com", false},
+		{"oidc", "carol@example.com", true}, {"entra", "carol@example.com", true},
+	} {
+		_, ck := f.signIn(e, c.prov, func(cl, h map[string]any) { cl["email"] = c.email })
+		if (ck != "") != c.ok {
+			t.Errorf("%s with %s: signed in = %v, want %v", c.email, c.prov, ck != "", c.ok)
+		}
+	}
+	// the discovery document must name the issuer it was fetched from
+	cfg := e.ws.ssoCfg()
+	cfg.OIDCIssuer = f.srv.URL + "/other"
+	cfg.OIDCClientID, cfg.OIDCClientSecret = "oid", f.secret
+	p := cfg.provider("oidc")
+	st := newSSOState()
+	if _, err := st.discovery(p); err == nil {
+		t.Fatal("a discovery document naming another issuer was accepted")
+	}
+	// the settings: https only, a trailing slash is dropped, half set up is off
+	ssoInsecure = false // the tests allowed http for the fake provider; real settings may not
+	c := SSOConfig{OIDCIssuer: "https://auth.example.lan/realms/main/", OIDCName: "Home", OIDCClientID: "x"}
+	if err := c.validateSSO(); err != nil || c.OIDCIssuer != "https://auth.example.lan/realms/main" || len(c.providers()) != 0 {
+		t.Fatalf("%v %+v", err, c)
+	}
+	for _, bad := range []SSOConfig{{OIDCIssuer: "http://auth.example.lan"}, {OIDCIssuer: "auth.example.lan"}, {OIDCName: "<b>x</b>"}, {OIDCName: strings.Repeat("x", 41)}} {
+		if err := bad.validateSSO(); err == nil {
+			t.Errorf("%+v was accepted", bad)
+		}
 	}
 }

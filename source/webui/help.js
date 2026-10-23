@@ -667,7 +667,7 @@ const DNSDIR_HELP = {
   users_sso: {
     title: "Users: SSO",
     body: [
-      "Single sign-on lets people sign in with a Google or a Microsoft (Entra ID) account instead of a system password. The password login stays, so you cannot lock yourself out. A **Sign in with Google** and/or **Sign in with Microsoft** button then appears on the login page. This tab holds the provider settings and the table of people who may use them; the **Local** tab has its own help.",
+      "Single sign-on lets people sign in with a Google or a Microsoft (Entra ID) account instead of a system password, or with an account at any other OpenID Connect provider you run yourself (Authentik, Keycloak, Authelia, Zitadel). The password login stays, so you cannot lock yourself out. A **Sign in with Google**, **Sign in with Microsoft** and/or a button with the name you chose for the OpenID Connect provider then appears on the login page. This tab holds the provider settings and the table of people who may use them; the **Local** tab has its own help.",
       ["h", "What it does"],
       ["ul", [
         "Only the e-mail addresses in the **Users** table can sign in, whatever account they use at the provider. Anybody else is turned away even with a valid Google or Microsoft account.",
@@ -679,12 +679,21 @@ const DNSDIR_HELP = {
         "Rows can be edited, dragged, filtered and right-clicked (Edit, Copy, Paste, Add row, Move, Delete) like the other tables; up to 5000.",
       ]],
       ["h", "Which provider an address uses"],
-      "The table lists addresses only; it does not say which provider each one signs in with. A person may use any provider that is set up, as long as that provider vouches for the address: a Google account whose verified address is on the list, or a Microsoft account of your tenant whose address is on the list. The log says which one was used (`web: login: \"alice@example.com\" signed in with Google from ... (full access)`).",
+      "Each row of the **Users** table has a **Provider** column. **any** (the default) lets the address sign in through any provider that is set up and vouches for it. **google**, **microsoft** or **oidc** admits it through that provider only, so an address that someone could also register at another provider cannot be used there. The log says which provider each sign-in used (`web: login: \"alice@example.com\" signed in with Google from ... (full access)`).",
       ["h", "Set-up with Google"],
       ["ul", [
         "In Google Cloud Console: APIs & Services ▸ Credentials ▸ Create credentials ▸ OAuth client ID ▸ **Web application**.",
         "Add the redirect URI `https://THIS-NODE:53853/api/sso/callback`: the address in your browser's bar, then `/api/sso/callback`. In a cluster register each node's, or set *Address of this console*.",
         "Copy the client ID and the client secret into the Google fields here, then add the addresses to the table.",
+      ]],
+      ["h", "Set-up with another OpenID Connect provider"],
+      ["ul", [
+        "Create an OpenID Connect client (a *confidential* client, authorization code flow) in your provider with the redirect URI `https://THIS-NODE:53853/api/sso/callback`. The scopes `openid`, `email` and `profile` are used.",
+        "The **issuer** is the address in the provider's discovery document, the one that ends before `/.well-known/openid-configuration`: for example `https://auth.example.lan/application/o/dnsdir/` (Authentik), `https://auth.example.lan/realms/main` (Keycloak). It must be https, and the document must name that same issuer.",
+        "Set the provider to sign ID tokens with **RS256** (an RSA key). Tokens signed another way, including the HMAC some providers use when no signing key is chosen, are refused.",
+        "The address is taken from the `email` claim and the provider must say it is verified (`email_verified`): mark the user's e-mail as verified in the provider.",
+        "If the provider uses a certificate from your own certificate authority, that authority must be trusted by this host's system certificate store; the console does not skip certificate checks.",
+        "Give the button a name (for example *Company SSO*); empty is *SSO*. The provider appears when issuer, client ID and client secret are all filled in.",
       ]],
       ["h", "Set-up with Microsoft"],
       ["ul", [
@@ -700,10 +709,14 @@ const DNSDIR_HELP = {
         ["Microsoft tenant ID", "The Directory (tenant) ID of your Microsoft Entra organisation, a GUID like `11111111-2222-3333-4444-555555555555`. Only accounts of this tenant can sign in (the token's issuer and tenant must match); `common` and domain names are not accepted. Microsoft is offered only when the tenant, client ID and secret are all filled in. The address is taken from the `email` claim, or from `preferred_username` when there is none. Shared."],
         ["Microsoft client ID", "The Application (client) ID of the app registration. Shared."],
         ["Microsoft client secret", "The client secret's **Value** (not its ID) from Certificates & secrets. Microsoft secrets expire: set a reminder to make a new one. Not shown to read-only accounts. Shared."],
-        ["Users", "Who may sign in with single sign-on, as a table: the **E-mail address** and the **Access**, `rw` (may change settings) or `ro` (may only look); a new row starts as `ro`. Rows can be edited, dragged, filtered and right-clicked like the zone table. Addresses are not case sensitive. Up to 5000. Nobody else gets in through a provider, even with a valid account there. Shared."],
+        ["OpenID Connect button name", "The text of the extra button on the login page, for your own OpenID Connect provider: *Sign in with* and this name. Up to 40 characters; empty is *SSO*. Shared."],
+        ["OpenID Connect issuer", "The provider's issuer address, `https` and no path beyond the provider's own, for example `https://auth.example.lan/realms/main`. A trailing slash is ignored. The console reads `/.well-known/openid-configuration` below it. Shared."],
+        ["OpenID Connect client ID", "The client ID of the confidential client registered with the provider. Shared."],
+        ["OpenID Connect client secret", "The client's secret. Stored in the configuration file like the other secrets and not shown to read-only accounts. The provider is offered only when issuer, client ID and secret are filled in. Shared."],
+        ["Users", "Who may sign in with single sign-on, as a table: the **E-mail address** and the **Access**, `rw` (may change settings) or `ro` (may only look); a new row starts as `ro`. **Provider** is `any` (the default) or the one provider the address may use: `google`, `microsoft` or `oidc`. Rows can be edited, dragged, filtered and right-clicked like the zone table. Addresses are not case sensitive. Up to 5000. Nobody else gets in through a provider, even with a valid account there. Shared."],
       ]],
       ["h", "In the configuration file"],
-      "The keys are in the `web` block: `sso_base_url`, `sso_google_client_id`, `sso_google_client_secret`, `sso_entra_tenant`, `sso_entra_client_id`, `sso_entra_client_secret` and `sso_users` (one `alice@example.com rw` or `bob@example.com ro` per entry; no level means `ro`). There is no separate command line for them; use `--config-import`.",
+      "The keys are in the `web` block: `sso_base_url`, `sso_google_client_id`, `sso_google_client_secret`, `sso_entra_tenant`, `sso_entra_client_id`, `sso_entra_client_secret`, `sso_oidc_name`, `sso_oidc_issuer`, `sso_oidc_client_id`, `sso_oidc_client_secret` and `sso_users` (one `alice@example.com rw` or `bob@example.com ro google` per entry; no level means `ro`, no provider means any). There is no separate command line for them; use `--config-import`.",
     ],
   },
   _default: { title: "Help", body: ["No help has been written for this page yet."] },

@@ -39,6 +39,12 @@ type SSOConfig struct {
 	EntraTenant        string `json:"sso_entra_tenant,omitempty"`
 	EntraClientID      string `json:"sso_entra_client_id,omitempty"`
 	EntraClientSecret  string `json:"sso_entra_client_secret,omitempty"`
+	// OIDC is any other OpenID Connect provider (Authentik, Keycloak, Authelia, ...): its issuer address, a name for the
+	// button, and the client ID and secret registered with it.
+	OIDCName         string `json:"sso_oidc_name,omitempty"`
+	OIDCIssuer       string `json:"sso_oidc_issuer,omitempty"`
+	OIDCClientID     string `json:"sso_oidc_client_id,omitempty"`
+	OIDCClientSecret string `json:"sso_oidc_client_secret,omitempty"`
 	// Users are the people who may sign in: "alice@example.com rw" or "bob@example.com ro" (no level means ro).
 	Users []string `json:"sso_users,omitempty"`
 	// BaseURL is the address the provider sends the browser back to ("https://dns1.example.com:53853"); empty uses the
@@ -48,7 +54,8 @@ type SSOConfig struct {
 
 func (c SSOConfig) empty() bool {
 	return c.GoogleClientID == "" && c.GoogleClientSecret == "" && c.EntraTenant == "" && c.EntraClientID == "" &&
-		c.EntraClientSecret == "" && len(c.Users) == 0 && c.BaseURL == ""
+		c.EntraClientSecret == "" && c.OIDCName == "" && c.OIDCIssuer == "" && c.OIDCClientID == "" && c.OIDCClientSecret == "" &&
+		len(c.Users) == 0 && c.BaseURL == ""
 }
 
 func (c SSOConfig) clone() *SSOConfig {
@@ -63,7 +70,7 @@ var entraTenantRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-
 
 const ssoMaxUsers = 5000
 
-// ssoProviderToken is the name a provider has in the users list: "google" or "microsoft" (an Entra ID provider is "entra" inside).
+// ssoProviderToken is the name a provider has in the users list: "google", "microsoft" (an Entra ID provider is "entra" inside) or "oidc".
 func ssoProviderToken(id string) string {
 	if id == "entra" {
 		return "microsoft"
@@ -72,7 +79,7 @@ func ssoProviderToken(id string) string {
 }
 
 // normalizeSSOUsers returns the list as "email level [provider]" lines, lower case, no repeats.  The provider (google or
-// microsoft) is optional: without one the address may sign in with either.
+// microsoft or oidc) is optional: without one the address may sign in with any provider that is set up.
 func normalizeSSOUsers(in []string) ([]string, error) {
 	var out []string
 	seen := map[string]int{}
@@ -94,6 +101,8 @@ func normalizeSSOUsers(in []string) ([]string, error) {
 					prov = "google"
 				case "microsoft", "entra", "azure", "ms":
 					prov = "microsoft"
+				case "oidc", "openid", "generic":
+					prov = "oidc"
 				case "any", "both":
 					prov = ""
 				default:
@@ -128,7 +137,18 @@ func (c *SSOConfig) validateSSO() error {
 	if c.EntraTenant != "" && !entraTenantRE.MatchString(c.EntraTenant) {
 		return errors.New("web: sso_entra_tenant must be the Directory (tenant) ID, a GUID like 11111111-2222-3333-4444-555555555555")
 	}
-	for _, v := range []string{c.GoogleClientID, c.GoogleClientSecret, c.EntraClientID, c.EntraClientSecret} {
+	c.OIDCName, c.OIDCIssuer = strings.TrimSpace(c.OIDCName), strings.TrimRight(strings.TrimSpace(c.OIDCIssuer), "/")
+	c.OIDCClientID, c.OIDCClientSecret = strings.TrimSpace(c.OIDCClientID), strings.TrimSpace(c.OIDCClientSecret)
+	if len(c.OIDCName) > 40 || strings.ContainsAny(c.OIDCName, "\r\n\t<>&\"'") {
+		return errors.New("web: sso_oidc_name is the text of the button: up to 40 characters, without < > & or quotes")
+	}
+	if c.OIDCIssuer != "" {
+		u, err := url.Parse(c.OIDCIssuer)
+		if err != nil || (u.Scheme != "https" && !(ssoInsecure && u.Scheme == "http")) || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(c.OIDCIssuer, " \t\r\n") {
+			return errors.New("web: sso_oidc_issuer must be the provider's issuer address, like https://auth.example.lan/realms/main (https)")
+		}
+	}
+	for _, v := range []string{c.GoogleClientID, c.GoogleClientSecret, c.EntraClientID, c.EntraClientSecret, c.OIDCClientID, c.OIDCClientSecret} {
 		if len(v) > 600 || strings.ContainsAny(v, " \t\r\n") {
 			return errors.New("web: a single sign-on client ID or secret is too long or has spaces in it")
 		}
@@ -177,6 +197,7 @@ var (
 
 type ssoProvider struct {
 	id, title        string
+	issuer           string // oidc: the issuer the discovery document must name
 	clientID, secret string
 	tenant           string
 	disc             string // discovery document address
@@ -193,6 +214,14 @@ func (c SSOConfig) providers() []ssoProvider {
 	if c.EntraTenant != "" && c.EntraClientID != "" && c.EntraClientSecret != "" {
 		out = append(out, ssoProvider{id: "entra", title: "Microsoft", clientID: c.EntraClientID, secret: c.EntraClientSecret, tenant: c.EntraTenant,
 			disc: ssoEntraBase + "/" + c.EntraTenant + "/v2.0/.well-known/openid-configuration", scope: "openid email profile", extra: url.Values{"prompt": {"select_account"}}})
+	}
+	if c.OIDCIssuer != "" && c.OIDCClientID != "" && c.OIDCClientSecret != "" {
+		title := c.OIDCName
+		if title == "" {
+			title = "SSO"
+		}
+		out = append(out, ssoProvider{id: "oidc", title: title, clientID: c.OIDCClientID, secret: c.OIDCClientSecret, issuer: c.OIDCIssuer,
+			disc: c.OIDCIssuer + "/.well-known/openid-configuration", scope: "openid email profile"})
 	}
 	return out
 }
@@ -278,6 +307,9 @@ func (s *ssoState) discovery(p *ssoProvider) (*ssoDisc, error) {
 			return d, nil // the provider is briefly unreachable: the last document still holds
 		}
 		return nil, err
+	}
+	if p.issuer != "" && strings.TrimRight(nd.Issuer, "/") != p.issuer { // a discovery document must name the issuer it was fetched from
+		return nil, errors.New("the provider's discovery document names another issuer")
 	}
 	if nd.Issuer == "" || !ssoURLOK(nd.AuthURL) || !ssoURLOK(nd.TokenURL) || !ssoURLOK(nd.JWKSURI) {
 		return nil, errors.New("the provider's discovery document is not usable")
@@ -432,6 +464,12 @@ func (s *ssoState) verifyIDToken(p *ssoProvider, d *ssoDisc, tok, nonce string, 
 				return "", errors.New("Google has not verified this address")
 			}
 		}
+	case "oidc":
+		if v, ok := c.EmailVerified.(bool); !(ok && v) {
+			if sv, ok := c.EmailVerified.(string); !(ok && sv == "true") {
+				return "", errors.New("the provider has not verified this address")
+			}
+		}
 	case "entra":
 		if !strings.EqualFold(c.Tid, p.tenant) {
 			return "", errors.New("the account is from another tenant")
@@ -584,7 +622,7 @@ func (w *WebServer) handleSSOCallback(rw http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		warnf("web: single sign-on with %s from %s: %v", p.title, ip, err)
-		ssoFail(rw, r, "Could not finish signing in with "+p.title+". Check the client ID and secret on the Web GUI page.")
+		ssoFail(rw, r, "Could not finish signing in with "+p.title+". Check the client ID and secret under Configure ▸ Users ▸ SSO.")
 		return
 	}
 	email, err := w.sso.verifyIDToken(p, d, tr.IDToken, pd.nonce, time.Now())

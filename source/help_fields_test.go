@@ -38,6 +38,8 @@ func TestHelpCoversEveryField(t *testing.T) {
 		{"LDAP_FIELDS", "users_ldap"},
 		{"SNMP_FIELDS", "config_snmp"},
 		{"CLUSTER_FIELDS", "config_cluster"},
+		{"LOG_FIELDS", "config_logs"},
+		{"SYSLOG_FIELDS", "config_logs"},
 		{"GENERAL_FIELDS", "config_general"},
 	}
 	type span struct {
@@ -118,21 +120,21 @@ func TestHelpCoversEveryField(t *testing.T) {
 	}
 
 	extra := map[string][]string{
-		"topology":       {"Time range"},
-		"config_general": {"Update every node automatically when a newer release is staged (one node at a time)", "Online repository"},
-		"config_web0":    {"Username", "Password"},
-		"config_web1":    {"Certificate", "Private key", "Main name", "Other names (one per line)", "IP addresses (one per line, optional)", "Pending CSR"},
-		"cluster":        {"Node", "Join code"},
-		"updates":        {"Release archive", "Fetch from online"},
-		"anycast_bgp":    {"Local AS number", "Router ID", "New neighbor address", "New neighbor AS", "New neighbor description", "New neighbor password"},
-		"anycast_ospf":   {"Router ID", "Hello interval", "Dead interval", "Metric", "New interface name", "New interface area", "New interface link type", "New interface key"},
-		"history":        {"Compare version", "Configuration file"},
-		"stats":          {"Time range", "From", "To"},
-		"host":           {"Time range", "From", "To"},
-		"capture":        {"Interface", "Filter"},
-		"log":            {"Filter text", "Level", "Time range", "Lines", "Live"},
-		"node":           {"Action", "When", "Minutes", "Time of day"},
-		"users_local":    {"Name", "Password", "Expires"},
+		"topology":        {"Time range"},
+		"config_upgrades": {"Update every node automatically when a newer release is staged (one node at a time)", "Online repository"},
+		"config_web0":     {"Username", "Password"},
+		"config_web1":     {"Certificate", "Private key", "Main name", "Other names (one per line)", "IP addresses (one per line, optional)", "Pending CSR"},
+		"cluster":         {"Node", "Join code"},
+		"updates":         {"Release archive", "Fetch from online"},
+		"anycast_bgp":     {"Local AS number", "Router ID", "New neighbor address", "New neighbor AS", "New neighbor description", "New neighbor password"},
+		"anycast_ospf":    {"Router ID", "Hello interval", "Dead interval", "Metric", "New interface name", "New interface area", "New interface link type", "New interface key"},
+		"history":         {"Compare version", "Configuration file"},
+		"stats":           {"Time range", "From", "To"},
+		"host":            {"Time range", "From", "To"},
+		"capture":         {"Interface", "Filter"},
+		"log":             {"Filter text", "Level", "Time range", "Lines", "Live"},
+		"node":            {"Action", "When", "Minutes", "Time of day"},
+		"users_local":     {"Name", "Password", "Expires"},
 	}
 	for tp, ls := range extra {
 		for _, l := range ls {

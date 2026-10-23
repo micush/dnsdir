@@ -253,6 +253,13 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 		b.putJSON("dnsdir/ospf.json", st)
 	})
 	do(func() {
+		if st, err := m.SyslogStatus(); err != nil {
+			b.fail("dnsdir/syslog.json", err)
+		} else {
+			b.putJSON("dnsdir/syslog.json", st)
+		}
+	})
+	do(func() {
 		if m.anycastFn != nil {
 			b.putJSON("dnsdir/anycast.json", m.anycastFn())
 		}

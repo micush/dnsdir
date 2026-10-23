@@ -612,7 +612,7 @@ This section is the detail behind [How it works](#how-it-works), for when you ne
 
 ### The gateway key, clocks and replay
 
-Every packet of the election protocol is signed with the gateway's **HMAC shared key** (Settings ▸ Gateway groups), so a machine without the key cannot take part. Anyone who has the key can take over the gateway, so use a long random one: a new gateway starts with a random 32-character key, and a gateway whose key is well known (`dnsdir`, `dgw`, `change-me`) or shorter than 12 characters is named in the log, by `--canvas` and in red beside the field in Settings. Changing the key there is pushed to every node by the cluster and restarts the gateway on each; for a moment the nodes do not hear each other, so do it at a quiet time.
+Every packet of the election protocol is signed with the gateway's **HMAC shared key** (Configure ▸ Gateways), so a machine without the key cannot take part. Anyone who has the key can take over the gateway, so use a long random one: a new gateway starts with a random 32-character key, and a gateway whose key is well known (`dnsdir`, `dgw`, `change-me`) or shorter than 12 characters is named in the log, by `--canvas` and in red beside the field in Settings. Changing the key there is pushed to every node by the cluster and restarts the gateway on each; for a moment the nodes do not hear each other, so do it at a quiet time.
 
 Since protocol version 3 every packet also carries the sender's clock (Unix milliseconds) under the signature. A node drops a packet whose clock is more than 30 seconds from its own, and a packet that is not newer than the last one it took from the same sender, so a recorded packet cannot be played back. Keep the nodes' clocks in step with NTP; a node whose clock is off is named in the log once a minute ("is N s off this node's clock"). **Version 3 nodes and version 2 nodes (dnsdir v429 and earlier) do not hear each other**, so while a cluster is being updated a gateway can have more than one controller until all its nodes have the new version; update them close together.
 
@@ -634,7 +634,7 @@ A controller that gives way to a better one moves to a free forwarder slot. Two 
 
 ### Real-MAC mode (no virtual MACs)
 
-Virtual MACs need the network to deliver frames addressed to a MAC that is not the NIC's own. A VMware port group with promiscuous mode off drops them, and so do clouds that allow one MAC per interface. For those networks, a gateway has a setting, **Use real MAC addresses** (Configure ▸ Gateway groups; `real_macs` in the file; `--configure`). It is shared by the cluster, and changing it restarts the gateway.
+Virtual MACs need the network to deliver frames addressed to a MAC that is not the NIC's own. A VMware port group with promiscuous mode off drops them, and so do clouds that allow one MAC per interface. For those networks, a gateway has a setting, **Use real MAC addresses** (Configure ▸ Gateways; `real_macs` in the file; `--configure`). It is shared by the cluster, and changing it restarts the gateway.
 
 It is **on for a gateway you create** (first start, Add gateway, `--canvas-add gateway`, `--configure`), because most networks need it. A gateway that already existed keeps the setting it had (a file that does not say `real_macs` means off), so an upgrade changes nothing. Off is the older way: a virtual MAC per node, which fails over without depending on the neighbors (see the last point below).
 
@@ -762,8 +762,8 @@ A directory account keeps its password and expiry date in the directory. **Add a
 | `--cluster-status/-token/-join/-promote/-remove/-unremove/-leave/-sync` | Cluster tab |
 | `--cluster-failover auto\|on\|off` | none: the GUI always uses Auto (on from three members); the command forces it on or off |
 | `--update-status/-history/-upload/-apply/-push` | Upgrade tab (stats at the top, upload, a paged History of every update event (`--update-history` prints them all; `--update-status` the newest 50), Nodes card: tick members, **Update this node now** / **Update N selected**) |
-| `--update-auto` | Configure ▸ General ▸ **Upgrade** card |
-| `--update-repo` | Configure ▸ General ▸ **Upgrade** card (Online repository) |
+| `--update-auto` | Configure ▸ Settings ▸ **Upgrades** tab |
+| `--update-repo` | Configure ▸ Settings ▸ **Upgrades** tab (Online repository) |
 | `--update-cancel` | command line only (the Upgrade tab shows what is queued) |
 | `--stats-clear` `[--all-nodes]`, `--scan ADDR`, `--ping ADDR\|NAME`, `--traceroute ADDR\|NAME`, `--lookup ADDR\|NAME`, `--cache-flush NAME`, `--cache-clear` | Statistics page: **Clear**; right-click a client ▸ **Scan** (prints the report); right-click a client or domain ▸ **Ping**, **Traceroute**, **Lookup** (the popup's output, printed when done); right-click a domain ▸ **Flush** (every node); `--cache-clear` is the **Clear** button of the **Cache** box on the DNS page (every node); a client's **Limit** is the `client_limits` setting, **Copy** has no command |
 | `--stats` `[--stats-range now\|1h\|1d\|7d\|30d] [--stats-rcode KIND] [--stats-client ADDR \| --stats-domain NAME] [--all-nodes]`, `--whois NAME`, `--dns-updates` | Statistics page (Monitor); `--whois` is right-click ▸ **Whois**; the last is its **Recent dynamic updates** card |
@@ -777,6 +777,7 @@ A directory account keeps its password and expiry date in the directory. **Add a
 | `--bgp-disable`, `--bgp-enable`, `--bgp-neighbor-disable ADDR`, `--bgp-neighbor-enable ADDR` | Operate ▸ Anycast (Disable / Enable BGP, and per neighbor) |
 | `--ospf`, `--ospf-router-id`, `--ospf-interface-add NAME` `[--ospf-area A] [--ospf-network T] [--ospf-key K]`, `--ospf-interface-del NAME`, `--ospf-hello`, `--ospf-dead`, `--ospf-metric` | Configure ▸ Anycast ▸ OSPF |
 | `--ospf-disable`, `--ospf-enable`, `--ospf-interface-disable NAME`, `--ospf-interface-enable NAME` | Operate ▸ Anycast (Disable / Enable OSPF, and per interface) |
+| `--syslog`, `--syslog-server`, `--syslog-protocol`, `--syslog-facility`, `--syslog-format`, `--syslog-ca`, `--syslog-tls-insecure`, `--syslog-disable`, `--syslog-enable`, `--syslog-test` | Configure ▸ Settings ▸ Logs (Syslog card) |
 | `--version`, `--help` | version in the header; the **?** at the top right of every page opens a slide-out help panel for that page or tab (what it is for, the steps for the usual jobs, every field, and the command-line equivalents) |
 
 ### TLS and security notes
@@ -1046,7 +1047,9 @@ Monitor ▸ Log (or `dnsdir --log`) shows the daemon's log and filters it by wor
 
 ![Monitor ▸ Log: filtered by level and words, with the matches marked](snaps/log.png)
 
-The text is the same that goes to stderr (the system journal under systemd). AnyName also keeps it in `dnsdir.log` in the state directory (`/var/lib/dnsdir`, root-only), rotated at 2 MB with the two previous files kept, so it survives restarts and needs no journal access. Besides the usual events, it logs server up and down changes and each domain that starts or stops answering on a server, so one failing domain shows even while the server stays up.
+The text is the same that goes to stderr (the system journal under systemd). AnyName also keeps it in `dnsdir.log` in the state directory (`/var/lib/dnsdir`, root-only), rotated at 100 MB with the two previous files kept, so it survives restarts and needs no journal access. Besides the usual events, it logs server up and down changes and each domain that starts or stops answering on a server, so one failing domain shows even while the server stays up.
+
+**Sending the log to a syslog server (Configure ▸ Settings ▸ Logs).** Every line the log shows can also be sent to a syslog server, over TCP, UDP or TLS, as RFC 5424 (or RFC 3164 for an old collector) messages with the severity of the line and the facility you pick (`daemon`, `local0` to `local7`, …). It is set per node and is not replicated. A server that is down never holds AnyName up: messages wait in a queue of 2000, the oldest are dropped when it fills, and the connection is retried with a growing pause. On TLS the server's certificate is checked against the CA file you give (or the system's authorities); ticking *Do not check the server's certificate* turns the check off. The tab shows whether the connection is up, how many messages were sent and dropped, and has a **Send test message** button. From the command line: `dnsdir --syslog`, `--syslog-server HOST[:PORT]`, `--syslog-protocol udp|tcp|tls`, `--syslog-facility`, `--syslog-format`, `--syslog-ca FILE`, `--syslog-tls-insecure`, `--syslog-disable`, `--syslog-enable`, `--syslog-test`. The local file and the journal are written as before, whatever the syslog server does.
 
 **tshoot** (Monitor ▸ Log ▸ tshoot, or `dnsdir --tshoot [--all-nodes]`) downloads one `.tgz` with what is needed to find out why something does not work, from every node:
 

@@ -129,6 +129,10 @@ the web GUI):
                    --ospf-disable | --ospf-enable   (stop / restart OSPF on this node, settings kept)
                    --ospf-interface-disable NAME | --ospf-interface-enable NAME
                                                  (per node; ospfd and ospf6d run only while an interface is set; BFD is always on)
+  Syslog           --syslog   (forwarding of this node's log to a syslog server: settings and state)
+                   --syslog-server HOST[:PORT]  [--syslog-protocol udp|tcp|tls]  [--syslog-facility daemon|local0..local7]
+                   [--syslog-format rfc5424|rfc3164]  [--syslog-ca FILE]  [--syslog-tls-insecure]   (- = default / none)
+                   --syslog-disable | --syslog-enable   (settings kept)   --syslog-test   (send a test message)
   Cluster          --cluster-status  --cluster-token  --cluster-join CODE
                    --cluster-promote  --cluster-remove ADDR
                    --cluster-failover auto|on|off   (the primary promotes a replica by itself

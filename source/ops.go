@@ -208,6 +208,24 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 			return nil, err
 		}
 		return m.OSPFStatus()
+	// syslog forwarding
+	case "syslog.status":
+		return m.SyslogStatus()
+	case "syslog.set":
+		var c SyslogConfig
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return nil, fmt.Errorf("bad arguments: %w", err)
+		}
+		if err := m.SyslogSet(c, actor); err != nil {
+			return nil, err
+		}
+		return m.SyslogStatus()
+	case "syslog.test":
+		st, err := sysSink.SendTest(actor)
+		if err != nil {
+			return nil, err
+		}
+		return st, nil
 	// log
 	case "log.read", "log.view":
 		q, err := logQueryFromArgs(a.LogLevel, a.LogText, a.LogSince, a.LogN)

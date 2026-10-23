@@ -1,5 +1,16 @@
 # Changelog
 
+## [v531] - 2026-10-23 — Configure ▸ Settings with General, Logs and Upgrades tabs; syslog forwarding; Gateways
+
+- **Configure ▸ General is now Configure ▸ Settings**, with three tabs. **General** keeps *Pause this node when its own DNS stops answering*. **Logs** holds the *Log level* and the new syslog settings. **Upgrades** holds the upgrade card (automatic updates, online repository).
+- **Configure ▸ Gateway groups is now Configure ▸ Gateways.**
+- **Syslog forwarding (Configure ▸ Settings ▸ Logs, `--syslog*`).** Every line of the log can also go to a syslog server over **TCP, UDP or TLS** (RFC 5424, or RFC 3164), with the facility you pick. Per node, not replicated. A queue of 2000 messages keeps a slow or dead server from holding anything up (the oldest are dropped and counted); the connection is retried with a growing pause. TLS checks the server's certificate against a CA file or the system's authorities unless told not to. The tab shows connected / not connected with the sent and dropped counts, and has a **Send test message** button. CLI: `--syslog`, `--syslog-server`, `--syslog-protocol`, `--syslog-facility`, `--syslog-format`, `--syslog-ca`, `--syslog-tls-insecure`, `--syslog-disable`, `--syslog-enable`, `--syslog-test`. The troubleshooting bundle gets `dnsdir/syslog.json`.
+- **Help:** new panels for the General, Logs and Upgrades tabs; the Gateways panel is renamed.
+
+## [v530] - 2026-10-23 — Log file rotates at 100 MB
+
+- The daemon's log file (`dnsdir.log` in the state directory) now rotates at **100 MB** instead of 2 MB; the two previous files are still kept, so up to about 300 MB of history is on disk. README and the Log help panel say so.
+
 ## [v529] - 2026-10-23 — Configure ▸ Users tabs: Local, LDAP, SSO
 
 - The tabs on **Configure ▸ Users** are now in the order **Local**, **LDAP**, **SSO** (they were Local, SSO, LDAP). Nothing else changes; the help panel still follows the tab.

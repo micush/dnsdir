@@ -989,6 +989,8 @@ type DaemonConfig struct {
 	BGP *BGPConfig `json:"bgp,omitempty"`
 	// OSPF is this node's OSPF settings (see ospf.go), per node like BGP.  Nil when never used: no "ospf" key.
 	OSPF *OSPFConfig `json:"ospf,omitempty"`
+	// Syslog is this node's log forwarding to a syslog server (see syslog.go), per node, never replicated.  Nil when never used: no "syslog" key.
+	Syslog *SyslogConfig `json:"syslog,omitempty"`
 	// SNMP is this node's own snmpd setting, the location (see snmp.go).  The community strings and the contact are
 	// shared and live in DNS.  A pointer with omitempty so a config that never used SNMP has no "snmp" key.
 	SNMP *SNMPConfig `json:"snmp,omitempty"`
@@ -1254,6 +1256,14 @@ func (dc *DaemonConfig) Validate() error {
 		}
 		if !dc.OSPF.Configured() {
 			dc.OSPF = nil
+		}
+	}
+	if dc.Syslog != nil {
+		if err := dc.Syslog.Validate(); err != nil {
+			return err
+		}
+		if dc.Syslog.empty() {
+			dc.Syslog = nil
 		}
 	}
 	return dc.Cluster.Validate()

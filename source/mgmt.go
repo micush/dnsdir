@@ -124,6 +124,7 @@ func (m *Mgmt) OnConfigLoaded(dc *DaemonConfig) {
 	w := dc.Web
 	m.webPolicy.Store(&w)
 	m.bgp.Apply(dc)
+	sysSink.Apply(dc.Syslog)
 	m.sched.SetTasks(dc.DNS.Schedule)
 	m.blocks.Apply(dc.DNS.BlockLists, dc.DNS.BlockUpdateHours)
 	m.certs.Refresh()

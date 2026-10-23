@@ -207,7 +207,7 @@ func (e *Engine) run(ctx context.Context) {
 	infof("Starting distributed gateway/%s on %s ip=%s group=%d vip=%s",
 		e.af, e.cfg.Interface, ip, e.cfg.GroupID, e.cfg.vipFor(e.af))
 	if isWeakKey(e.cfg.Key) {
-		warnf("Gateway %d signs its messages with a well-known or short key: anyone on this network who knows it can take over the gateway. Set a long random key in Settings ▸ Gateway groups (the cluster pushes it to every node) (%s)", e.cfg.GroupID, e.tag())
+		warnf("Gateway %d signs its messages with a well-known or short key: anyone on this network who knows it can take over the gateway. Set a long random key in Configure ▸ Gateways (the cluster pushes it to every node) (%s)", e.cfg.GroupID, e.tag())
 	}
 
 	var conn net.PacketConn

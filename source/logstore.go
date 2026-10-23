@@ -20,9 +20,9 @@ import (
 
 const (
 	logFileName    = "dnsdir.log"
-	logFileMax     = 2 << 20 // rotate when the current file reaches this size
-	logFileKeep    = 2       // rotated files kept
-	logReadMax     = 5000    // most lines one GUI request returns
+	logFileMax     = 100 << 20 // rotate when the current file reaches this size
+	logFileKeep    = 2         // rotated files kept
+	logReadMax     = 5000      // most lines one GUI request returns
 	logReadDefault = 1000
 )
 
@@ -102,7 +102,7 @@ func startLogFile(dir string) {
 		return
 	}
 	logDir = dir
-	slog.SetDefault(slog.New(slog.NewTextHandler(io.MultiWriter(os.Stderr, rf), &slog.HandlerOptions{Level: logLevel})))
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.MultiWriter(os.Stderr, rf, sysSink), &slog.HandlerOptions{Level: logLevel})))
 }
 
 // LogQuery selects log lines.  Zero values mean "no filter"; Limit 0 means all.

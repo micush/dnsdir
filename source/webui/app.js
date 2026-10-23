@@ -267,7 +267,7 @@
   // Topology comes first; its items are the gateways themselves (filled in from the daemon).
   const TOPO = "Topology";
   const NAV_GROUPS = [
-    ["Configure", [["cfg_general", "General"], ["cfg_groups", "Gateway groups"], ["cfg_dns", "DNS"], ["cfg_web", "Web GUI"], ["cfg_snmp", "SNMP"], ["cfg_cluster", "Cluster"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
+    ["Configure", [["cfg_general", "Settings"], ["cfg_groups", "Gateways"], ["cfg_dns", "DNS"], ["cfg_web", "Web GUI"], ["cfg_snmp", "SNMP"], ["cfg_cluster", "Cluster"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
     ["Operate", [["node", "Node"], ["cluster", "Cluster"], ["anycastop", "Anycast"], ["scheduler", "Scheduler"], ["updates", "Upgrade"]]],
     ["Monitor", [["stats", "Statistics"], ["host", "Host"], ["gateways", "Gateways"], ["nodes", "Cluster"], ["dns", "DNS"], ["anycaststatus", "Anycast"], ["capture", "Capture"], ["log", "Log"]]],
   ];
@@ -481,7 +481,7 @@
   function helpTopicKey() {
     const k = (() => {
       switch (state.tab) {
-      case "cfg_general": return "config_general";
+      case "cfg_general": return state.settingsTab === "logs" ? "config_logs" : state.settingsTab === "upgrades" ? "config_upgrades" : "config_general";
       case "cfg_groups": return "config_groups";
       case "cfg_web": return "config_web" + (state.webTab === 1 ? 1 : 0);
       case "anycast": return "anycast_" + (state.anycastTab === 1 ? "ospf" : "bgp");
@@ -2377,8 +2377,18 @@
     { k: "self", l: "Advertised address", t: "text" },
     { k: "sync_interval_sec", l: "Sync interval (s)", t: "int", min: 1, max: 3600 },
   ];
+  // Configure ▸ Settings ▸ Logs: where this node sends its log (per node, never replicated)
+  const SYSLOG_FIELDS = [
+    { k: "enabled", l: "Send the log to a syslog server", t: "bool", hint: "" },
+    { k: "protocol", l: "Protocol", t: "select", options: ["tcp", "udp", "tls"] },
+    { k: "server", l: "Server", t: "text", hint: "a host name or address, with the port if it is not the usual one: logs.example.com or 10.0.0.9:1514 (514, and 6514 for tls)" },
+    { k: "facility", l: "Facility", t: "select", options: ["daemon", "user", "auth", "authpriv", "local0", "local1", "local2", "local3", "local4", "local5", "local6", "local7"] },
+    { k: "format", l: "Message format", t: "select", options: ["rfc5424", "rfc3164"] },
+    { k: "ca_file", l: "CA certificate file (tls)", t: "text", hint: "the PEM file of the authority that signed the server's certificate; empty trusts the system's authorities" },
+    { k: "tls_insecure", l: "Do not check the server's certificate (tls)", t: "bool" },
+  ];
+  const LOG_FIELDS = [{ k: "log_level", l: "Log level", t: "select", options: ["debug", "info", "warning", "error"] }];
   const GENERAL_FIELDS = [
-    { k: "log_level", l: "Log level", t: "select", options: ["debug", "info", "warning", "error"] },
     { k: "self_check", l: "Pause this node when its own DNS stops answering", t: "bool", hint: "Every few seconds the node asks its own DNS listeners a question. If they stop answering while the program is still running (a stuck cache, say), the node pauses itself: the VIP and the anycast addresses come off and the other nodes carry on. It starts again by itself to check, and resumes once the listeners answer. It never pauses the only node in service. Local to this node." },
   ];
 
@@ -3295,7 +3305,7 @@
   // Configure ▸ General, Gateway groups, DNS proxy, Web GUI and Cluster: one page each, all made from the one form
   // (every page shows its own panel and saves through the same call).
   const makeConfigView = (only) => {
-    let holder, status, collect = null, refreshSNMP = () => {};
+    let holder, status, collect = null, refreshSNMP = () => {}, refreshSyslog = () => {};
     const tab = only;
 
     // Action results ("Saved", "Restored" …) are not announced; only errors, warnings and hints are.
@@ -3303,6 +3313,8 @@
 
     function renderForm(cfg) {
       const general = fieldset(GENERAL_FIELDS, cfg);
+      const logs = fieldset(LOG_FIELDS, cfg);
+      const syslog = fieldset(SYSLOG_FIELDS, cfg.syslog || {});
       const web = fieldset(WEB_FIELDS, cfg.web);
       const sso = ssoTabs(cfg.web);
       const ldap = ldapTab(cfg.web);
@@ -3396,6 +3408,7 @@
       cfg.groups.forEach(addGroup);
       const section = (title, ...kids) => h("div", { class: "card" }, h("header", {}, h("h2", {}, tc(title))), h("div", { class: "body" }, ...kids));
       collect = () => ({
+        ...logs.get(),
         ...general.get(),
         // keep what this form has no fields for (a gateway's own DNS pool, per-server domains)
         groups: groups.map((g) => ({ ...(g.orig.dns ? { dns: g.orig.dns } : {}), ...(g.orig.paused ? { paused: true } : {}), ...(g.orig.paused_all ? { paused_all: true } : {}), ...(g.orig.excluded_nodes ? { excluded_nodes: g.orig.excluded_nodes } : {}), ...(g.orig.node_order ? { node_order: g.orig.node_order } : {}), ...(g.orig.paused_vips ? { paused_vips: g.orig.paused_vips } : {}), ...(g.orig.paused_vips_here ? { paused_vips_here: g.orig.paused_vips_here } : {}), ...(g.orig.extra_vips ? { extra_vips: g.orig.extra_vips } : {}), ...g.fs.get() })),
@@ -3404,6 +3417,7 @@
         web: { cert_file: cfg.web.cert_file || "", key_file: cfg.web.key_file || "", ...web.get(), ...sso.get(), ...ldap.get() },
         cluster: cluster.get(),
         snmp: snmpLocal(),
+        ...(() => { const v = syslog.get(); return v.enabled || v.server ? { syslog: v } : {}; })(), // empty settings leave no key
         ...(cfg.bgp ? { bgp: cfg.bgp } : {}), // edited on the Anycast page
         ...(cfg.ospf ? { ospf: cfg.ospf } : {}), // likewise
         ...(cfg.node_paused ? { node_paused: true } : {}), // set on the Node page
@@ -3435,7 +3449,7 @@
             repoIn.value = state.updateRepo ? "https://github.com/" + state.updateRepo : DEFAULT_REPO;
           } catch (e) { repoErr.textContent = e.message || String(e); }
         });
-        return section("Upgrade", h("label", { class: "f check" }, cb, "Update every node automatically when a newer release is staged (one node at a time)"),
+        return section("Upgrades", h("label", { class: "f check" }, cb, "Update every node automatically when a newer release is staged (one node at a time)"),
           h("label", { class: "f repo" }, h("span", {}, "Online repository"), repoIn, repoErr),
           h("p", { class: "hint" }, "Upload a release on the Upgrade page; with this on, each node then builds and installs it in turn and rolls back by itself if the new version does not stay up."));
       };
@@ -3468,9 +3482,60 @@
         show(state.webTab >= 0 && state.webTab < TABS.length ? state.webTab : 0);
         return h("div", {}, strip, ...panes);
       };
+      // Syslog: the state of the connection is shown under the settings, with a button that sends a test message
+      const syslogState = h("div", { class: "hint" });
+      const syslogMsg = h("span", { class: "hint" });
+      refreshSyslog = async () => {
+        try {
+          const st = (await api("GET", "/api/syslog")).data.status;
+          clear(syslogState);
+          if (!st.enabled) { syslogState.append("Forwarding is off."); return; }
+          syslogState.append(pill(st.connected ? "connected" : "not connected", st.connected ? "ok tiny" : "bad tiny"),
+            " " + st.protocol + " to " + st.address + " · " + st.sent + " sent, " + st.dropped + " dropped" + (st.last_error ? " · " + st.last_error : ""));
+        } catch (_) { clear(syslogState); }
+      };
+      refreshSyslog();
+      const syslogTest = h("button", { class: "btn", type: "button" }, "Send test message");
+      syslogTest.addEventListener("click", async (ev) => {
+        ev.stopPropagation(); // not a config edit
+        clear(syslogMsg); syslogTest.disabled = true;
+        try { await api("POST", "/api/syslog/test", {}); syslogMsg.textContent = "Delivered."; }
+        catch (e) { if (e.message === "unauthenticated") throw e; syslogMsg.textContent = "Not delivered: " + (e.message || e); }
+        syslogTest.disabled = false;
+        refreshSyslog();
+      });
+      // the Settings page is tabs (every card stays in the page, so a save reads all of them)
+      const settingsTabs = () => {
+        const TABS = [
+          ["general", "General", section("General", general.el)],
+          ["logs", "Logs", h("div", {}, section("Log level", logs.el),
+            section("Syslog", syslog.el, h("div", { class: "toolbar" }, syslogTest, syslogMsg, syslogState),
+              h("p", { class: "hint" }, "Every line the log shows is also sent to the server, from this node only: the setting is not copied to the other nodes. A server that is down never holds anything up; the newest messages wait in a queue and the oldest are dropped if it fills.")))],
+          ["upgrades", "Upgrades", updatesCard() || section("Upgrades", h("p", { class: "hint" }, "The upgrade settings cannot be read right now."))],
+        ];
+        const panes = TABS.map(([, , el]) => h("div", { role: "tabpanel" }, el));
+        const buttons = TABS.map(([, name], i) => h("button", { type: "button", role: "tab", class: "dtab", onclick: () => show(i) }, name));
+        function show(i, focus) {
+          state.settingsTab = TABS[i][0];
+          refreshHelp();
+          panes.forEach((p, j) => { p.hidden = j !== i; });
+          buttons.forEach((b, j) => { b.setAttribute("aria-selected", j === i ? "true" : "false"); b.tabIndex = j === i ? 0 : -1; b.classList.toggle("on", j === i); });
+          if (focus) buttons[i].focus();
+        }
+        const strip = h("div", { class: "dtabs", role: "tablist", "aria-label": "Settings" }, buttons);
+        strip.addEventListener("keydown", (e) => {
+          const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+          if (!d) return;
+          e.preventDefault();
+          const cur = Math.max(0, TABS.findIndex((t) => t[0] === state.settingsTab));
+          show((cur + d + TABS.length) % TABS.length, true);
+        });
+        show(Math.max(0, TABS.findIndex((t) => t[0] === state.settingsTab)));
+        return h("div", {}, strip, ...panes);
+      };
       // one card per tab; every tab stays in the page (the hidden ones are just not shown) so a save reads all of them
       const panels = [
-        ["general", "General", h("div", {}, section("General", general.el), updatesCard())],
+        ["general", "Settings", settingsTabs()],
         ["groups", "Gateway groups", h("div", {}, groupsEl)],
         ["dns", "DNS", dnsTabs()],
         ["web", "Web GUI", webTabs()],
@@ -3528,6 +3593,7 @@
         clear(status);
         state.cfgInfo.exists = true;
         setTimeout(() => refreshSNMP(), 1500);   // snmpd was (re)started by the save
+        setTimeout(() => refreshSyslog(), 800);  // so was the connection to the syslog server
       } catch (e) { if (e.message !== "unauthenticated") say("bad", "Not saved: " + e.message); }
     }
 

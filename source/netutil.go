@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -21,7 +22,7 @@ var logLevel = new(slog.LevelVar)
 
 func setupLogging(level string) {
 	logLevel.Set(parseLevel(level))
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.MultiWriter(os.Stderr, sysSink), &slog.HandlerOptions{Level: logLevel})))
 }
 
 func parseLevel(s string) slog.Level {

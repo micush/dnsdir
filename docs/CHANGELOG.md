@@ -1,5 +1,15 @@
 # Changelog
 
+## [v527] - 2026-10-23 — Anycast over OSPF, and Configure ▸ Anycast split into BGP and OSPF tabs
+
+- **OSPF as a second way to announce the anycast addresses.** New **OSPF** tab on **Configure ▸ Anycast** (the **BGP** tab is first): router ID, hello and dead interval, metric, and a table of interfaces (name, area, link type, optional OSPFv2 MD5 key, enabled). OSPFv2 carries the IPv4 addresses and OSPFv3 the IPv6 ones. The settings are per node and not replicated (`ospf` block in the config, written only when used).
+- **`ospfd` and `ospf6d` run only while OSPF is configured.** They are switched on in `/etc/frr/daemons` when the first interface is added and back off (FRR restarted) when the last one is removed or OSPF is disabled; `bgpd` follows BGP in the same way and `bfdd` stays on while either protocol uses it. A node that uses neither never has its FRR files touched. `frr.conf` is now rendered for BGP and OSPF together; BGP-only output is unchanged.
+- **Same posture as BGP.** Only the anycast addresses are redistributed into OSPF (a route-map permits just them, type 1 external, with the configured metric) and nothing is taken in (a route-map on zebra's OSPF routes denies everything). BFD is on for every interface.
+- **Announce gate and Topology pills.** An address is held on `lo` while BGP **or** OSPF can carry it (OSPF: an enabled interface has a neighbor in state Full, OSPFv2 for IPv4, OSPFv3 for IPv6). The pill colours count OSPF interfaces the way they count BGP neighbors and show the better of the two; the labels say *no OSPF neighbor* / *OSPF disabled* when OSPF is the one in trouble.
+- **Operate ▸ Anycast** has *Disable OSPF* / *Enable OSPF* and a per-interface Disable / Enable (passive); **Monitor ▸ Anycast** shows the OSPF status and the neighbors per interface (protocol, state, BFD, up time) next to the BGP ones.
+- **Command line, API, support bundle.** `--ospf`, `--ospf-router-id`, `--ospf-interface-add/-del`, `--ospf-area`, `--ospf-network`, `--ospf-key`, `--ospf-hello`, `--ospf-dead`, `--ospf-metric`, `--ospf-disable/-enable`, `--ospf-interface-disable/-enable`; `GET/PUT /api/ospf` and `POST /api/ospf/operate` (relayable to another node); the tshoot bundle gets `dnsdir/ospf.json` and `frr/ospf.txt`.
+- **Help.** The Anycast configuration help is now two panels (BGP and OSPF) that follow the tab; the Operate and Monitor Anycast panels and the Topology notes cover OSPF.
+
 ## [v526] - 2026-10-23 — Help rewritten: one plain-English panel for every screen and tab
 
 - Every help panel was rewritten. Each screen now has a panel of its own, and so does every tab and sub-tab: the Configure ▸ General, Gateway groups, Web GUI (General and Certificates), SNMP and Cluster pages, each of the six DNS tabs, the four Resolution sub-tabs (Policy-Based Resolution, Sort List, Conditional Forwarding, Block Lists), the Users tabs (Local, SSO with its General, Google, Microsoft and OpenID Connect tabs, and LDAP), and every Operate and Monitor page.

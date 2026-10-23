@@ -484,6 +484,7 @@
       case "cfg_general": return "config_general";
       case "cfg_groups": return "config_groups";
       case "cfg_web": return "config_web" + (state.webTab === 1 ? 1 : 0);
+      case "anycast": return "anycast_" + (state.anycastTab === 1 ? "ospf" : "bgp");
       case "cfg_snmp": return "config_snmp";
       case "cfg_cluster": return "config_cluster";
       case "cfg_dns": return "config_dns" + (state.dnsTab >= 0 ? state.dnsTab : 0) + (state.dnsTab === 3 ? "_" + (state.resTab >= 0 ? state.resTab : 0) : "");
@@ -1001,7 +1002,7 @@
           sv("title", {}, "Anycast " + addr + " — " + why + (a && !noSrv && !g.paused && !g.paused_all && !pz ? (a.cluster_up_sec > 0 ? "\nOnline for " + spanText(a.cluster_up_sec) : upLine(a.uptime)) : "")),
           sv("rect", { x, y, width: AW, height: AH, rx: 18 }),
           label(x + AW / 2, y + 17, addr, "ip"),
-          label(x + AW / 2, y + 32, a && a.up && !noSrv && !pz && a.status === "warn" ? "anycast · neighbor down" : a && a.up && !noSrv && !pz && a.status === "bad" ? (a.bgp === "disabled" ? "anycast · BGP disabled" : "anycast · no BGP session") : c === "ok" ? "anycast · announced" : c === "paused" && pz ? "paused · " + (pzAll ? "all nodes" : "this node") : c === "paused" ? "anycast · paused" : a && !a.up && !noSrv ? "anycast · withdrawn" : "anycast", "t2")));
+          label(x + AW / 2, y + 32, a && a.up && !noSrv && !pz && a.status === "warn" ? "anycast · neighbor down" : a && a.up && !noSrv && !pz && a.status === "bad" ? (a.bgp === "disabled" ? "anycast · " + (/^OSPF/.test(a.detail || "") ? "OSPF" : "BGP") + " disabled" : /OSPF/.test(a.detail || "") ? "anycast · no OSPF neighbor" : "anycast · no BGP session") : c === "ok" ? "anycast · announced" : c === "paused" && pz ? "paused · " + (pzAll ? "all nodes" : "this node") : c === "paused" ? "anycast · paused" : a && !a.up && !noSrv ? "anycast · withdrawn" : "anycast", "t2")));
       });
       // the cluster's nodes, left of the circle, as parallelograms: drag one to another place (the order is saved with the gateway)
       const nodeIds = nodes.map((n) => n.node_id);
@@ -3402,6 +3403,7 @@
         cluster: cluster.get(),
         snmp: snmpLocal(),
         ...(cfg.bgp ? { bgp: cfg.bgp } : {}), // edited on the Anycast page
+        ...(cfg.ospf ? { ospf: cfg.ospf } : {}), // likewise
         ...(cfg.node_paused ? { node_paused: true } : {}), // set on the Node page
         ...(cfg.paused_servers_here ? { paused_servers_here: cfg.paused_servers_here } : {}), // set on the Topology page
         ...(cfg.paused_queries_here ? { paused_queries_here: cfg.paused_queries_here } : {}),
@@ -5242,43 +5244,77 @@
     };
   })();
 
-  // ── Anycast, Monitor  (CLI: --bgp) ──────────────────────────────────────────────
+  // ── Anycast, Monitor  (CLI: --bgp, --ospf) ──────────────────────────────────────────────
   VIEWS.anycaststatus = (() => {
     let box;
     const stateKind = (st) => (st === "Established" ? "ok" : st === "Active" || st === "Connect" || st === "OpenSent" || st === "OpenConfirm" ? "warn" : "bad");
+    const ospfKind = (st) => (st === "Full" ? "ok" : st === "Down" || st === "Attempt" ? "bad" : "warn");
     const bfdKind = (st) => (st === "up" ? "ok" : st === "init" ? "warn" : st === "down" ? "bad" : "");
 
-    function draw(st) { const real = box; box = h("div", {}); try { build(st); } finally { morph(real, box); box = real; } }
+    function draw(st, os) { const real = box; box = h("div", {}); try { build(st, os); } finally { morph(real, box); box = real; } }
     // built into a detached copy and morphed in: the page keeps its elements (and so its scroll boxes) from one poll to the next
-    function build(st) {
-      const c = st.config;
-      if (!c.asn) {
-        box.append(section("BGP", h("div", { class: "muted" }, "BGP is off on this node.")));
+    function build(st, os) {
+      const c = st.config, oc = os.config;
+      const bgpOn = !!c.asn && !c.disabled, ospfOn = oc.interfaces.length > 0 && !oc.disabled;
+      if (!bgpOn && !ospfOn) {
+        const bits = [];
+        if (c.asn) bits.push("BGP is disabled on this node (AS " + c.asn + ").");
+        if (oc.interfaces.length) bits.push("OSPF is disabled on this node.");
+        box.append(section("Anycast routing", h("div", { class: "muted" }, bits.length ? bits.join(" ") : "BGP and OSPF are off on this node.")));
         return;
       }
-      if (c.disabled) {
-        box.append(section("BGP", h("div", { class: "muted" }, "BGP is disabled on this node (AS " + c.asn + ").")));
-        return;
-      }
-      box.append(section("Status", kv([
-        ["Local AS", String(c.asn) + (c.router_id ? " · router id " + c.router_id : "")],
-        ["FRR", st.installed ? pill("installed", "ok") : pill("not installed", "bad")],
-        st.installed ? ["bgpd", st.running ? pill("answering", "ok") : pill("not answering", "bad")] : null,
-        ["Last apply", h("span", {}, pill(st.applied.ok ? "ok" : "failed", st.applied.ok ? "ok" : "bad"), ...(st.applied.ok ? [] : [" ", st.applied.detail || "–"]))],
-      ]), ...(st.notes || []).map((n) => h("div", { class: "muted" }, n))));
+      const applied = (a) => ["Last apply", h("span", {}, pill(a.ok ? "ok" : "failed", a.ok ? "ok" : "bad"), ...(a.ok ? [] : [" ", a.detail || "–"]))];
+      if (bgpOn) {
+        box.append(section("BGP status", kv([
+          ["Local AS", String(c.asn) + (c.router_id ? " · router id " + c.router_id : "")],
+          ["FRR", st.installed ? pill("installed", "ok") : pill("not installed", "bad")],
+          st.installed ? ["bgpd", st.running ? pill("answering", "ok") : pill("not answering", "bad")] : null,
+          applied(st.applied),
+        ]), ...(st.notes || []).map((n) => h("div", { class: "muted" }, n))));
 
-      const live = new Map(st.peers.map((p) => [p.peer, p]));
-      const row = (n) => {
-        const p = live.get(n.peer);
-        return h("tr", {}, h("td", { class: "mono" }, n.peer), h("td", {}, String(n.remote_as)), h("td", {}, n.description || ""),
-          h("td", {}, n.disabled ? pill("disabled", "") : p ? pill(p.state, stateKind(p.state)) : pill(st.running ? "not known yet" : "–", "")),
-          h("td", {}, p && p.bfd ? pill(p.bfd, bfdKind(p.bfd)) : "–"),
-          h("td", {}, p && p.state === "Established" ? p.uptime : "–"),
-          h("td", {}, p && p.state === "Established" ? String(p.sent) : "–"));
-      };
-      box.append(section("Neighbors", h("div", { class: "scroll" }, h("table", {},
-        h("thead", {}, h("tr", {}, ["Neighbor", "AS", "Description", "BGP", "BFD", "Up for", "Prefixes sent"].map((t) => h("th", {}, t)))),
-        h("tbody", {}, c.neighbors.length ? c.neighbors.map(row) : h("tr", {}, h("td", { colspan: 7, class: "empty" }, "No neighbors yet: add one under Configure → Anycast.")))))));
+        const live = new Map(st.peers.map((p) => [p.peer, p]));
+        const row = (n) => {
+          const p = live.get(n.peer);
+          return h("tr", {}, h("td", { class: "mono" }, n.peer), h("td", {}, String(n.remote_as)), h("td", {}, n.description || ""),
+            h("td", {}, n.disabled ? pill("disabled", "") : p ? pill(p.state, stateKind(p.state)) : pill(st.running ? "not known yet" : "–", "")),
+            h("td", {}, p && p.bfd ? pill(p.bfd, bfdKind(p.bfd)) : "–"),
+            h("td", {}, p && p.state === "Established" ? p.uptime : "–"),
+            h("td", {}, p && p.state === "Established" ? String(p.sent) : "–"));
+        };
+        box.append(section("BGP neighbors", h("div", { class: "scroll" }, h("table", {},
+          h("thead", {}, h("tr", {}, ["Neighbor", "AS", "Description", "BGP", "BFD", "Up for", "Prefixes sent"].map((t) => h("th", {}, t)))),
+          h("tbody", {}, c.neighbors.length ? c.neighbors.map(row) : h("tr", {}, h("td", { colspan: 7, class: "empty" }, "No neighbors yet: add one under Configure → Anycast → BGP.")))))));
+      } else if (c.asn) {
+        box.append(section("BGP", h("div", { class: "muted" }, "BGP is disabled on this node (AS " + c.asn + ").")));
+      }
+
+      if (ospfOn) {
+        box.append(section("OSPF status", kv([
+          ["Router ID", oc.router_id],
+          ["FRR", os.installed ? pill("installed", "ok") : pill("not installed", "bad")],
+          os.installed ? ["ospfd / ospf6d", os.running ? pill("answering", "ok") : pill("not answering", "bad")] : null,
+          applied(os.applied),
+        ]), ...(os.notes || []).filter((n) => !(st.notes || []).includes(n)).map((n) => h("div", { class: "muted" }, n))));
+
+        const rows = [];
+        for (const f of oc.interfaces) {
+          const ps = os.peers.filter((p) => p.interface === f.name);
+          if (f.disabled || !ps.length) {
+            rows.push(h("tr", {}, h("td", { class: "mono" }, f.name), h("td", {}, f.area), h("td", {}, "–"), h("td", {}, "–"),
+              h("td", {}, f.disabled ? pill("disabled", "") : pill(os.running ? "no neighbor" : "–", os.running ? "bad" : "")), h("td", {}, "–"), h("td", {}, "–")));
+            continue;
+          }
+          for (const p of ps) {
+            rows.push(h("tr", {}, h("td", { class: "mono" }, f.name), h("td", {}, f.area), h("td", { class: "mono" }, p.neighbor), h("td", {}, p.af === "ipv6" ? "OSPFv3" : "OSPFv2"),
+              h("td", {}, pill(p.state, ospfKind(p.state))), h("td", {}, p.bfd ? pill(p.bfd, bfdKind(p.bfd)) : "–"), h("td", {}, p.state === "Full" && p.uptime ? p.uptime : "–")));
+          }
+        }
+        box.append(section("OSPF neighbors", h("div", { class: "scroll" }, h("table", {},
+          h("thead", {}, h("tr", {}, ["Interface", "Area", "Neighbor", "Protocol", "State", "BFD", "Up for"].map((t) => h("th", {}, t)))),
+          h("tbody", {}, rows)))));
+      } else if (oc.interfaces.length) {
+        box.append(section("OSPF", h("div", { class: "muted" }, "OSPF is disabled on this node.")));
+      }
 
       box.append(section("Anycast addresses", h("div", { class: "scroll" }, h("table", {},
         h("thead", {}, h("tr", {}, ["Address", "State", "Why"].map((t) => h("th", {}, t)))),
@@ -5289,13 +5325,14 @@
           : h("tr", {}, h("td", { colspan: 3, class: "empty" }, "None: add an anycast address to a gateway on the Topology page.")))))));
     }
 
+    const both = async () => { const [a, b] = await Promise.all([api("GET", "/api/bgp"), api("GET", "/api/ospf")]); return [a.data, b.data]; };
     return {
       async mount(main) {
         box = h("div", {});
         main.append(box);
-        draw((await api("GET", "/api/bgp")).data);
+        draw(...(await both()));
       },
-      async poll() { draw((await api("GET", "/api/bgp")).data); },
+      async poll() { draw(...(await both())); },
       poll_ms: 5000,
     };
   })();
@@ -5432,64 +5469,231 @@
       drawSettings(); drawNeighbors();
     }
 
+    // ── OSPF tab ──
+    let ocfg = null, ohost = [], osettings, oifs, osel = null, odraft = null, orows = new Map(), orid = null;
+
+    function osave(next, keepForm) {
+      chain = chain.then(async () => {
+        try { const st = (await api("PUT", "/api/ospf", next)).data; say(status, "ok"); ocfg = st.config; ohost = st.host_interfaces || ohost; return true; }
+        catch (e) { fail(status)(e); if (!keepForm) await oload(); return false; }
+      });
+      return chain;
+    }
+
+    function oselect(key) {
+      osel = key;
+      for (const [k, tr] of orows) tr.classList.toggle("sel", k === key);
+    }
+
+    const LINKS = [["", "Default"], ["point-to-point", "Point-to-point"], ["broadcast", "Broadcast"]];
+    const linkSelect = (value, label) => h("select", { "aria-label": label }, ...LINKS.map(([v, t]) => h("option", { value: v, selected: v === (value || "") }, t)));
+    const areaInput = (value, label) => h("input", { class: "as", type: "text", autocomplete: "off", value: value && value !== "0.0.0.0" ? value : "", placeholder: "0", spellcheck: "false", "aria-label": label });
+
+    function interfaceRow(f, idx) {
+      const area = areaInput(f.area, "Area of " + f.name);
+      const link = linkSelect(f.network, "Link type of " + f.name);
+      const key = h("input", { type: "password", value: f.password || "", autocomplete: "new-password", maxlength: "16", "aria-label": "Key for " + f.name });
+      const commit = () => {
+        const next = clone(ocfg);
+        next.interfaces[idx] = { name: f.name, area: area.value.trim(), network: link.value, password: key.value };
+        osave(next);
+      };
+      for (const el of [area, link, key]) el.addEventListener("change", commit);
+      // on/off for this one interface (the same as Operate ▸ Anycast): off makes it passive, no neighbors, and keeps it
+      const on = h("input", { type: "checkbox", checked: !f.disabled, disabled: !!ocfg.disabled, title: ocfg.disabled ? "OSPF is switched off on this node" : "Off: no hellos are sent and no neighbors are formed on this interface", "aria-label": "Interface " + f.name + " enabled" });
+      on.addEventListener("change", () => {
+        if (!on.checked && !confirm("Disable OSPF on " + f.name + "?\n\nNo hellos are sent and its neighbors go down. The interface is kept.")) { on.checked = true; return; }
+        on.disabled = true;
+        chain = chain.then(async () => {
+          try { await api("POST", "/api/ospf/operate", { interface: f.name, enabled: on.checked }); say(status, "ok"); } catch (e) { fail(status)(e); }
+          await oload();
+        });
+      });
+      return h("tr", { "data-iface": f.name }, h("td", { class: "mono" }, f.name), h("td", {}, area), h("td", {}, link), h("td", {}, withEye(key)), h("td", {}, on));
+    }
+
+    // the new row: becomes an interface once it has a name
+    function draftInterfaceRow() {
+      const list = "ospf-host-ifs";
+      const name = h("input", { type: "text", list, placeholder: "eth0", spellcheck: "false", autocomplete: "off", "aria-label": "New interface name" });
+      const dl = h("datalist", { id: list }, ...ohost.filter((n) => !ocfg.interfaces.some((f) => f.name === n)).map((n) => h("option", { value: n })));
+      const area = areaInput("", "New interface area");
+      const link = linkSelect("", "New interface link type");
+      const key = h("input", { type: "password", autocomplete: "new-password", placeholder: "optional", maxlength: "16", "aria-label": "New interface key" });
+      const commit = async () => {
+        if (!name.value.trim()) return; // not complete yet
+        const rid = orid.value.trim();
+        if (!rid) { say(status, "bad", "Enter the router ID first (an IPv4 address that is unique among your routers), then add the interface."); orid.focus(); return; }
+        const next = clone(ocfg);
+        next.router_id = rid;
+        next.interfaces.push({ name: name.value.trim(), area: area.value.trim(), network: link.value, password: key.value });
+        if (await osave(next, true)) { odraft = null; osel = name.value.trim(); drawOSPF(); }
+      };
+      for (const el of [name, area, link, key]) el.addEventListener("change", commit);
+      odraft = { name, focus: () => name.focus() };
+      return h("tr", { "data-iface": "" }, h("td", {}, name, dl), h("td", {}, area), h("td", {}, link), h("td", {}, withEye(key)), h("td", {}));
+    }
+
+    function drawOSPF() {
+      // settings
+      const rid = h("input", { type: "text", value: ocfg.router_id || "", placeholder: "192.0.2.10", spellcheck: "false", "aria-label": "OSPF router ID" });
+      orid = rid;
+      const num = (v, d, label) => h("input", { class: "narrow", type: "text", inputmode: "numeric", pattern: "[0-9]*", autocomplete: "off", value: String(v || d), "aria-label": label });
+      const hello = num(ocfg.hello, 10, "Hello interval"), dead = num(ocfg.dead, 40, "Dead interval"), metric = num(ocfg.metric, 20, "Metric");
+      const commit = () => {
+        if (!ocfg.interfaces.length) return; // saved with the first interface (the router ID means nothing without one)
+        const next = clone(ocfg);
+        next.router_id = rid.value.trim();
+        next.hello = Number(hello.value) || 0; next.dead = Number(dead.value) || 0; next.metric = Number(metric.value) || 0;
+        if (next.hello === 10) next.hello = 0;
+        if (next.dead === 40) next.dead = 0;
+        if (next.metric === 20) next.metric = 0;
+        osave(next);
+      };
+      for (const el of [rid, hello, dead, metric]) el.addEventListener("change", commit);
+      clear(osettings).append(section("OSPF",
+        h("div", { class: "bgprow" },
+          h("label", { class: "f" }, h("span", {}, "Router ID"), rid),
+          h("label", { class: "f" }, h("span", {}, "Hello interval"), hello),
+          h("label", { class: "f" }, h("span", {}, "Dead interval"), dead),
+          h("label", { class: "f" }, h("span", {}, "Metric"), metric))));
+
+      // interfaces
+      orows = new Map();
+      const add = h("button", { class: "btn small", type: "button", "aria-label": "Add an interface", title: "Add an interface", onclick: () => {
+        if (odraft) { odraft.focus(); return; }
+        const tr = draftInterfaceRow(); body.append(tr); orows.set("", tr); oselect(""); odraft.focus();
+        const e = body.querySelector(".empty"); if (e) e.closest("tr").remove();
+      } }, "+");
+      const del = h("button", { class: "btn small", type: "button", "aria-label": "Remove the selected interface", title: "Remove the selected interface", onclick: () => {
+        if (osel === null) { say(status, "bad", "Click an interface first, then remove it."); return; }
+        if (osel === "") { odraft = null; drawOSPF(); return; }
+        if (!confirm("Remove interface " + osel + " from OSPF?")) return;
+        const next = clone(ocfg); next.interfaces = next.interfaces.filter((x) => x.name !== osel);
+        osel = null; osave(next).then(drawOSPF);
+      } }, "−");
+      const body = h("tbody", {});
+      ocfg.interfaces.forEach((f, i) => { const tr = interfaceRow(f, i); body.append(tr); orows.set(f.name, tr); });
+      odraft = null;
+      if (!ocfg.interfaces.length) body.append(h("tr", {}, h("td", { colspan: 5, class: "empty" }, "No interfaces yet. Enter a router ID, then press + to add one.")));
+      for (const [k, tr] of orows) { const pick = () => oselect(k); tr.addEventListener("click", pick); tr.addEventListener("focusin", pick); }
+      if (osel !== null && !orows.has(osel)) osel = null;
+      clear(oifs).append(section("Interfaces",
+        h("div", { class: "toolbar tight" }, add, del),
+        h("div", { class: "scroll" }, h("table", {},
+          h("thead", {}, h("tr", {}, ["Interface", "Area", "Link type", "Key (OSPFv2)", "Enabled"].map((t) => h("th", {}, t)))), body))));
+      oselect(osel);
+    }
+
+    async function oload() {
+      const st = (await api("GET", "/api/ospf")).data;
+      ocfg = st.config; ohost = st.host_interfaces || [];
+      if (st.blocked) { clear(osettings).append(section("OSPF", h("div", { class: "muted" }, "OSPF is not available here: " + st.blocked + "."))); clear(oifs); return; }
+      drawOSPF();
+    }
+
     return {
       async mount(main) {
         status = h("div", { "aria-live": "polite" }); settings = h("div", {}); nbrs = h("div", {});
-        sel = null; draft = null;
-        main.append(status, settings, nbrs);
+        osettings = h("div", {}); oifs = h("div", {});
+        sel = null; draft = null; osel = null; odraft = null;
+        // two tabs: BGP and OSPF.  Both stay in the page; the hidden one is just not shown.
+        const TABS = [["BGP", h("div", {}, settings, nbrs)], ["OSPF", h("div", {}, osettings, oifs)]];
+        const panes = TABS.map(([, el]) => h("div", { role: "tabpanel" }, el));
+        const buttons = TABS.map(([name], i) => h("button", { type: "button", role: "tab", class: "dtab", onclick: () => show(i) }, name));
+        function show(i, focus) {
+          state.anycastTab = i;
+          refreshHelp();
+          panes.forEach((p, j) => { p.hidden = j !== i; });
+          buttons.forEach((b, j) => { b.setAttribute("aria-selected", j === i ? "true" : "false"); b.tabIndex = j === i ? 0 : -1; b.classList.toggle("on", j === i); });
+          if (focus) buttons[i].focus();
+        }
+        const strip = h("div", { class: "dtabs", role: "tablist", "aria-label": "Anycast routing" }, buttons);
+        strip.addEventListener("keydown", (e) => {
+          const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+          if (!d) return;
+          e.preventDefault();
+          show((state.anycastTab + d + TABS.length) % TABS.length, true);
+        });
+        show(state.anycastTab >= 0 && state.anycastTab < TABS.length ? state.anycastTab : 0);
+        main.append(status, strip, ...panes);
         try { await load(); } catch (e) { fail(status)(e); }
+        try { await oload(); } catch (e) { fail(status)(e); }
       },
     };
   })();
 
-  // ── Anycast, Operate  (CLI: --bgp-disable/-enable, --bgp-neighbor-disable/-enable) ──
+  // ── Anycast, Operate  (CLI: --bgp-disable/-enable, --bgp-neighbor-disable/-enable, --ospf-disable/-enable, --ospf-interface-disable/-enable) ──
   VIEWS.anycastop = (() => {
     let status, box;
 
-    async function call(body) {
-      try { draw((await api("POST", "/api/bgp/operate", body)).data); clear(status); }
+    async function call(path, body) {
+      try { await api("POST", path, body); clear(status); await refresh(); }
       catch (e) { fail(status)(e); }
     }
+    const both = async () => { const [a, b] = await Promise.all([api("GET", "/api/bgp"), api("GET", "/api/ospf")]); return [a.data, b.data]; };
+    async function refresh() { draw(...(await both())); }
 
-    function draw(st) { const real = box; box = h("div", {}); try { build(st); } finally { morph(real, box); box = real; } }
+    function draw(st, os) { const real = box; box = h("div", {}); try { build(st, os); } finally { morph(real, box); box = real; } }
     // built into a detached copy and morphed in: the page keeps its elements (and so its scroll boxes) from one poll to the next
-    function build(st) {
-      const c = st.config;
-      if (!c.asn) {
-        box.append(section("BGP", h("div", { class: "muted" }, "BGP is off on this node.")));
+    function build(st, os) {
+      const c = st.config, oc = os.config;
+      if (!c.asn && !oc.interfaces.length) {
+        box.append(section("Anycast routing", h("div", { class: "muted" }, "BGP and OSPF are off on this node: set one up under Configure → Anycast.")));
         return;
       }
-      const live = new Map(st.peers.map((p) => [p.peer, p]));
-      const stateOf = (n) => {
-        const p = live.get(n.peer);
-        if (n.disabled) return pill("disabled", "");
-        if (c.disabled) return pill("–", "");
-        return p ? pill(p.state, p.state === "Established" ? "ok" : p.state === "Active" || p.state === "Connect" || p.state === "OpenSent" || p.state === "OpenConfirm" ? "warn" : "bad") : pill(st.running ? "not known yet" : "–", "");
-      };
-      const toggleBGP = h("button", { class: c.disabled ? "btn primary" : "btn danger", type: "button", onclick: () => {
-        if (!c.disabled && !confirm("Disable BGP on this node?\n\nIts sessions go down and the anycast addresses are no longer announced from this node. The settings are kept.")) return;
-        call({ enabled: !!c.disabled });
-      } }, c.disabled ? "Enable BGP" : "Disable BGP");
-      const row = (n) => h("tr", { tabindex: "0", oncontextmenu: rowMenu([[n.disabled ? "Enable" : "Disable", () => {
-          if (c.disabled) return;
-          if (!n.disabled && !confirm("Disable neighbor " + n.peer + "?\n\nThe session is shut down and nothing is announced to it. The neighbor is kept.")) return;
-          call({ peer: n.peer, enabled: !!n.disabled });
-        }]]) }, h("td", { class: "mono" }, n.peer), h("td", {}, String(n.remote_as)), h("td", {}, n.description || ""), h("td", {}, stateOf(n)));
-      box.append(section("BGP",
-        kv([["Local AS", String(c.asn)], ["State", c.disabled ? pill("disabled", "") : pill("enabled", "ok")]]),
-        h("div", { class: "toolbar" }, toggleBGP)));
-      box.append(section("Neighbors", h("div", { class: "scroll" }, h("table", {},
-        h("thead", {}, h("tr", {}, ["Neighbor", "AS", "Description", "BGP"].map((t) => h("th", {}, t)))),
-        h("tbody", {}, c.neighbors.length ? c.neighbors.map(row) : h("tr", {}, h("td", { colspan: 5, class: "empty" }, "No neighbors yet: add one under Configure → Anycast.")))))));
+      if (c.asn) {
+        const live = new Map(st.peers.map((p) => [p.peer, p]));
+        const stateOf = (n) => {
+          const p = live.get(n.peer);
+          if (n.disabled) return pill("disabled", "");
+          if (c.disabled) return pill("–", "");
+          return p ? pill(p.state, p.state === "Established" ? "ok" : p.state === "Active" || p.state === "Connect" || p.state === "OpenSent" || p.state === "OpenConfirm" ? "warn" : "bad") : pill(st.running ? "not known yet" : "–", "");
+        };
+        const toggleBGP = h("button", { class: c.disabled ? "btn primary" : "btn danger", type: "button", onclick: () => {
+          if (!c.disabled && !confirm("Disable BGP on this node?\n\nIts sessions go down and the anycast addresses are no longer announced from this node by BGP. The settings are kept.")) return;
+          call("/api/bgp/operate", { enabled: !!c.disabled });
+        } }, c.disabled ? "Enable BGP" : "Disable BGP");
+        const row = (n) => h("tr", { tabindex: "0", oncontextmenu: rowMenu([[n.disabled ? "Enable" : "Disable", () => {
+            if (c.disabled) return;
+            if (!n.disabled && !confirm("Disable neighbor " + n.peer + "?\n\nThe session is shut down and nothing is announced to it. The neighbor is kept.")) return;
+            call("/api/bgp/operate", { peer: n.peer, enabled: !!n.disabled });
+          }]]) }, h("td", { class: "mono" }, n.peer), h("td", {}, String(n.remote_as)), h("td", {}, n.description || ""), h("td", {}, stateOf(n)));
+        box.append(section("BGP",
+          kv([["Local AS", String(c.asn)], ["State", c.disabled ? pill("disabled", "") : pill("enabled", "ok")]]),
+          h("div", { class: "toolbar" }, toggleBGP)));
+        box.append(section("BGP neighbors", h("div", { class: "scroll" }, h("table", {},
+          h("thead", {}, h("tr", {}, ["Neighbor", "AS", "Description", "BGP"].map((t) => h("th", {}, t)))),
+          h("tbody", {}, c.neighbors.length ? c.neighbors.map(row) : h("tr", {}, h("td", { colspan: 5, class: "empty" }, "No neighbors yet: add one under Configure → Anycast → BGP.")))))));
+      }
+      if (oc.interfaces.length) {
+        const full = (f) => os.peers.some((p) => p.interface === f.name && p.state === "Full");
+        const stateOf = (f) => f.disabled ? pill("disabled", "") : oc.disabled ? pill("–", "") : os.running ? (full(f) ? pill("Full", "ok") : pill("no neighbor", "bad")) : pill("–", "");
+        const toggleOSPF = h("button", { class: oc.disabled ? "btn primary" : "btn danger", type: "button", disabled: !!os.blocked && !!oc.disabled, onclick: () => {
+          if (!oc.disabled && !confirm("Disable OSPF on this node?\n\nIts neighbors go down and the anycast addresses are no longer announced from this node by OSPF. ospfd and ospf6d are stopped. The settings are kept.")) return;
+          call("/api/ospf/operate", { enabled: !!oc.disabled });
+        } }, oc.disabled ? "Enable OSPF" : "Disable OSPF");
+        const row = (f) => h("tr", { tabindex: "0", oncontextmenu: rowMenu([[f.disabled ? "Enable" : "Disable", () => {
+            if (oc.disabled) return;
+            if (!f.disabled && !confirm("Disable OSPF on " + f.name + "?\n\nNo hellos are sent and its neighbors go down. The interface is kept.")) return;
+            call("/api/ospf/operate", { interface: f.name, enabled: !!f.disabled });
+          }]]) }, h("td", { class: "mono" }, f.name), h("td", {}, f.area), h("td", {}, f.network || "default"), h("td", {}, stateOf(f)));
+        box.append(section("OSPF",
+          kv([["Router ID", oc.router_id], ["State", oc.disabled ? pill("disabled", "") : pill("enabled", "ok")]]),
+          h("div", { class: "toolbar" }, toggleOSPF)));
+        box.append(section("OSPF interfaces", h("div", { class: "scroll" }, h("table", {},
+          h("thead", {}, h("tr", {}, ["Interface", "Area", "Link type", "OSPF"].map((t) => h("th", {}, t)))),
+          h("tbody", {}, oc.interfaces.map(row))))));
+      }
     }
 
     return {
       async mount(main) {
         status = h("div", { "aria-live": "polite" }); box = h("div", {});
         main.append(status, box);
-        try { draw((await api("GET", "/api/bgp")).data); } catch (e) { fail(status)(e); }
+        try { await refresh(); } catch (e) { fail(status)(e); }
       },
-      async poll() { draw((await api("GET", "/api/bgp")).data); },
+      async poll() { await refresh(); },
       poll_ms: 5000,
     };
   })();

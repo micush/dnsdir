@@ -187,6 +187,27 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 			return nil, err
 		}
 		return m.BGPStatus()
+	// ospf
+	case "ospf.status":
+		return m.OSPFStatus()
+	case "ospf.set":
+		var c OSPFConfig
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return nil, fmt.Errorf("bad arguments: %w", err)
+		}
+		if err := m.OSPFSet(c, actor); err != nil {
+			return nil, err
+		}
+		return m.OSPFStatus()
+	case "ospf.operate":
+		var o OSPFOperateArgs
+		if err := json.Unmarshal(raw, &o); err != nil {
+			return nil, fmt.Errorf("bad arguments: %w", err)
+		}
+		if err := m.OSPFOperate(o, actor); err != nil {
+			return nil, err
+		}
+		return m.OSPFStatus()
 	// log
 	case "log.read", "log.view":
 		q, err := logQueryFromArgs(a.LogLevel, a.LogText, a.LogSince, a.LogN)

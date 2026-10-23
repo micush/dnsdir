@@ -89,6 +89,9 @@ func (b *BGPConfig) Configured() bool { return b != nil && b.ASN != 0 }
 // Active reports whether BGP runs on this node: an AS number is set and BGP is not disabled.
 func (b *BGPConfig) Active() bool { return b.Configured() && !b.Disabled }
 
+// frrBlocked says why this program may not manage FRR on this host ("" = it may).  dnsdir always may.
+func frrBlocked() string { return "" }
+
 func (b *BGPConfig) clone() *BGPConfig {
 	if b == nil {
 		return nil
@@ -194,6 +197,12 @@ func anycastAddresses(dc *DaemonConfig) (v4, v6 []string) {
 // renderFRR builds the whole frr.conf.  It is a pure function.  Without BGP it is
 // only the header, which is what a node that turned BGP off is left with.
 func renderFRR(b *BGPConfig, v4, v6 []string, hostname string) string {
+	return renderFRRAll(b, nil, v4, v6, hostname)
+}
+
+// renderFRRAll builds the whole frr.conf for BGP and/or OSPF (either may be nil or inactive).  Without either it is
+// only the header, which is what a node that turned routing off is left with.
+func renderFRRAll(b *BGPConfig, osp *OSPFConfig, v4, v6 []string, hostname string) string {
 	var o strings.Builder
 	o.WriteString("! Written by dnsdir. Changes made here are overwritten; use dnsdir --bgp or the BGP page.\n")
 	o.WriteString("frr defaults traditional\n")
@@ -201,7 +210,7 @@ func renderFRR(b *BGPConfig, v4, v6 []string, hostname string) string {
 		o.WriteString("hostname " + h + "\n")
 	}
 	o.WriteString("log syslog informational\nservice integrated-vtysh-config\n!\n")
-	if !b.Active() {
+	if !b.Active() && !osp.Active() {
 		return o.String()
 	}
 	// what this node may announce: its anycast addresses, nothing else
@@ -212,6 +221,14 @@ func renderFRR(b *BGPConfig, v4, v6 []string, hostname string) string {
 	o.WriteString("ipv6 prefix-list DNSDIR-ANYCAST-V6 seq 1000 deny any\n")
 	for i, a := range v6 {
 		o.WriteString(fmt.Sprintf("ipv6 prefix-list DNSDIR-ANYCAST-V6 seq %d permit %s/128\n", 10+i, a))
+	}
+	if osp.Active() {
+		o.WriteString("!\n" + renderOSPFRouteMaps())
+	}
+	if !b.Active() {
+		o.WriteString(renderOSPF(osp))
+		o.WriteString("line vty\n!\n")
+		return o.String()
 	}
 	prepend := ""
 	if b.ASPrepend {
@@ -263,7 +280,11 @@ func renderFRR(b *BGPConfig, v4, v6 []string, hostname string) string {
 	for _, n := range n6 {
 		o.WriteString(fmt.Sprintf("  neighbor %s activate\n  neighbor %s route-map DNSDIR-IN in\n  neighbor %s route-map DNSDIR-OUT-V6 out\n", n.Peer, n.Peer, n.Peer))
 	}
-	o.WriteString(" exit-address-family\n!\nline vty\n!\n")
+	o.WriteString(" exit-address-family\n!\n")
+	if osp.Active() {
+		o.WriteString(renderOSPF(osp))
+	}
+	o.WriteString("line vty\n!\n")
 	return o.String()
 }
 
@@ -340,7 +361,7 @@ func (b *BGPManager) markerPath() string { return filepath.Join(b.stateDir, "bgp
 // serialised and only the latest config is applied.
 func (b *BGPManager) Apply(dc *DaemonConfig) {
 	b.mu.Lock()
-	b.pending = &DaemonConfig{Groups: dc.Groups, BGP: dc.BGP.clone()}
+	b.pending = &DaemonConfig{Groups: dc.Groups, BGP: dc.BGP.clone(), OSPF: dc.OSPF.clone()}
 	if b.running {
 		b.mu.Unlock()
 		return
@@ -379,28 +400,36 @@ func (b *BGPManager) applyNow(dc *DaemonConfig) *BGPApplied {
 	res := func(ok bool, f string, a ...any) *BGPApplied {
 		return &BGPApplied{OK: ok, Detail: fmt.Sprintf(f, a...), At: time.Now().Format(time.RFC3339)}
 	}
-	enabled := dc.BGP.Active()
+	bgpOn, ospfOn := dc.BGP.Active(), dc.OSPF.Active()
+	enabled := bgpOn || ospfOn
 	_, markerErr := os.Stat(b.markerPath())
 	managed := markerErr == nil
 	if !enabled && !managed {
-		return res(true, "BGP is off")
+		return res(true, "BGP and OSPF are off")
 	}
 	if _, err := os.Stat(frrDir); err != nil {
 		if enabled {
-			warnf("bgp: FRR is not installed (%s is missing); BGP is not configured", frrDir)
+			warnf("bgp: FRR is not installed (%s is missing); BGP and OSPF are not configured", frrDir)
 			return res(false, "FRR is not installed on this node (no %s)", frrDir)
 		}
 		os.Remove(b.markerPath())
-		return res(true, "BGP is off")
+		return res(true, "BGP and OSPF are off")
 	}
 	v4, v6 := anycastAddresses(dc)
-	conf := renderFRR(dc.BGP, v4, v6, b.hostname)
+	conf := renderFRRAll(dc.BGP, dc.OSPF, v4, v6, b.hostname)
 	oldConf, _ := os.ReadFile(frrConfPath())
 	oldDaemons, err := os.ReadFile(frrDaemonsPath())
 	if err != nil && !os.IsNotExist(err) {
 		return res(false, "cannot read %s: %v", frrDaemonsPath(), err)
 	}
-	daemons := setDaemon(setDaemon(string(oldDaemons), "bgpd", enabled), "bfdd", enabled)
+	// each routing daemon runs only while its protocol is in use; bfdd serves both
+	daemons := string(oldDaemons)
+	for _, d := range []struct {
+		name string
+		on   bool
+	}{{"bgpd", bgpOn}, {"ospfd", ospfOn}, {"ospf6d", ospfOn}, {"bfdd", enabled}} {
+		daemons = setDaemon(daemons, d.name, d.on)
+	}
 	confChanged, daemonsChanged := string(oldConf) != conf, daemons != string(oldDaemons)
 
 	if confChanged {
@@ -447,11 +476,18 @@ func (b *BGPManager) applyNow(dc *DaemonConfig) *BGPApplied {
 	}
 	if !enabled {
 		os.Remove(b.markerPath())
-		infof("bgp: turned off; frr.conf no longer has a BGP section")
-		return res(true, "BGP is off")
+		infof("bgp: turned off; frr.conf no longer has a BGP or OSPF section")
+		return res(true, "BGP and OSPF are off")
 	}
 	if confChanged || daemonsChanged {
-		infof("bgp: FRR configured (AS %d, %d neighbor(s), %d IPv4 + %d IPv6 anycast address(es))", dc.BGP.ASN, len(dc.BGP.Neighbors), len(v4), len(v6))
+		var what []string
+		if bgpOn {
+			what = append(what, fmt.Sprintf("BGP AS %d, %d neighbor(s)", dc.BGP.ASN, len(dc.BGP.Neighbors)))
+		}
+		if ospfOn {
+			what = append(what, fmt.Sprintf("OSPF on %d interface(s)", len(dc.OSPF.Interfaces)))
+		}
+		infof("bgp: FRR configured (%s, %d IPv4 + %d IPv6 anycast address(es))", strings.Join(what, ", "), len(v4), len(v6))
 	}
 	return res(true, "FRR is configured")
 }

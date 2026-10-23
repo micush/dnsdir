@@ -122,6 +122,13 @@ the web GUI):
                    --bgp-disable | --bgp-enable   (stop / restart BGP on this node, settings kept)
                    --bgp-neighbor-disable ADDR | --bgp-neighbor-enable ADDR
                                                  (per node; dnsdir then owns /etc/frr/frr.conf; BFD is always on)
+  OSPF (FRR)       --ospf   (this node's settings, announced addresses, neighbor state; OSPFv2 and OSPFv3)
+                   --ospf-router-id A.B.C.D  [--ospf-hello S] [--ospf-dead S] [--ospf-metric N]   (- = default)
+                   --ospf-interface-add NAME [--ospf-area A] [--ospf-network point-to-point|broadcast] [--ospf-key K]
+                   --ospf-interface-del NAME
+                   --ospf-disable | --ospf-enable   (stop / restart OSPF on this node, settings kept)
+                   --ospf-interface-disable NAME | --ospf-interface-enable NAME
+                                                 (per node; ospfd and ospf6d run only while an interface is set; BFD is always on)
   Cluster          --cluster-status  --cluster-token  --cluster-join CODE
                    --cluster-promote  --cluster-remove ADDR
                    --cluster-failover auto|on|off   (the primary promotes a replica by itself

@@ -8,7 +8,7 @@ What you get:
 - **A caching DNS proxy on each node.** It sends every query to the fastest healthy upstream server, spreads load across servers of similar speed, fails over when one goes down, and answers over UDP, TCP, DNS over TLS and DNS over HTTPS.
 - **Policy-Based Resolution.** Send some clients or some names to different servers, answer a name yourself, block it, or ask for a different name instead.
 - **Per-client rate limiting** and a list of the clients that may use the proxy.
-- **Anycast addresses over BGP.** Gateways can announce extra addresses to your routers through FRR, and withdraw them when no upstream server is healthy.
+- **Anycast addresses over BGP or OSPF.** Gateways can announce extra addresses to your routers through FRR, and withdraw them when no upstream server is healthy.
 - **A web GUI and a command line** that manage the whole cluster. Draw gateways, servers and domains on a topology page, watch live statistics, and keep shared settings, config versions, certificates and software updates in step across all your nodes.
 
 ![The Topology page: a gateway, its nodes, an anycast address, upstream servers and the domains each one is tested with](snaps/topology.png)
@@ -483,7 +483,7 @@ Anycast addresses are not checked against the interface and do not take part in 
 
 An address is held only while this node can answer on it: the gateway is running and not paused, the listener is up, and at least one DNS server is healthy. Otherwise it is taken off `lo`, so the route disappears from your routing daemon. It is added with a 10-second lifetime that AnyName renews every 3 seconds, so if AnyName crashes or hangs, the kernel removes the address by itself within about 10 seconds instead of leaving a route that nothing answers.
 
-The drawing and `--canvas` show whether each address is announced from the node you are looking at. When the node manages BGP, the pill is **green** when every neighbor of its family has an established session (IPv4 address → IPv4 neighbors, IPv6 → IPv6), **amber** when some do and some do not, and **red** when none does, when it has no neighbor of that family, or when BGP is disabled on the node (Operate ▸ Anycast). A neighbor that is disabled or still connecting counts as not established.
+The drawing and `--canvas` show whether each address is announced from the node you are looking at. When the node manages BGP, the pill is **green** when every neighbor of its family has an established session (IPv4 address → IPv4 neighbors, IPv6 → IPv6), **amber** when some do and some do not, and **red** when none does, when it has no neighbor of that family, or when BGP is disabled on the node (Operate ▸ Anycast). A neighbor that is disabled or still connecting counts as not established. With OSPF (below) the same colours count the enabled interfaces that have a neighbor in state Full, and with both protocols the better picture is shown.
 
 ### BGP through FRR
 
@@ -491,7 +491,7 @@ AnyName can drive FRR on a node so the anycast addresses are announced without a
 
 ![Configure ▸ Anycast: the local AS, router ID, timers and the neighbor table](snaps/anycast.png)
 
-**Turning BGP on.** BGP runs on a node while a local AS number is set. That makes AnyName the owner of the node's `/etc/frr/frr.conf`: it renders the whole file (BGP only), sets `bgpd=yes` and `bfdd=yes` in `/etc/frr/daemons`, and reloads FRR (`systemctl reload frr`; a restart when a daemon is switched on or off). FRR must be installed (the installer does it; on Debian and Ubuntu together with the `frr-pythontools` package, on the RHEL family and Fedora `frr-reload.py` is part of the `frr` package). Without `frr-reload.py` a reload cannot work, so AnyName restarts FRR for every change and the sessions drop briefly. An `frr.conf` that AnyName did not write is saved once as `frr.conf.pre-dnsdir` before it is replaced. Do not run this on a host whose FRR is managed by something else; they would overwrite each other.
+**Turning BGP on.** BGP runs on a node while a local AS number is set. That makes AnyName the owner of the node's `/etc/frr/frr.conf`: it renders the whole file, sets `bgpd=yes` and `bfdd=yes` in `/etc/frr/daemons`, and reloads FRR (`systemctl reload frr`; a restart when a daemon is switched on or off). FRR must be installed (the installer does it; on Debian and Ubuntu together with the `frr-pythontools` package, on the RHEL family and Fedora `frr-reload.py` is part of the `frr` package). Without `frr-reload.py` a reload cannot work, so AnyName restarts FRR for every change and the sessions drop briefly. An `frr.conf` that AnyName did not write is saved once as `frr.conf.pre-dnsdir` before it is replaced. Do not run this on a host whose FRR is managed by something else; they would overwrite each other.
 
 **Turning it off.** The **Enabled** box on a neighbor's row in **Configure ▸ Anycast** shuts that session down and back up (the same as right-click ▸ Disable in Operate ▸ Anycast). Clearing the AS number removes the BGP section and leaves FRR running (the router ID can only be set while an AS is set, and clearing the AS clears it). **Operate ▸ Anycast** does the same without forgetting any setting (*Disable BGP*), and can shut down a single neighbor (`neighbor … shutdown`; the neighbor stays configured). A node that never set an AS never has its FRR files touched.
 
@@ -524,7 +524,7 @@ dnsdir --bgp-neighbor-disable 192.0.2.1          # shut one neighbor down, kept 
 - **A prefix is in FRR's table only while AnyName holds the address on `lo`**, so it is withdrawn when no DNS server answers, the gateway is paused or AnyName stops, and within about 10 seconds if AnyName is killed (the address lifetime, above). Lower the router's timers to shorten the time your peers need to notice.
 - **The neighbor password** is an MD5 TCP session password. It is stored in the config file and its history (root-only), and `--password` on the command line is visible to other users of the host, so the Anycast page is the safer place to set it.
 
-**Where to look.** **Monitor ▸ Anycast** shows each neighbor's session and BFD state, read from FRR every few seconds (`vtysh -c "show bgp summary json"`, `show bfd peers json`), and which anycast addresses are announced. **Configure ▸ Anycast** (card *BGP*) has the AS, router ID and the neighbor table (**+** adds a row, **−** removes the highlighted one).
+**Where to look.** **Monitor ▸ Anycast** shows each neighbor's session and BFD state, read from FRR every few seconds (`vtysh -c "show bgp summary json"`, `show bfd peers json`), and which anycast addresses are announced. **Configure ▸ Anycast** (tab *BGP*, the first one) has the AS, router ID and the neighbor table (**+** adds a row, **−** removes the highlighted one).
 
 The generated config looks like this:
 
@@ -542,6 +542,59 @@ router bgp 64512
   neighbor 192.0.2.1 route-map DNSDIR-IN in
   neighbor 192.0.2.1 route-map DNSDIR-OUT-V4 out
  exit-address-family
+```
+
+### OSPF through FRR
+
+Instead of BGP, or together with it, AnyName can announce the anycast addresses with **OSPF**: OSPFv2 (`ospfd`) carries the IPv4 addresses and OSPFv3 (`ospf6d`) the IPv6 ones. In the GUI it is the **OSPF** tab of **Configure ▸ Anycast** (the **BGP** tab is the first one); the command line is below. Like BGP it is **per node** and never replicated.
+
+**Turning OSPF on.** OSPF runs on a node while it has at least one interface listed. The settings are the **router ID** (an IPv4 address, unique among your routers; it is required once there is an interface and is saved with the first one), the **hello** and **dead** interval (FRR's 10 and 40 seconds when empty), the **metric** the announced addresses carry (FRR's 20 when empty; give a node a higher one to make it the backup), and per interface the **area** (empty is 0), the **link type** (default, point-to-point or broadcast) and an optional OSPFv2 MD5 **key** (up to 16 characters; OSPFv3 does not use it). AnyName then renders the OSPF part of `/etc/frr/frr.conf` next to any BGP part, sets `ospfd=yes`, `ospf6d=yes` and `bfdd=yes` in `/etc/frr/daemons` and reloads FRR (a restart when a daemon is switched on or off).
+
+**The OSPF daemons run only while OSPF is set up.** `ospfd` and `ospf6d` are `no` in `/etc/frr/daemons` until the first interface is added, and are switched back to `no` (and FRR restarted) when the last interface is removed or **Disable OSPF** is pressed in Operate ▸ Anycast. `bgpd` follows BGP in the same way, and `bfdd` stays on while either protocol is in use. A node that uses neither never has its FRR files touched.
+
+**Posture.** As with BGP, the node announces its anycast addresses and nothing else: connected routes are redistributed into OSPF through a route-map that permits only those addresses (`redistribute connected metric-type 1 route-map DNSDIR-OSPF-V4`, and `-V6` for OSPFv3), so an address exists in OSPF only while AnyName holds it on `lo`. Nothing is taken in: a route-map on zebra's OSPF routes (`ip protocol ospf route-map DNSDIR-OSPF-IN`, `ipv6 protocol ospf6 …`) denies every route, so a neighbor cannot change this host's routing table. The networks of the OSPF interfaces themselves are part of OSPF and are advertised as usual. **BFD** is on for every interface.
+
+**Both protocols.** An address is held on `lo` while **BGP or OSPF** can carry it: for OSPF, when an enabled interface has a neighbor in state **Full** (OSPFv2 for an IPv4 address, OSPFv3 for IPv6). The Topology pill shows the better of the two pictures: green when every enabled interface has a Full neighbor, amber when some do, red when none does or OSPF is disabled.
+
+**Turning it off.** Remove all the interfaces: the OSPF part leaves `frr.conf`, `ospfd` and `ospf6d` go back to `no`, and the router ID is cleared with them. **Operate ▸ Anycast** (*Disable OSPF*) does the same without forgetting any setting, and the **Enabled** box of an interface (or right-click ▸ Disable) makes just that interface passive: no hellos, no neighbors, still configured.
+
+```
+dnsdir --ospf                                                    # settings, neighbor state, announced addresses
+dnsdir --ospf-router-id 192.0.2.10 --ospf-interface-add eth0     # the router id is saved with the first interface
+dnsdir --ospf-interface-add eth1 --ospf-area 0.0.0.1 --ospf-network point-to-point --ospf-key SECRET
+dnsdir --ospf-hello 10 --ospf-dead 40 --ospf-metric 100          # - goes back to the default
+dnsdir --ospf-interface-del eth1                                 # the last one turns OSPF off
+dnsdir --ospf-disable                                            # stop OSPF on this node, settings kept (--ospf-enable)
+dnsdir --ospf-interface-disable eth0                             # make one interface passive, kept (--ospf-interface-enable)
+```
+
+**Where to look.** **Monitor ▸ Anycast** shows the OSPF neighbors per interface (`show ip ospf neighbor json`, `show ipv6 ospf6 neighbor json`) with their state and BFD, next to the BGP neighbors. The generated OSPF part of `frr.conf` looks like this:
+
+```
+route-map DNSDIR-OSPF-V4 permit 10
+ match ip address prefix-list DNSDIR-ANYCAST-V4
+route-map DNSDIR-OSPF-V6 permit 10
+ match ipv6 address prefix-list DNSDIR-ANYCAST-V6
+route-map DNSDIR-OSPF-IN deny 10
+!
+interface eth0
+ ip ospf area 0.0.0.0
+ ipv6 ospf6 area 0.0.0.0
+ ip ospf network point-to-point
+ ipv6 ospf6 network point-to-point
+ ip ospf bfd
+ ipv6 ospf6 bfd
+!
+router ospf
+ ospf router-id 192.0.2.10
+ redistribute connected metric-type 1 route-map DNSDIR-OSPF-V4
+!
+router ospf6
+ ospf6 router-id 192.0.2.10
+ redistribute connected metric-type 1 route-map DNSDIR-OSPF-V6
+!
+ip protocol ospf route-map DNSDIR-OSPF-IN
+ipv6 protocol ospf6 route-map DNSDIR-OSPF-IN
 ```
 
 ### Cloud use (untested)
@@ -722,6 +775,8 @@ A directory account keeps its password and expiry date in the directory. **Add a
 | `--node-pause`, `--node-resume`, `--node-status` | Operate ▸ Node ▸ **Maintenance** (Pause / Resume this node) |
 | `--hostname NAME` | Topology ▸ right-click a node ▸ **Rename** |
 | `--bgp-disable`, `--bgp-enable`, `--bgp-neighbor-disable ADDR`, `--bgp-neighbor-enable ADDR` | Operate ▸ Anycast (Disable / Enable BGP, and per neighbor) |
+| `--ospf`, `--ospf-router-id`, `--ospf-interface-add NAME` `[--ospf-area A] [--ospf-network T] [--ospf-key K]`, `--ospf-interface-del NAME`, `--ospf-hello`, `--ospf-dead`, `--ospf-metric` | Configure ▸ Anycast ▸ OSPF |
+| `--ospf-disable`, `--ospf-enable`, `--ospf-interface-disable NAME`, `--ospf-interface-enable NAME` | Operate ▸ Anycast (Disable / Enable OSPF, and per interface) |
 | `--version`, `--help` | version in the header; the **?** at the top right of every page opens a slide-out help panel for that page or tab (what it is for, the steps for the usual jobs, every field, and the command-line equivalents) |
 
 ### TLS and security notes
@@ -997,7 +1052,7 @@ The text is the same that goes to stderr (the system journal under systemd). Any
 
 - the log (newest 20000 lines), the configuration and its versions;
 - cluster, gateway, DNS, BGP, anycast, virtual-MAC and update state, and host numbers;
-- addresses, links, routes, rules, neighbors, ARP, sockets, the ARP and routing sysctl settings, firewall rules, and FRR's BGP and BFD output;
+- addresses, links, routes, rules, neighbors, ARP, sockets, the ARP and routing sysctl settings, firewall rules, and FRR's BGP, OSPF and BFD output;
 - service status, the journal and the kernel log tail;
 - 8 seconds of ARP and neighbor-discovery traffic per gateway interface (always; `--tshoot-capture` is still accepted and does nothing);
 - a dump of every goroutine of the daemon (`dnsdir/goroutines.txt`: what it is busy with, for a node that is up but stuck). `kill -USR1 $(pidof dnsdir)` writes the same dump to standard error (`journalctl -u dnsdir`), for a daemon whose pages and cluster port do not answer.

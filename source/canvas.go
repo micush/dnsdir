@@ -505,17 +505,30 @@ func (s *StatusServer) markAnycast(groups []CanvasGateway) {
 			}
 		}
 		switch {
-		case cfg.BGP.Active():
-			peers, ok := liveBGPPeers()
+		case cfg.BGP.Active() || cfg.OSPF.Active():
+			var bp []BGPPeer
+			var bok bool
+			if cfg.BGP.Active() {
+				bp, bok = liveBGPPeers()
+			}
+			var op []OSPFPeer
+			var ook bool
+			if cfg.OSPF.Active() {
+				op, ook = liveOSPFPeers()
+			}
 			for j := range st {
 				if st[j].Up && st[j].Paused == "" {
-					st[j].Status, st[j].Detail, st[j].BGP = anycastBGPStatus(st[j].Addr, cfg.BGP.Neighbors, peers, ok)
+					st[j].Status, st[j].Detail, st[j].BGP = anycastRouteStatus(cfg, st[j].Addr, bp, bok, op, ook)
 				}
 			}
-		case cfg.BGP.Configured(): // BGP is disabled here (Operate ▸ Anycast): nothing is announced
+		case cfg.BGP.Configured() || cfg.OSPF.Configured(): // routing is disabled here (Operate ▸ Anycast): nothing is announced
+			what := "BGP"
+			if !cfg.BGP.Configured() {
+				what = "OSPF"
+			}
 			for j := range st {
 				if st[j].Up && st[j].Paused == "" {
-					st[j].Status, st[j].Detail, st[j].BGP = "bad", "BGP is disabled on this node (Operate ▸ Anycast): the address is not announced", "disabled"
+					st[j].Status, st[j].Detail, st[j].BGP = "bad", what+" is disabled on this node (Operate ▸ Anycast): the address is not announced", "disabled"
 				}
 			}
 		}

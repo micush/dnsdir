@@ -30,6 +30,7 @@ type Supervisor struct {
 	mu       sync.Mutex // guards dc and engines
 	pausedMu sync.RWMutex
 	bgpAC    *BGPConfig                // BGP settings, for the anycast loops' announce gate (guarded by pausedMu)
+	ospfAC   *OSPFConfig               // OSPF settings, likewise (guarded by pausedMu)
 	pausedAC map[int]map[string]string // gateway -> anycast address -> where it is paused; read by the anycast loops without s.mu
 	dc       *DaemonConfig
 	engines  map[engineKey]*Engine
@@ -91,6 +92,7 @@ func (s *Supervisor) notePausedAnycast(dc *DaemonConfig) {
 	s.pausedMu.Lock()
 	s.pausedAC = m
 	s.bgpAC = dc.BGP.clone()
+	s.ospfAC = dc.OSPF.clone()
 	s.pausedMu.Unlock()
 }
 
@@ -248,6 +250,7 @@ func (s *Supervisor) startAnycastLocked(gc GroupConfig) {
 	a.doh = func() int { return s.dnsFor(gid).DoHPort }
 	a.paused = func() map[string]string { return s.pausedAnycast(gid) }
 	a.bgp = func() (*BGPConfig, bool) { s.pausedMu.RLock(); defer s.pausedMu.RUnlock(); return s.bgpAC, true }
+	a.ospf = func() *OSPFConfig { s.pausedMu.RLock(); defer s.pausedMu.RUnlock(); return s.ospfAC }
 	s.anycast[gid] = a
 	a.start(s.ctx)
 }

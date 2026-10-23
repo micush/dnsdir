@@ -245,6 +245,14 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 		b.putJSON("dnsdir/bgp.json", st)
 	})
 	do(func() {
+		st, err := m.OSPFStatus()
+		if err != nil {
+			b.fail("dnsdir/ospf.json", err)
+			return
+		}
+		b.putJSON("dnsdir/ospf.json", st)
+	})
+	do(func() {
 		if m.anycastFn != nil {
 			b.putJSON("dnsdir/anycast.json", m.anycastFn())
 		}
@@ -346,6 +354,9 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 		{"net/iptables.txt", func() string { return tshootRun("iptables-save") + tshootRun("ip6tables-save") }},
 		{"frr/bgp.txt", func() string {
 			return tshootRun("vtysh", "-c", "show bgp summary", "-c", "show bgp ipv4 unicast", "-c", "show bgp ipv6 unicast", "-c", "show bfd peers", "-c", "show bgp neighbors")
+		}},
+		{"frr/ospf.txt", func() string {
+			return tshootRun("vtysh", "-c", "show ip ospf neighbor", "-c", "show ip ospf interface", "-c", "show ip ospf route", "-c", "show ipv6 ospf6 neighbor", "-c", "show ipv6 ospf6 interface", "-c", "show ipv6 ospf6 route")
 		}},
 		{"frr/running-config.txt", func() string { return tshootRun("vtysh", "-c", "show running-config") }},
 		{"frr/frr.conf.txt", func() string { return tshootFile("/etc/frr/frr.conf") }},

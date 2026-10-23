@@ -104,7 +104,7 @@ The DNS page (Monitor ▸ DNS, or `dnsdir --show-dns`) shows the ranking, health
 
 ![The DNS page: each server's rank, health, latency and share of the queries, with the answer cache above](snaps/dns.png)
 
-In the GUI, the DNS proxy settings are under Configure ▸ DNS, on six tabs: **Servers**, **Health & balancing**, **Listeners**, **Resolution**, **Cache & ECS** and **Clients**. The help panel (the **?** at the top right) has a page for each tab.
+In the GUI, the DNS proxy settings are under Configure ▸ DNS, on six tabs: **Servers**, **Health & balancing**, **Listeners**, **Resolution**, **Cache & ECS** and **Clients**. The help panel (the **?** at the top right) has a panel for each tab, and for each of the four Resolution sub-tabs.
 
 ### Choosing an upstream server
 
@@ -597,7 +597,7 @@ In real-MAC mode, everything above is replaced as follows:
 
 ## The web GUI
 
-Everything the command line does is also in a browser, over HTTPS on port **53853** (`web.listen`). The page follows the system light or dark theme automatically. The **?** at the top right of every page opens a slide-out help panel for that page, with its command-line equivalents and a description of every field on it.
+Everything the command line does is also in a browser, over HTTPS on port **53853** (`web.listen`). The page follows the system light or dark theme automatically. The **?** at the top right of every page opens a slide-out help panel for the screen you are on. Every screen has a panel of its own, and so does every tab and sub-tab (for example Configure ▸ DNS ▸ Resolution ▸ Block Lists, and the Google, Microsoft and OpenID Connect tabs of Users ▸ SSO); the panel changes when you change tab. Each panel says what the screen is for, what you can do on it, the steps for the usual jobs, every field, and the command-line equivalents.
 
 Saving applies immediately, with the same hot reload as editing the file.
 
@@ -722,7 +722,7 @@ A directory account keeps its password and expiry date in the directory. **Add a
 | `--node-pause`, `--node-resume`, `--node-status` | Operate ▸ Node ▸ **Maintenance** (Pause / Resume this node) |
 | `--hostname NAME` | Topology ▸ right-click a node ▸ **Rename** |
 | `--bgp-disable`, `--bgp-enable`, `--bgp-neighbor-disable ADDR`, `--bgp-neighbor-enable ADDR` | Operate ▸ Anycast (Disable / Enable BGP, and per neighbor) |
-| `--version`, `--help` | version in the header; the **?** at the top right of every page opens a slide-out help panel for that page (including its command-line equivalents and a description of every field on the page) |
+| `--version`, `--help` | version in the header; the **?** at the top right of every page opens a slide-out help panel for that page or tab (what it is for, the steps for the usual jobs, every field, and the command-line equivalents) |
 
 ### TLS and security notes
 

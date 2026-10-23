@@ -1,5 +1,13 @@
 # Changelog
 
+## [v526] - 2026-10-23 — Help rewritten: one plain-English panel for every screen and tab
+
+- Every help panel was rewritten. Each screen now has a panel of its own, and so does every tab and sub-tab: the Configure ▸ General, Gateway groups, Web GUI (General and Certificates), SNMP and Cluster pages, each of the six DNS tabs, the four Resolution sub-tabs (Policy-Based Resolution, Sort List, Conditional Forwarding, Block Lists), the Users tabs (Local, SSO with its General, Google, Microsoft and OpenID Connect tabs, and LDAP), and every Operate and Monitor page.
+- The panel follows you: change a tab or a sub-tab while the help is open and the panel changes with it.
+- All panels use the same layout: what the screen is for, what you can do on it, numbered steps for the usual jobs, a Fields list with the exact on-screen labels, notes on what to watch out for, and the command-line equivalents. Warnings stand out in a highlighted note.
+- The existing explanations were carried over and reorganised; the long single paragraphs (policy rows, zone lists, block lists, statistics) were split into short, headed parts.
+- The checks now require a panel for every page and tab (and fail on one left over from a page that is gone), the same layout in every panel, and every labelled field in the panel of the tab it is on.
+
 ## [v525] - 2026-10-22 — A joining node does not pull the cluster up to its version
 
 - With auto-update on (the default), every node follows the highest source version any member offers, so a node that joined a cluster while holding a newer release staged would have upgraded the whole cluster. A node that has just joined now does not offer the source it had staged when it joined (it reports no source and refuses `/cluster/source`) until an administrator uploads or fetches a release on it, or it stages something else. The guard is on the joining node, so it works even when the cluster's nodes are older. A joining node on an older version updates itself from the cluster as before.

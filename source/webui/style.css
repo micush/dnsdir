@@ -347,6 +347,10 @@ mark.help-hit.cur { background: #ff9f1a; outline: 2px solid var(--accent); }
 .help-panel-body p { margin: 0 0 .75rem; }
 .help-panel-body ul { margin: 0 0 .75rem; padding-left: 1.2rem; }
 .help-panel-body li { margin-bottom: .4rem; }
+.help-panel-body ol { margin: 0 0 .85rem; padding-left: 1.5rem; }
+.help-panel-body ol li { margin-bottom: .5rem; padding-left: .2rem; }
+.help-panel-body ol li::marker { font-weight: 700; color: var(--accent); }
+.help-panel-body p.help-note { margin: 0 0 .85rem; padding: .55rem .8rem; border-left: 3px solid var(--amber); background: var(--warn-bg); border-radius: 0 6px 6px 0; }
 .help-panel-body dl.help-fields { margin: 0 0 .75rem; }
 .help-panel-body dl.help-fields dt { font-weight: 600; margin-top: .65rem; }
 .help-panel-body dl.help-fields dd { margin: .1rem 0 0; color: var(--text); }

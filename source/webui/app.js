@@ -267,7 +267,7 @@
   // Topology comes first; its items are the gateways themselves (filled in from the daemon).
   const TOPO = "Topology";
   const NAV_GROUPS = [
-    ["Configure", [["cfg_general", "Settings"], ["cfg_groups", "Gateways"], ["cfg_dns", "DNS"], ["cfg_web", "Web GUI"], ["cfg_snmp", "SNMP"], ["cfg_cluster", "Cluster"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
+    ["Configure", [["cfg_general", "Settings"], ["cfg_groups", "Gateways"], ["cfg_dns", "DNS"], ["cfg_web", "Web GUI"], ["cfg_snmp", "SNMP"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
     ["Operate", [["node", "Node"], ["cluster", "Cluster"], ["anycastop", "Anycast"], ["scheduler", "Scheduler"], ["updates", "Upgrade"]]],
     ["Monitor", [["stats", "Statistics"], ["host", "Host"], ["gateways", "Gateways"], ["nodes", "Cluster"], ["dns", "DNS"], ["anycaststatus", "Anycast"], ["capture", "Capture"], ["log", "Log"]]],
   ];
@@ -349,6 +349,7 @@
     if (wanted === "bgp") wanted = "anycast"; // likewise Configure ▸ BGP
     if (wanted === "certificate") wanted = "cfg_web"; // moved under Configure ▸ Web GUI
     if (wanted === "config") wanted = "cfg_general"; // Configure ▸ Settings was split into one page per tab
+    if (wanted === "cfg_cluster") { wanted = "cfg_general"; state.settingsTab = "cluster"; } // moved under Configure ▸ Settings
     selectTab(TABS.some(([id]) => id === wanted) ? wanted : "topology");
   }
 
@@ -481,14 +482,13 @@
   function helpTopicKey() {
     const k = (() => {
       switch (state.tab) {
-      case "cfg_general": return state.settingsTab === "logs" ? "config_logs" : state.settingsTab === "upgrades" ? "config_upgrades" : "config_general";
+      case "cfg_general": return state.settingsTab === "cluster" ? "config_cluster" : state.settingsTab === "logs" ? "config_logs" : state.settingsTab === "upgrades" ? "config_upgrades" : "config_general";
       case "cfg_groups": return "config_groups";
       case "cfg_web": return "config_web" + (state.webTab === 1 ? 1 : 0);
       case "anycast": return "anycast_" + (state.anycastTab === 1 ? "ospf" : "bgp");
       case "anycaststatus": return "anycaststatus_" + (state.anycastMonTab === 1 ? "ospf" : "bgp");
       case "anycastop": return "anycastop_" + (state.anycastOpTab === 1 ? "ospf" : "bgp");
       case "cfg_snmp": return "config_snmp";
-      case "cfg_cluster": return "config_cluster";
       case "cfg_dns": return "config_dns" + (state.dnsTab >= 0 ? state.dnsTab : 0) + (state.dnsTab === 3 ? "_" + (state.resTab >= 0 ? state.resTab : 0) : "");
       case "users": return state.usersTab === 1 ? "users_ldap" : state.usersTab === 2 ? "users_sso" + (state.ssoTab >= 0 ? state.ssoTab : 0) : "users_local";
       default: return state.tab;
@@ -3512,6 +3512,7 @@
             section("Syslog", syslog.el, h("div", { class: "toolbar" }, syslogTest, syslogMsg, syslogState),
               h("p", { class: "hint" }, "Every line the log shows is also sent to the server, from this node only: the setting is not copied to the other nodes. A server that is down never holds anything up; the newest messages wait in a queue and the oldest are dropped if it fills.")))],
           ["upgrades", "Upgrades", updatesCard() || section("Upgrades", h("p", { class: "hint" }, "The upgrade settings cannot be read right now."))],
+          ["cluster", "Cluster", section("Cluster", cluster.el)],
         ];
         const panes = TABS.map(([, , el]) => h("div", { role: "tabpanel" }, el));
         const buttons = TABS.map(([, name], i) => h("button", { type: "button", role: "tab", class: "dtab", onclick: () => show(i) }, name));
@@ -3543,7 +3544,6 @@
           sso.el)],
         ["ldap", "LDAP", section("LDAP sign-in", ldap.el)],
         ["snmp", "SNMP", h("div", {}, (() => { const c = section("SNMP", snmp.el); c.querySelector("h2").append(snmpPill); return c; })())],
-        ["cluster", "Cluster", section("Cluster", cluster.el)],
       ];
       for (const [pid, , el] of panels) el.hidden = pid !== tab;
       const form = h("div", {}, ...panels.map((p) => p[2]));
@@ -3606,7 +3606,7 @@
       },
     };
   };
-  for (const id of ["general", "groups", "dns", "web", "sso", "ldap", "snmp", "cluster"]) VIEWS["cfg_" + id] = makeConfigView(id);
+  for (const id of ["general", "groups", "dns", "web", "sso", "ldap", "snmp"]) VIEWS["cfg_" + id] = makeConfigView(id);
 
   // ── shared helpers for the management pages ───────────────────────────────
   // Nothing is said when every node answered (the Node menu says "Cluster"); when one could not, which and why, since the

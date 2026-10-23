@@ -1,5 +1,9 @@
 # Changelog
 
+## [v532] - 2026-10-23 — Configure ▸ Cluster moved to Configure ▸ Settings ▸ Cluster
+
+- The **Cluster** settings (binding address, advertised address, sync interval) are now the **Cluster** tab of **Configure ▸ Settings**, after General, Logs and Upgrades. The *Cluster* entry under Configure is gone; an old `#cfg_cluster` bookmark opens the new tab. Nothing else changes, and the help panel follows the tab.
+
 ## [v531] - 2026-10-23 — Configure ▸ Settings with General, Logs and Upgrades tabs; syslog forwarding; Gateways
 
 - **Configure ▸ General is now Configure ▸ Settings**, with three tabs. **General** keeps *Pause this node when its own DNS stops answering*. **Logs** holds the *Log level* and the new syslog settings. **Upgrades** holds the upgrade card (automatic updates, online repository).

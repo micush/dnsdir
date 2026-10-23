@@ -153,7 +153,7 @@ const DNSDIR_HELP = {
   config_general: {
     title: "Configure: Settings ▸ General",
     body: [
-      "The **General** tab of **Configure ▸ Settings** holds one setting: whether this node takes itself out of service when its own DNS stops answering. The other tabs are **Logs** and **Upgrades**.",
+      "The **General** tab of **Configure ▸ Settings** holds one setting: whether this node takes itself out of service when its own DNS stops answering. The other tabs are **Logs**, **Upgrades** and **Cluster**.",
       "**Every change saves and applies as soon as you leave the field or tick the box.** There is no Save button. If AnyName refuses a value, a red *Not saved* message says why and nothing is changed until you correct it.",
       ["h", "What you can do here"],
       ["ul", ["Turn the self-check on or off for this node."]],
@@ -460,13 +460,13 @@ const DNSDIR_HELP = {
     ],
   },
   config_cluster: {
-    title: "Configure: Cluster",
+    title: "Configure: Settings ▸ Cluster",
     body: [
       "How this node talks to the other nodes of its cluster: the port it listens on, the address the others use to find it, and how often it checks in. **Joining, promoting and removing nodes is done on Operate ▸ Cluster**, not here.",
       ["h", "What you can do here"],
       ["ul", ["Change the cluster port or bind it to one address.", "Tell the other nodes which address to use for this one (useful behind NAT or with several addresses).", "Change how often replicas copy the settings."]],
       ["h", "Step by step: set the address the others should use"],
-      ["ol", ["Open **Configure ▸ Cluster** on the node.", "Fill in **Advertised address** as `host:port`, for example `10.0.0.5:53854`.", "Leave it empty to use this host's name with the listen port."]],
+      ["ol", ["Open **Configure ▸ Settings ▸ Cluster** on the node.", "Fill in **Advertised address** as `host:port`, for example `10.0.0.5:53854`.", "Leave it empty to use this host's name with the listen port."]],
       ["h", "Fields"],
       "These belong to this node, not to the cluster.",
       ["fields", [["Binding address", "The port the cluster listens on, which the other nodes connect to. Just the port (default `53854`) listens on all addresses; give an address with it, such as `10.0.0.5:53854`, to bind to one."], ["Advertised address", "`host:port` the other members use to reach this node. Empty means this host's name with the listen port."], ["Sync interval (s)", "1–3600, default 5. How often replicas pull state and members are polled."]]],

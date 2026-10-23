@@ -1,5 +1,16 @@
 # Changelog
 
+## [v523] - 2026-10-22 — LDAP without a service account
+
+- **Configure ▸ Users ▸ LDAP**: the bind account and its password are now optional. Leave both empty and each person signs in to the directory as themselves (`alice` is sent as `alice@example.lan`, the domain taken from the search base; `alice@example.lan` and `EXAMPLE\alice` are sent as typed), and the console reads their own groups and account status.
+- Without a bind account an open session cannot be rechecked against the directory, so it runs until it expires or the person signs out; with one, sessions are still rechecked every minute. A bind account without its password (or the reverse) leaves LDAP off.
+- The Test box needs a password in this mode. The account that signed in must be the account whose groups were read.
+
+## [v522] - 2026-10-22 — LDAP sign-in, and an option to skip certificate checks
+- **Configure ▸ Users ▸ LDAP** (new tab beside SSO) signs people in with a Samba 4 or Active Directory account. Servers (`ldaps://`, or `ldap://` with StartTLS), a bind account, a search base, and a full-access and a read-only group (name or DN, nested groups count). The host's own accounts are tried first. Sessions are rechecked every minute. A **Test** box shows each step of a lookup.
+- **Do not check the server's certificate** (LDAP) and **Do not check the provider's certificate** (OpenID Connect) accept self-signed certificates without trusting a certificate authority. Off by default; the log warns while on.
+- New help pane for LDAP; the SSO pane covers the new option.
+
 ## [v521] - 2026-10-22 — A tab for each sign-in provider
 
 - **Configure ▸ Users ▸ SSO** has a tab for each provider: **General** (the console's address and the table of users), **Google**, **Microsoft** and **OpenID Connect**.

@@ -30,7 +30,7 @@ func TestEveryPageHasHelp(t *testing.T) {
 	for _, id := range ids {
 		topics := []string{id}
 		if id == "users" { // the Users page has a help topic for each of its tabs
-			topics = []string{"users_local", "users_sso"}
+			topics = []string{"users_local", "users_sso", "users_ldap"}
 		}
 		for _, tp := range topics {
 			if !regexp.MustCompile(`(?m)^  ` + tp + `: \{`).Match(help) {

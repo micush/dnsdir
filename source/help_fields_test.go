@@ -45,6 +45,11 @@ func TestHelpCoversEveryField(t *testing.T) {
 	if ssoAt < 0 {
 		t.Fatal("cannot find SSO_FIELDS in app.js")
 	}
+	ldapAt := strings.Index(app, "const LDAP_FIELDS = [")
+	if ldapAt < 0 {
+		t.Fatal("cannot find LDAP_FIELDS in app.js")
+	}
+	ldapEnd := ldapAt + strings.Index(app[ldapAt:], "\n  ];")
 	found := 0
 	for _, m := range regexp.MustCompile(`\bl: "([^"]+)"`).FindAllStringSubmatchIndex(app, -1) {
 		label := app[m[2]:m[3]]
@@ -54,6 +59,9 @@ func TestHelpCoversEveryField(t *testing.T) {
 		}
 		if m[0] > ssoAt && m[0] < ssoEnd {
 			tp = "users_sso"
+		}
+		if m[0] > ldapAt && m[0] < ldapEnd {
+			tp = "users_ldap"
 		}
 		found++
 		if !has(tp, label) {

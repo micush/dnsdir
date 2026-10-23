@@ -65,6 +65,8 @@ type SharedConfig struct {
 	WebAuth *SharedWebAuth `json:"web_auth,omitempty"`
 	// SSO is single sign-on (providers, users); omitted while nothing is set, so the hash of a cluster that does not use it is unchanged.
 	SSO *SSOConfig `json:"sso,omitempty"`
+	// LDAP is sign-in with a directory (servers, service account, groups); omitted while nothing is set, for the same reason.
+	LDAP *LDAPConfig `json:"ldap,omitempty"`
 }
 
 // SharedWebAuth is the replicated part of the sign-in rules.
@@ -113,6 +115,7 @@ func sharedOf(dc *DaemonConfig) SharedConfig {
 	}
 	sc.WebAuth = sharedWebAuth(dc.Web)
 	sc.SSO = dc.Web.SSOConfig.clone()
+	sc.LDAP = dc.Web.LDAPConfig.clone()
 	if sc.DNS.Servers == nil {
 		sc.DNS.Servers = []string{}
 	}
@@ -160,6 +163,7 @@ func (s SharedConfig) Validate() error {
 	}
 	s.WebAuth.applyTo(&dc.Web)
 	dc.Web.SSOConfig = ssoOf(s.SSO)
+	dc.Web.LDAPConfig = ldapOf(s.LDAP)
 	return dc.Validate()
 }
 
@@ -227,6 +231,7 @@ func mergeShared(dc *DaemonConfig, sh SharedConfig, seeds []GroupSeed) (bool, er
 	}
 	sh.WebAuth.applyTo(&dc.Web)
 	dc.Web.SSOConfig = ssoOf(sh.SSO)
+	dc.Web.LDAPConfig = ldapOf(sh.LDAP)
 	if err := dc.Validate(); err != nil {
 		return false, err
 	}
@@ -345,6 +350,14 @@ func cloneDNSPtr(d *DNSConfig) *DNSConfig {
 func ssoOf(c *SSOConfig) SSOConfig {
 	if c == nil || c.empty() {
 		return SSOConfig{}
+	}
+	return *c.clone()
+}
+
+// ldapOf is the LDAP settings of a shared document: none when the document has none.
+func ldapOf(c *LDAPConfig) LDAPConfig {
+	if c == nil || c.empty() {
+		return LDAPConfig{}
 	}
 	return *c.clone()
 }

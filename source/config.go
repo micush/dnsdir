@@ -1331,6 +1331,8 @@ type WebConfig struct {
 	MinPasswordLength int `json:"min_password_length,omitempty"`
 	// SSOConfig is single sign-on with Google or Microsoft Entra ID (sso.go); its keys are flat in the web block.
 	SSOConfig
+	// LDAPConfig is sign-in with an LDAP directory such as Active Directory (ldap.go); its keys are flat in the web block.
+	LDAPConfig
 }
 
 const (
@@ -1398,6 +1400,9 @@ func (w *WebConfig) Validate() error {
 		return errors.New("web: lockout_minutes must be 1-10080")
 	}
 	if err := w.SSOConfig.validateSSO(); err != nil {
+		return err
+	}
+	if err := w.LDAPConfig.validateLDAP(); err != nil {
 		return err
 	}
 	if w.MinPasswordLength < 0 || w.MinPasswordLength > maxMinPasswordLength {

@@ -4,6 +4,7 @@ import (
 	"crypto"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -45,6 +46,9 @@ type SSOConfig struct {
 	OIDCIssuer       string `json:"sso_oidc_issuer,omitempty"`
 	OIDCClientID     string `json:"sso_oidc_client_id,omitempty"`
 	OIDCClientSecret string `json:"sso_oidc_client_secret,omitempty"`
+	// OIDCSkipVerify accepts any certificate the provider presents (a self-signed one, say).  The connection is still
+	// encrypted, but nothing proves who is on the other end.
+	OIDCSkipVerify bool `json:"sso_oidc_skip_verify,omitempty"`
 	// Users are the people who may sign in: "alice@example.com rw" or "bob@example.com ro" (no level means ro).
 	Users []string `json:"sso_users,omitempty"`
 	// BaseURL is the address the provider sends the browser back to ("https://dns1.example.com:53853"); empty uses the
@@ -54,7 +58,7 @@ type SSOConfig struct {
 
 func (c SSOConfig) empty() bool {
 	return c.GoogleClientID == "" && c.GoogleClientSecret == "" && c.EntraTenant == "" && c.EntraClientID == "" &&
-		c.EntraClientSecret == "" && c.OIDCName == "" && c.OIDCIssuer == "" && c.OIDCClientID == "" && c.OIDCClientSecret == "" &&
+		c.EntraClientSecret == "" && c.OIDCName == "" && c.OIDCIssuer == "" && c.OIDCClientID == "" && c.OIDCClientSecret == "" && !c.OIDCSkipVerify &&
 		len(c.Users) == 0 && c.BaseURL == ""
 }
 
@@ -198,6 +202,7 @@ var (
 type ssoProvider struct {
 	id, title        string
 	issuer           string // oidc: the issuer the discovery document must name
+	skipVerify       bool   // oidc: do not check the provider's certificate
 	clientID, secret string
 	tenant           string
 	disc             string // discovery document address
@@ -221,7 +226,7 @@ func (c SSOConfig) providers() []ssoProvider {
 			title = "SSO"
 		}
 		out = append(out, ssoProvider{id: "oidc", title: title, clientID: c.OIDCClientID, secret: c.OIDCClientSecret, issuer: c.OIDCIssuer,
-			disc: c.OIDCIssuer + "/.well-known/openid-configuration", scope: "openid email profile"})
+			disc: c.OIDCIssuer + "/.well-known/openid-configuration", scope: "openid email profile", skipVerify: c.OIDCSkipVerify})
 	}
 	return out
 }
@@ -277,8 +282,30 @@ func ssoURLOK(u string) bool {
 	return strings.HasPrefix(u, "https://")
 }
 
-func ssoGetJSON(req *http.Request, v any) error {
-	resp, err := ssoHTTP.Do(req)
+// client is the HTTP client for talking to the provider: the ordinary one, or one that accepts any certificate when the
+// administrator turned certificate checking off for this provider.
+func (p *ssoProvider) client() *http.Client {
+	if !p.skipVerify {
+		return ssoHTTP
+	}
+	warnNoCertCheck(p.title)
+	ssoInsecureClient.Do.Lock()
+	defer ssoInsecureClient.Do.Unlock()
+	if ssoInsecureClient.c == nil {
+		ssoInsecureClient.c = &http.Client{Timeout: ssoHTTP.Timeout, Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}, // Do not check the provider's certificate is on
+		}}
+	}
+	return ssoInsecureClient.c
+}
+
+var ssoInsecureClient = struct {
+	Do sync.Mutex
+	c  *http.Client
+}{}
+
+func ssoGetJSON(hc *http.Client, req *http.Request, v any) error {
+	resp, err := hc.Do(req)
 	if err != nil {
 		return err
 	}
@@ -302,7 +329,7 @@ func (s *ssoState) discovery(p *ssoProvider) (*ssoDisc, error) {
 	}
 	req, _ := http.NewRequest(http.MethodGet, p.disc, nil)
 	nd := &ssoDisc{}
-	if err := ssoGetJSON(req, nd); err != nil {
+	if err := ssoGetJSON(p.client(), req, nd); err != nil {
 		if d != nil {
 			return d, nil // the provider is briefly unreachable: the last document still holds
 		}
@@ -330,7 +357,7 @@ func b64Int(s string) (*big.Int, error) {
 }
 
 // key finds the provider's signing key for kid, fetching the key set when it is old or the key is not in it.
-func (s *ssoState) key(d *ssoDisc, kid string) (*rsa.PublicKey, error) {
+func (s *ssoState) key(hc *http.Client, d *ssoDisc, kid string) (*rsa.PublicKey, error) {
 	find := func(j *ssoJWKS) *rsa.PublicKey {
 		if j == nil {
 			return nil
@@ -357,7 +384,7 @@ func (s *ssoState) key(d *ssoDisc, kid string) (*rsa.PublicKey, error) {
 			Kty, Kid, N, E, Use, Alg string
 		} `json:"keys"`
 	}
-	if err := ssoGetJSON(req, &doc); err != nil {
+	if err := ssoGetJSON(hc, req, &doc); err != nil {
 		return nil, err
 	}
 	nj := &ssoJWKS{fetched: time.Now()}
@@ -425,7 +452,7 @@ func (s *ssoState) verifyIDToken(p *ssoProvider, d *ssoDisc, tok, nonce string, 
 	if json.Unmarshal(hb, &hdr) != nil || hdr.Alg != "RS256" { // never "none", never a key-confusion HMAC
 		return "", errors.New("the ID token is not signed with RS256")
 	}
-	pub, err := s.key(d, hdr.Kid)
+	pub, err := s.key(p.client(), d, hdr.Kid)
 	if err != nil {
 		return "", err
 	}
@@ -608,7 +635,7 @@ func (w *WebServer) handleSSOCallback(rw http.ResponseWriter, r *http.Request) {
 		Error   string `json:"error"`
 		Desc    string `json:"error_description"`
 	}
-	resp, err := ssoHTTP.Do(req)
+	resp, err := p.client().Do(req)
 	if err == nil {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		resp.Body.Close()

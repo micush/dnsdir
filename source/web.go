@@ -110,6 +110,7 @@ type session struct {
 	checked  time.Time // last group-membership check
 	ip       string    // the address it signed in from (for the log)
 	readOnly bool      // signed in through the read-only group: may look, not change (see readonly.go)
+	ldap     bool      // signed in with an LDAP directory account (ldap.go): rechecked against the directory, not PAM
 	ssoProv  string    // which provider it signed in with (google or entra)
 	sso      bool      // signed in with Google or Entra ID (sso.go): user is an e-mail address, checked against the list of users
 }
@@ -329,6 +330,7 @@ func (w *WebServer) Handler() http.Handler {
 	mux.HandleFunc("GET /api/login/state", w.handleLoginState)
 	mux.HandleFunc("GET /api/sso/start", w.handleSSOStart)
 	mux.HandleFunc("GET /api/sso/callback", w.handleSSOCallback)
+	mux.HandleFunc("POST /api/ldap/test", w.authed(w.handleLDAPTest))
 	mux.HandleFunc("POST /api/logout", w.authed(w.handleLogout))
 	mux.HandleFunc("GET /api/session", w.authed(w.handleSession))
 	mux.HandleFunc("GET /api/gateways", w.authed(w.handleGateways))
@@ -475,6 +477,15 @@ func (w *WebServer) lookup(r *http.Request) *session {
 		var err error
 		if s.sso {
 			ok, ro = pol.ssoLevel(uname, s.ssoProv)
+		} else if s.ldap && pol.LDAPConfig.enabled() && !pol.LDAPConfig.hasBind() {
+			ok, ro = true, w.ro(s) // no service account: there is nothing to look the person up with, the session runs its course
+		} else if s.ldap {
+			o := pol.LDAPConfig.ldapFind(uname, "", false)
+			ok, ro = o.OK, o.ReadOnly
+			if o.Failed { // the directory could not be asked: the session stays until it can be
+				warnf("web: ldap: could not recheck %q, the session stays for now: %s", uname, o.reason())
+				ok, ro = true, w.ro(s)
+			}
 		} else {
 			ok, ro, err = w.access(uname, pol)
 		}
@@ -736,11 +747,12 @@ func (w *WebServer) handleLogin(rw http.ResponseWriter, r *http.Request) {
 	pol := w.policy.Load()
 
 	var reason string
-	var readOnly bool
+	var readOnly, viaLDAP bool
 	switch {
 	case !validUsername(req.Username) || req.Password == "":
 		reason = "malformed credentials"
 	default:
+		granted := false
 		if err := w.auth.Authenticate(pol.PAMService, req.Username, req.Password); err != nil {
 			reason = "authentication failed: " + err.Error()
 			if strings.HasPrefix(err.Error(), "pam account check") {
@@ -753,7 +765,14 @@ func (w *WebServer) handleLogin(rw http.ResponseWriter, r *http.Request) {
 		} else if !ok {
 			reason = "not a member of group " + pol.Group
 		} else {
-			readOnly = ro
+			readOnly, granted = ro, true
+		}
+		if !granted && pol.LDAPConfig.enabled() { // not a host account: the directory is asked
+			if o := pol.LDAPConfig.ldapFind(req.Username, req.Password, true); o.OK {
+				readOnly, viaLDAP, reason = o.ReadOnly, true, ""
+			} else {
+				reason += "; LDAP: " + o.reason()
+			}
 		}
 	}
 	if reason != "" {
@@ -775,7 +794,7 @@ func (w *WebServer) handleLogin(rw http.ResponseWriter, r *http.Request) {
 	w.clearFailures(keys...)
 
 	now := time.Now()
-	s := &session{user: req.Username, csrf: randToken(), created: now, last: now, checked: now, readOnly: readOnly, ip: ip}
+	s := &session{user: req.Username, csrf: randToken(), created: now, last: now, checked: now, readOnly: readOnly, ip: ip, ldap: viaLDAP}
 	tok := randToken()
 	w.mu.Lock()
 	w.sessions[sessKey(tok)] = s
@@ -785,7 +804,11 @@ func (w *WebServer) handleLogin(rw http.ResponseWriter, r *http.Request) {
 		Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true, Secure: true,
 		SameSite: http.SameSiteStrictMode, MaxAge: int(sessionMaxAge.Seconds()),
 	})
-	infof("web: login: %q signed in from %s (%s)", req.Username, ip, accessWord(readOnly))
+	if viaLDAP {
+		infof("web: login: %q signed in with LDAP from %s (%s)", req.Username, ip, accessWord(readOnly))
+	} else {
+		infof("web: login: %q signed in from %s (%s)", req.Username, ip, accessWord(readOnly))
+	}
 	writeJSON(rw, http.StatusOK, w.sessionInfo(s))
 }
 
@@ -922,4 +945,38 @@ func (w *WebServer) logLockedOut(ip, name string, wait time.Duration) {
 	w.lockSeen[key] = now
 	w.mu.Unlock()
 	warnf("web: login refused for %q from %s: locked out for another %s", name, ip, wait.Round(time.Second))
+}
+
+// handleLDAPTest tries the directory settings as saved and says what happened, step by step: with a user name (and a
+// password) it does what a sign-in does, without a user name it only connects and binds the service account.
+func (w *WebServer) handleLDAPTest(rw http.ResponseWriter, r *http.Request, s *session) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if !readJSON(rw, r, maxLoginBody, &req) {
+		return
+	}
+	cfg := w.policy.Load().LDAPConfig
+	var o *ldapOutcome
+	switch {
+	case !cfg.enabled():
+		o = &ldapOutcome{Steps: []string{"LDAP is not set up yet: it needs a server, a search base and at least one group (and a bind account together with its password, or neither)"}}
+	case strings.TrimSpace(req.Username) == "":
+		o = &ldapOutcome{}
+		if lc := cfg.ldapConnect(o); lc != nil {
+			lc.close()
+			o.OK = true
+			o.step("the settings work; give a user name and password to try a person")
+		}
+	case req.Password == "" && !cfg.hasBind():
+		o = &ldapOutcome{Steps: []string{"there is no bind account, so a person can only be tried with their password"}}
+	default:
+		o = cfg.ldapFind(strings.TrimSpace(req.Username), req.Password, req.Password != "")
+		if o.OK && req.Password == "" {
+			o.step("no password was given, so it was not checked")
+		}
+	}
+	infof("web: ldap test by %q: ok=%v", s.user, o.OK)
+	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": map[string]any{"ok": o.OK, "read_only": o.ReadOnly, "steps": o.Steps}})
 }

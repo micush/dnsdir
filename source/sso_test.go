@@ -370,3 +370,26 @@ func TestSSOGenericProvider(t *testing.T) {
 		}
 	}
 }
+
+// A provider with a certificate of its own (self-signed) is refused until "Do not check the provider's certificate" is on.
+func TestSSOSkipVerify(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"issuer": "https://" + r.Host, "authorization_endpoint": "https://" + r.Host + "/auth",
+			"token_endpoint": "https://" + r.Host + "/token", "jwks_uri": "https://" + r.Host + "/keys"})
+	}))
+	defer srv.Close()
+	c := SSOConfig{OIDCIssuer: srv.URL, OIDCClientID: "c", OIDCClientSecret: "s"}
+	if err := c.validateSSO(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newSSOState().discovery(c.provider("oidc")); err == nil {
+		t.Fatal("a self-signed certificate was accepted")
+	}
+	c.OIDCSkipVerify = true
+	if d, err := newSSOState().discovery(c.provider("oidc")); err != nil || d.Issuer != srv.URL {
+		t.Fatalf("with the checkbox on: %v", err)
+	}
+	if c.empty() || (SSOConfig{OIDCSkipVerify: true}).empty() {
+		t.Fatal("the checkbox alone must count as a setting")
+	}
+}

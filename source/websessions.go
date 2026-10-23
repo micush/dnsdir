@@ -32,6 +32,7 @@ type sessionRec struct {
 	IP      string `json:"ip,omitempty"` // where it signed in from
 	SSO     bool   `json:"sso,omitempty"`
 	SSOProv string `json:"sso_provider,omitempty"`
+	LDAP    bool   `json:"ldap,omitempty"`
 }
 
 // loadSessions restores the sessions saved by the last run; whatever has run out is dropped.
@@ -56,7 +57,7 @@ func (w *WebServer) loadSessions() {
 			continue
 		}
 		// checked is left at zero: the group is looked at again with the first request
-		w.sessions[r.Key] = &session{user: r.User, csrf: r.CSRF, created: created, last: last, readOnly: r.RO, ip: r.IP, sso: r.SSO, ssoProv: r.SSOProv}
+		w.sessions[r.Key] = &session{user: r.User, csrf: r.CSRF, created: created, last: last, readOnly: r.RO, ip: r.IP, sso: r.SSO, ssoProv: r.SSOProv, ldap: r.LDAP}
 		n++
 	}
 	w.mu.Unlock()
@@ -73,7 +74,7 @@ func (w *WebServer) saveSessions() {
 	w.mu.Lock()
 	recs := make([]sessionRec, 0, len(w.sessions))
 	for k, s := range w.sessions {
-		recs = append(recs, sessionRec{Key: k, User: s.user, CSRF: s.csrf, Created: s.created.Unix(), Last: s.last.Unix(), RO: s.readOnly, IP: s.ip, SSO: s.sso, SSOProv: s.ssoProv})
+		recs = append(recs, sessionRec{Key: k, User: s.user, CSRF: s.csrf, Created: s.created.Unix(), Last: s.last.Unix(), RO: s.readOnly, IP: s.ip, SSO: s.sso, SSOProv: s.ssoProv, LDAP: s.ldap})
 	}
 	w.mu.Unlock()
 	b, _ := json.Marshal(recs)

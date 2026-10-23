@@ -1,5 +1,9 @@
 # Changelog
 
+## [v525] - 2026-10-22 — A joining node does not pull the cluster up to its version
+
+- With auto-update on (the default), every node follows the highest source version any member offers, so a node that joined a cluster while holding a newer release staged would have upgraded the whole cluster. A node that has just joined now does not offer the source it had staged when it joined (it reports no source and refuses `/cluster/source`) until an administrator uploads or fetches a release on it, or it stages something else. The guard is on the joining node, so it works even when the cluster's nodes are older. A joining node on an older version updates itself from the cluster as before.
+
 ## [v523] - 2026-10-22 — LDAP without a service account
 
 - **Configure ▸ Users ▸ LDAP**: the bind account and its password are now optional. Leave both empty and each person signs in to the directory as themselves (`alice` is sent as `alice@example.lan`, the domain taken from the search base; `alice@example.lan` and `EXAMPLE\alice` are sent as typed), and the console reads their own groups and account status.

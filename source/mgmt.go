@@ -347,6 +347,7 @@ func (m *Mgmt) UpdateUpload(body []byte, by string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("rejected: %w", err)
 	}
+	m.upd.ReleaseSource() // staged on purpose: it may be offered to the cluster
 	m.upd.Record(UpdateEvent{Node: m.cl.selfAddrForEvents(), Kind: "uploaded", To: ver, By: by,
 		Detail: fmt.Sprintf("source v%s staged (running v%s)", ver, version())})
 	infof("update: source v%s staged by %s", ver, by)

@@ -946,3 +946,37 @@ func (u *Updater) RolledBackNotice() string {
 	}
 	return ""
 }
+
+// ---- a node that has just joined does not offer its source ----
+//
+// Auto-update makes every node follow the highest source version any member offers.  A node that joins a cluster with a
+// newer release than the cluster runs must not, by joining, pull the whole cluster up to it: what it had staged when it
+// joined is not offered to the others until an administrator stages a release on it (an upload or a fetch from online),
+// or it stages something else (a newer source pulled from the cluster).
+
+func (u *Updater) holdPath() string { return filepath.Join(u.dir, "source-hold") }
+
+// HoldSource stops the source staged now from being offered to the other members.
+func (u *Updater) HoldSource() {
+	v := u.SourceVersion()
+	if v == "" {
+		os.Remove(u.holdPath())
+		return
+	}
+	writeAtomic(u.holdPath(), []byte(v), 0o600)
+}
+
+// ReleaseSource lets the staged source be offered again (an administrator staged a release here on purpose).
+func (u *Updater) ReleaseSource() { os.Remove(u.holdPath()) }
+
+// OfferedSource is the source version other members are told about, and may pull: the staged one, unless it is held.
+func (u *Updater) OfferedSource() string {
+	v := u.SourceVersion()
+	if v == "" {
+		return ""
+	}
+	if b, err := os.ReadFile(u.holdPath()); err == nil && strings.TrimSpace(string(b)) == v {
+		return ""
+	}
+	return v
+}

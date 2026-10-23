@@ -1086,7 +1086,7 @@ dnsdir --update-history
 
 ### How a node updates
 
-Each node that is asked pulls the source from the peer that has the newest one and **builds it natively** (the Go toolchain, gcc and the PAM headers, which is what `install.sh` sets up). It checks the result (version number, PAM linked), keeps the old binary as `/var/lib/dnsdir/update/dnsdir.prev`, swaps it in and re-executes itself.
+A node that has just joined a cluster does not offer the source it had staged at that moment to the other members, so joining with a newer version never makes auto-update pull the cluster up to it; uploading or fetching a release on that node (or staging a newer one) offers it. A joining node on an older version updates itself from the cluster as usual. Each node that is asked pulls the source from the peer that has the newest one and **builds it natively** (the Go toolchain, gcc and the PAM headers, which is what `install.sh` sets up). It checks the result (version number, PAM linked), keeps the old binary as `/var/lib/dnsdir/update/dnsdir.prev`, swaps it in and re-executes itself.
 
 A new binary that does not stay up is rolled back automatically (three boot attempts; it is confirmed after 60 seconds), and the failure is shown in the Upgrade tab. The queue and the auto-update setting are cluster-wide and live on the primary. Run it under a supervisor that restarts the process; the unit does (`Restart=always`).
 

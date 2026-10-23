@@ -623,7 +623,7 @@ func (c *Cluster) statusMsg() PeerStatusMsg {
 		Hostname: host,
 		Peer:     c.node.Self(), Epoch: snap.Epoch, Role: snap.Role, PrimaryAddr: snap.PrimaryAddr,
 		Peers: append(c.knownPeers(snap), c.node.Self()), Removed: snap.Removed,
-		Version: version(), SourceVersion: c.mg.upd.SourceVersion(), Updating: c.mg.upd.Busy(),
+		Version: version(), SourceVersion: c.mg.upd.OfferedSource(), Updating: c.mg.upd.Busy(),
 		UpdateFailed: c.mg.upd.FailedFor(), UptimeSec: int64(time.Since(processStart) / time.Second), AnycastUp: c.mg.anycastReport(), SharedRev: snap.SharedRev, Intent: c.mg.upd.Intent(), PrimaryDownSec: c.primaryDownSec(),
 		GwKnown: c.mg.gwFn != nil, Gateways: c.mg.localGateways(), NodePaused: c.mg.pausedFn != nil && c.mg.pausedFn(), Host: hostLoadPtr(), Addrs: ethernetAddrs(), GwIPs: c.mg.localGwIPs(),
 	}
@@ -766,6 +766,10 @@ func (c *Cluster) handleAdmin(rw http.ResponseWriter, r *http.Request, caller Cl
 }
 
 func (c *Cluster) handleSource(rw http.ResponseWriter, r *http.Request, caller ClusterPeer, _ []byte) {
+	if c.mg.upd.OfferedSource() == "" {
+		jsonError(rw, http.StatusNotFound, "no source tree is offered by this node")
+		return
+	}
 	data, ver, err := c.mg.upd.SourceTarball()
 	if err != nil {
 		jsonError(rw, http.StatusNotFound, err.Error())
@@ -1056,6 +1060,7 @@ func (c *Cluster) Join(ctx context.Context, code, by string) error {
 		if err := c.node.JoinAs(res.Secret, res.Epoch, primary, peers); err != nil {
 			return err
 		}
+		c.mg.upd.HoldSource() // before the first status message: what this node had staged is not offered to the cluster
 		infof("cluster: joined the cluster via %s (primary %s, epoch %d) — requested by %s", addr, primary, res.Epoch, by)
 		if err := c.SyncOnce(ctx); err != nil {
 			warnf("cluster: joined, but the first sync failed: %v", err)

@@ -390,7 +390,7 @@ const DNSDIR_HELP = {
   updates: {
     title: "Upgrade",
     body: [
-      "Update AnyName in place. Upload a release archive (`dnsdir_vN.tgz` or `.zip`) to any node: it is checked and kept as the **source**, and the other members pull it from there. Auto-update is on by default, so each node installs a newly staged release by itself; turn it off in Configure ▸ General ▸ Upgrade to update nodes by hand. Each node builds the daemon itself, so it needs a Go toolchain, gcc and the PAM headers (the installer sets these up).",
+      "Update AnyName in place. Upload a release archive (`dnsdir_vN.tgz` or `.zip`) to any node: it is checked and kept as the **source**, and the other members pull it from there. Auto-update is on by default, so each node installs a newly staged release by itself; turn it off in Configure ▸ General ▸ Upgrade to update nodes by hand. A node that has just joined a cluster does not offer the release it had staged to the others (so joining with a newer version never pulls the cluster up to it): upload or fetch a release on that node to offer it. A joining node on an older version still updates itself from the cluster. Each node builds the daemon itself, so it needs a Go toolchain, gcc and the PAM headers (the installer sets these up).",
       ["h", "Updating"],
       ["ul", [
         "**Update this node now** (top right of the Nodes card) installs the source here. In a cluster, tick one or more members first and the button becomes **Update N selected**: those members update one at a time.",

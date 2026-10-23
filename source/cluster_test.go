@@ -1076,3 +1076,58 @@ func TestClusterDeletePeerLeavesNothing(t *testing.T) {
 		t.Fatalf("Delete must clear the removed list: %v", r)
 	}
 }
+
+// A node that joins with a newer release staged does not pull the cluster up to it: auto-update follows the highest source
+// any member offers, and joining is not a decision to upgrade the others.
+func TestJoiningNodeDoesNotOfferItsSource(t *testing.T) {
+	a, b := newTNode(t, "A"), newTNode(t, "B")
+	running := version()
+	next := fmt.Sprintf("%d", mustInt(running)+1)
+	if _, err := b.mg.upd.ExtractSource(fakeSourceTarball(t, next)); err != nil { // staged on B before it joins
+		t.Fatal(err)
+	}
+	b.join(a)
+	a.sync()
+	b.sync()
+	a.sync()
+	if v := b.mg.upd.OfferedSource(); v != "" {
+		t.Fatalf("a node that just joined offers v%s", v)
+	}
+	if p, v, ok := a.mg.cl.bestSourcePeer(running); ok {
+		t.Fatalf("A would pull v%s from %s", v, p.Addr)
+	}
+	if _, err := a.mg.cl.pullSource(context.Background(), ClusterPeer{Addr: b.addr, Fp: b.mg.cl.node.Fingerprint()}); err == nil {
+		t.Fatal("B served its source although it is held")
+	}
+	// an administrator stages a release on B on purpose: now it is offered
+	if _, err := b.mg.UpdateUpload(fakeSourceTarball(t, next), "alice"); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	if p, v, ok := a.mg.cl.bestSourcePeer(running); !ok || v != next || p.Addr != b.addr {
+		t.Fatalf("after an upload on B: %v %v %v", p, v, ok)
+	}
+}
+
+func TestUpdaterHoldsSource(t *testing.T) {
+	u := newTestUpdater(t)
+	u.HoldSource() // nothing staged: nothing to hold
+	if _, err := u.ExtractSource(makeTgz(t, good("9"))); err != nil {
+		t.Fatal(err)
+	}
+	if u.OfferedSource() != "9" {
+		t.Fatal("a staged source is offered")
+	}
+	u.HoldSource()
+	if u.OfferedSource() != "" || u.SourceVersion() != "9" {
+		t.Fatal("a held source is not offered but is still there")
+	}
+	if _, err := u.ExtractSource(makeTgz(t, good("10"))); err != nil || u.OfferedSource() != "10" {
+		t.Fatal("something newer staged later is offered")
+	}
+	u.HoldSource()
+	u.ReleaseSource()
+	if u.OfferedSource() != "10" {
+		t.Fatal("released")
+	}
+}

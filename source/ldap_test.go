@@ -225,6 +225,14 @@ func (f *fakeLDAP) serve(raw net.Conn) {
 				f.userBinds++
 				for _, u := range f.users {
 					who := strings.EqualFold(u.dn, dn) || strings.EqualFold(u.upn, dn) || strings.EqualFold("EXAMPLE\\"+u.sam, dn)
+					if !who && strings.EqualFold(u.sam+"@example.lan", dn) { // account name @ domain, only when no account has it as its UPN (as Active Directory does)
+						who = true
+						for _, o := range f.users {
+							if strings.EqualFold(o.upn, dn) {
+								who = false
+							}
+						}
+					}
 					if who && u.pw == pw && pw != "" && !u.disabled {
 						ok = true
 					}
@@ -562,6 +570,33 @@ func TestLDAPNoServiceAccount(t *testing.T) {
 		groups: map[string]bool{strings.ToLower(fakeRW): true}})
 	if o := tc.ldapFind("alice", "allypw", true); o.OK {
 		t.Errorf("a different account signed in under alice's name: %v", o.Steps)
+	}
+}
+
+// An account whose user principal name is not name@domain still signs in by its account name (mcc -> mcc@example.lan) when no
+// other account has that UPN; when one has, it is the one that signed in and the entry found is refused.
+func TestLDAPAccountNameWithDifferentUPN(t *testing.T) {
+	f := newFakeLDAP(t, true)
+	f.users = append(f.users, &fakeUser{dn: "CN=Michael,OU=People,DC=example,DC=lan", sam: "mcc", upn: "michael.cushard@example.com", pw: "mccpw",
+		groups: map[string]bool{strings.ToLower(fakeRW): true}})
+	cfg := f.config()
+	cfg.LDAPBindDN, cfg.LDAPBindPassword = "", ""
+	for _, user := range []string{"mcc", "EXAMPLE\\mcc"} {
+		if o := cfg.ldapFind(user, "mccpw", true); !o.OK || o.Failed {
+			t.Errorf("%q should sign in: %v", user, o.Steps)
+		}
+	}
+	if o := cfg.ldapFind("mcc", "wrong", true); o.OK {
+		t.Errorf("a wrong password signed in: %v", o.Steps)
+	}
+	// another account owns mcc@example.lan as its UPN: the server signs that one in, not the account named mcc
+	f.users = append(f.users, &fakeUser{dn: "CN=Other,OU=People,DC=example,DC=lan", sam: "other", upn: "mcc@example.lan", pw: "otherpw",
+		groups: map[string]bool{strings.ToLower(fakeRW): true}})
+	if o := cfg.ldapFind("mcc", "otherpw", true); o.OK {
+		t.Errorf("a different account signed in under mcc's name: %v", o.Steps)
+	}
+	if o := cfg.ldapFind("mcc", "mccpw", true); o.OK {
+		t.Errorf("mcc's own password cannot sign in while another account owns the UPN: %v", o.Steps)
 	}
 }
 

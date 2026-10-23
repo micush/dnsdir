@@ -608,9 +608,17 @@ func (c LDAPConfig) ldapFind(user, password string, checkPassword bool) *ldapOut
 		o.step("%q matches more than one account; nobody is signed in on an ambiguous name", name)
 		return o
 	}
-	if passwordDone && !ldapSameAccount(es[0], ident, name) { // the entry found must be the one that signed in
-		o.step("the account found (%s) is not the one that signed in as %q", es[0].dn, ident)
-		return o
+	if passwordDone {
+		same, err := ldapBoundIsEntry(lc, c.LDAPBaseDN, es[0], ident, name)
+		if err != nil {
+			o.Failed = true
+			o.step("checking who signed in failed: %v", err)
+			return o
+		}
+		if !same { // the entry found must be the one that signed in
+			o.step("the account found (%s) is not the one that signed in as %q", es[0].dn, ident)
+			return o
+		}
 	}
 	o.DN = es[0].dn
 	o.step("found %s", o.DN)
@@ -682,6 +690,36 @@ func (c LDAPConfig) ldapBindName(typed string) string {
 		return typed
 	}
 	return typed + "@" + strings.Join(parts, ".")
+}
+
+// ldapBoundIsEntry says whether the entry found is the account that signed in as ident.  A bind name written
+// name@domain is, in Active Directory, first looked up as a user principal name and then as account name @ domain, so an
+// account whose UPN differs from that (michael.cushard@example.com, signing in as mcc@example.lan) signs in by its account
+// name.  That is accepted when the entry's account name is the part before the @ and no account has ident as its UPN
+// (one that does is the one the server signed in, and it is not this entry).
+func ldapBoundIsEntry(lc *ldapConn, base string, e ldapEntry, ident, name string) (bool, error) {
+	if ldapSameAccount(e, ident, name) {
+		return true, nil
+	}
+	at := strings.LastIndexByte(ident, '@')
+	if at <= 0 || strings.ContainsRune(ident, '\\') {
+		return false, nil
+	}
+	local := ident[:at]
+	named := false
+	for _, s := range e.attrs["samaccountname"] {
+		if strings.EqualFold(s, local) {
+			named = true
+		}
+	}
+	if !named {
+		return false, nil
+	}
+	owners, err := lc.search(base, ldapScopeSub, fAnd(fEq("objectClass", "user"), fEq("userPrincipalName", ident)), []string{"1.1"}, 1)
+	if err != nil {
+		return false, err
+	}
+	return len(owners) == 0, nil
 }
 
 // ldapSameAccount says whether the entry read back is the account that bound: by user principal name when the bind name is

@@ -1,5 +1,17 @@
 # Changelog
 
+## [v535] - 2026-10-23 — LDAP sign-in: an account whose UPN differs from name@domain can sign in by account name
+
+### Fixed
+- With no bind account set, LDAP sign-in binds as `name@domain` (the domain from the search base) and then checks that the account it reads back is the one that signed in. That check required the account's userPrincipalName to be exactly the bind name, so an account whose UPN has another suffix or form (`michael.cushard@company.com`, signing in as `mcc` -> `mcc@axway.int`) was refused with "the account found (…) is not the one that signed in", although the server had accepted the password. Active Directory also accepts account name @ domain, so the check now accepts the entry when its account name is the part before the `@` and no account has the bind name as its UPN (an account that does is the one the server really signed in, and the entry found is still refused). Sign-in by full UPN, `DOMAIN\name` or a plain name whose UPN matches is unchanged.
+- `TestLDAPAccountNameWithDifferentUPN` covers the new case and the refusal when another account owns the UPN; the fake directory now resolves bind names the way Active Directory does.
+
+### Verified
+- `gofmt`, `go vet`, `go test -race` on the full suite.
+
+### Not verified
+- Against a real Active Directory.
+
 ## [v534] - 2026-10-23 — Adding a DNS server no longer registers its name in DNS
 
 ### Changed

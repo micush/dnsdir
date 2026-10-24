@@ -1109,6 +1109,9 @@ func (c *DNSConfig) followSettings(shared DNSConfig) {
 	if len(c.ClientLimits) == 0 {
 		c.ClientLimits = nil
 	}
+	// the DNS over TLS and HTTPS ports are set once, on the Settings page: a gateway's own pool made before they
+	// were switched on used to keep port 0, and the listeners never started
+	c.DoTPort, c.DoHPort = shared.DoTPort, shared.DoHPort
 	c.PolicyOn, c.PolicyLog, c.PolicyBlockTTL = shared.PolicyOn, shared.PolicyLog, shared.PolicyBlockTTL
 	c.Policy = clonePolicy(shared.Policy)
 	c.BlockLists = append([]BlockListRef(nil), shared.BlockLists...)

@@ -137,3 +137,15 @@ func TestClusterDNSCertificateReplication(t *testing.T) {
 		t.Fatal("revert must reach both nodes")
 	}
 }
+
+// A gateway with its own DNS pool follows the shared DNS over TLS/HTTPS ports (they are set on the Settings page).
+func TestGroupPoolFollowsSharedDoTAndDoHPorts(t *testing.T) {
+	dc := newDaemonConfig()
+	own := defaultDNS()
+	dc.Groups[0].DNS = &own
+	dc.DNS.DoTPort, dc.DNS.DoHPort = 853, 443
+	_, c := dc.poolFor(&dc.Groups[0])
+	if c.DoTPort != 853 || c.DoHPort != 443 {
+		t.Fatalf("the gateway's pool has dot %d, doh %d; want 853 and 443", c.DoTPort, c.DoHPort)
+	}
+}

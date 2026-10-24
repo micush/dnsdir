@@ -1,5 +1,10 @@
 # Changelog
 
+## [v551] - 2026-10-24 — DNS over TLS and HTTPS start on gateways with their own DNS pool
+
+### Fixed
+- The DNS over TLS and DNS over HTTPS ports set on the Settings page were saved but never reached a gateway that has its own DNS pool, so nothing listened on 853 or 443 ("connection refused") and no restart happened. The gateway's pool now follows those two ports from Settings, and the listeners start when they are changed.
+
 ## [v550] - 2026-10-24 — Automatic certificates: one button
 
 ### Changed

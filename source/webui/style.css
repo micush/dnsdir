@@ -699,7 +699,9 @@ table.policy.rows th:nth-child(n+2) { width: auto; }
 .acme-step h3 { display: flex; align-items: center; gap: .6rem; margin: 0 0 .7rem; font-size: 1rem; }
 .acme-n { display: inline-flex; align-items: center; justify-content: center; width: 1.45rem; height: 1.45rem; border-radius: 50%; background: var(--accent); color: var(--accent-text); font-size: .8rem; font-weight: 600; }
 .acme-step .stack { display: flex; flex-direction: column; gap: 1rem; }
-.acme-step .acme-test { margin: 1rem 0 1.1rem; }
+.acme-step .grid2 { align-items: stretch; margin-bottom: 1.1rem; }
+.acme-step .grid2 > label.f { height: 100%; }
+.acme-step .grid2 > label.f > textarea { flex: 1; resize: none; min-height: 5.5rem; }
 .acme-step .toolbar.nomargin { margin-bottom: 0; }
 .acme-step .notice { margin-top: .9rem; }
 .acme-recs { display: flex; flex-direction: column; gap: .6rem; }

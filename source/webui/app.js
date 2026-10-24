@@ -2288,7 +2288,7 @@
     { shared: true, k: "fail_threshold", l: "Failures before down", t: "int", min: 1 },
     { shared: true, k: "max_attempts", l: "Max servers tried", t: "int", min: 1 },
     { shared: true, k: "latency_alpha", l: "Latency smoothing (0–1]", t: "float" },
-    { section: "Listeners", note: "Plain DNS is always on. DNS over TLS (usually 853) and DNS over HTTPS (usually 443, served at /dns-query) present the certificate below; 0 turns one off." },
+    { section: "Listeners", cols: 3, note: "Plain DNS is always on. DNS over TLS (usually 853) and DNS over HTTPS (usually 443, served at /dns-query) present the certificate below; 0 turns one off." },
     { shared: true, k: "listen_port", l: "DNS port (UDP and TCP)", t: "int", min: 1, max: 65535 },
     { shared: true, k: "dot_port", l: "DNS over TLS port", t: "int", min: 0, max: 65535 },
     { shared: true, k: "doh_port", l: "DNS over HTTPS port", t: "int", min: 0, max: 65535 },
@@ -4011,7 +4011,7 @@
   // ── Automatic certificates: Let's Encrypt (or another ACME CA) through an acme-dns CNAME  (CLI: --acme-*) ─────
   // One button: save, get the names from acme-dns, and order as soon as the CNAMEs are in DNS (the primary keeps looking).
   VIEWS.acme = (() => {
-    const LE = "https://acme-v02.api.letsencrypt.org/directory", LES = "https://acme-staging-v02.api.letsencrypt.org/directory";
+    const LE = "https://acme-v02.api.letsencrypt.org/directory";
     let status, body, timer, boxEl;
     const note = (kind, ...msg) => clear(status).append(h("div", { class: "notice " + kind, role: kind === "bad" ? "alert" : "status" }, ...msg));
     const call = async (path, payload) => { const v = (await api("POST", "/api/acme/" + path, payload || {})).data; draw(v); return v; };
@@ -4020,7 +4020,6 @@
       clearTimeout(timer);
       if (!boxEl || !boxEl.isConnected) return;
       const s = v.settings;
-      const test = h("input", { type: "checkbox", checked: s.directory === LES });
       const email = h("input", { type: "text", value: s.email || "", autocomplete: "off", placeholder: "you@example.com", "aria-label": "Email address" });
       const names = h("textarea", { rows: 3, spellcheck: "false", placeholder: "dns.example.com\n*.example.com", "aria-label": "Certificate names" });
       names.value = (s.names || []).join("\n");
@@ -4028,13 +4027,13 @@
         h("option", { value: "dns" }, "DNS over TLS and HTTPS"), h("option", { value: "gui" }, "The web GUI"), h("option", { value: "both" }, "Both"));
       target.value = s.target || "dns";
       // advanced
-      const known = s.directory === LE || s.directory === LES;
+      const known = s.directory === LE;
       const caUrl = h("input", { type: "text", spellcheck: "false", autocomplete: "off", value: known ? "" : s.directory, placeholder: "empty: Let's Encrypt", "aria-label": "ACME directory address" });
       const dnsServer = h("input", { type: "text", value: s.dns_server || "", spellcheck: "false", autocomplete: "off", "aria-label": "acme-dns server" });
       const kid = h("input", { type: "text", value: s.eab_kid || "", autocomplete: "off", spellcheck: "false", "aria-label": "Account key id" });
       const hkey = h("input", { type: "password", value: "", autocomplete: "off", placeholder: v.eab_key_set ? "(set: leave empty to keep it)" : "", "aria-label": "Account key" });
       const credsBox = h("textarea", { rows: 6, spellcheck: "false", class: "pem", "aria-label": "acme-dns credentials", autocomplete: "off" });
-      const collect = () => ({ enabled: true, directory: caUrl.value.trim() || (test.checked ? LES : LE), email: email.value.trim(), names: names.value.split("\n").map((x) => x.trim()).filter(Boolean), target: target.value, dns_server: dnsServer.value.trim(), eab_kid: kid.value.trim(), eab_key: hkey.value.trim() });
+      const collect = () => ({ enabled: true, directory: caUrl.value.trim() || LE, email: email.value.trim(), names: names.value.split("\n").map((x) => x.trim()).filter(Boolean), target: target.value, dns_server: dnsServer.value.trim(), eab_kid: kid.value.trim(), eab_key: hkey.value.trim() });
       const busy = (btn, fn) => async () => { btn.disabled = true; try { await fn(); } catch (e) { if (e.message !== "unauthenticated") note("bad", e.message); } finally { btn.disabled = false; } };
       const mk = (label, cls, fn) => { const b = h("button", { class: "btn " + cls, type: "button" }, label); b.addEventListener("click", busy(b, fn)); return b; };
 
@@ -4059,7 +4058,6 @@
             h("div", { class: "stack" },
               h("label", { class: "f" }, "Use the certificate for", target),
               h("label", { class: "f" }, "Email address (the CA writes to it about problems)", email))),
-          h("label", { class: "f check acme-test" }, test, "Try it first with the Let's Encrypt test CA (browsers do not trust its certificate)"),
           h("div", { class: "toolbar nomargin" }, go, s.enabled ? stop : null),
           v.register_error ? h("div", { class: "notice bad", role: "alert" }, "Could not get the names from the acme-dns server: " + v.register_error) : null),
         haveRecs ? step(2, "Add this to your DNS, once",
@@ -4076,7 +4074,7 @@
         s.enabled && !v.task_exists ? h("div", { class: "notice bad" }, "No renewal task: add a daily \"Renew the automatic certificate\" task on the Scheduler page.") : null,
         h("details", { class: "fold" }, h("summary", {}, "Advanced"),
           h("div", { class: "grid2" },
-            h("label", { class: "f" }, "Another ACME CA (address of its directory)", caUrl),
+            h("label", { class: "f" }, "Another ACME CA, or the Let's Encrypt test CA (address of its directory)", caUrl),
             h("label", { class: "f" }, "acme-dns server", dnsServer)),
           h("div", { class: "grid2" },
             h("label", { class: "f" }, "Account key id (only CAs that ask for one: Google, ZeroSSL)", kid),

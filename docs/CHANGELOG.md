@@ -1,5 +1,11 @@
 # Changelog
 
+## [v553] - 2026-10-24 — Tidier Listeners and certificate cards
+
+### Changed
+- Listeners: the three ports are one row and the certificate and key files the next.
+- Automatic certificates: the names box is as tall as the two boxes beside it, and the "Try it first with the test CA" tick box is gone (the test CA's address goes under Advanced ▸ Another ACME CA, as before from the command line with `--acme-directory staging`).
+
 ## [v552] - 2026-10-24 — `--configure` asks for the DNS listeners
 
 ### Changed

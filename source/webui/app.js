@@ -719,6 +719,17 @@
     };
     const gwAddr = (g) => bareIP(g.vip4) || bareIP(g.vip6) || "gateway " + g.group_id;
     const gwLabel = (g) => g.name || gwAddr(g);
+    // Why a name cannot be probed, or "" when it can: the same rules as the daemon's (parts between dots of 1 to 63 characters,
+    // at most 253 in all, one dot at the end allowed), so a name it would refuse is refused here, in the form, and not after the form has closed.
+    const badDomain = (n) => {
+      const t = String(n).replace(/\.$/, "");
+      if (!/^[A-Za-z0-9_.\-]+$/.test(n) || !t) return "Enter a domain name such as google.com.";
+      if (t.length > 253) return "A domain name is at most 253 characters.";
+      const parts = t.split(".");
+      if (parts.some((x) => !x)) return "A domain name cannot start with a dot or have two dots in a row.";
+      if (parts.some((x) => x.length > 63)) return "Each part of a domain name (between the dots) is at most 63 characters.";
+      return "";
+    };
     const effQueries = (g, addr) => {
       const d = g.dns || {};
       return (d.server_queries && d.server_queries[addr]) || d.queries || [];
@@ -1485,7 +1496,18 @@
     };
     // Monitor ▸ Log searched for this server
     const goLog = (addr) => { state.prefill.log = srvTarget(addr).host; selectTab("log"); };
+    // Copy a test domain, paste it on a server (of this gateway or another): the same name and type are added to that server's tests.
+    // What is copied is only the name and the type; a pause stays where it was.
+    let domClip = null;
+    const sameQuery = (a, b) => String(a.name).replace(/\.$/, "").toLowerCase() === String(b.name).replace(/\.$/, "").toLowerCase() && String(a.type).toUpperCase() === String(b.type).toUpperCase();
+    const pasteWhy = (g, addr) => (!domClip ? "Nothing copied yet: right-click a domain ▸ Copy" : effQueries(g, addr).some((x) => sameQuery(x, domClip)) ? domClip.name + " (" + domClip.type + ") is already tested on this server" : "");
+    function pasteDomain(g, addr) {
+      if (pasteWhy(g, addr)) return;
+      const q = { name: domClip.name, type: domClip.type };
+      quick(() => { const list = ownQueries(g, addr); list.push(q); cv.sel = { kind: "dom", addr, di: list.length - 1 }; });
+    }
     const srvItems = (g, addr) => [["Statistics", () => serverStats(g, addr)], ["Capture", () => goCapture(addr)], ["Logs", () => goLog(addr)], "-", ["Edit", () => serverForm(g, addr)], ["Add domain", () => domainForm(g, addr, null)],
+      ["Paste domain" + (domClip ? " " + domClip.name + " (" + domClip.type + ")" : ""), () => pasteDomain(g, addr), "", null, pasteWhy(g, addr)],
       ...pauseItems("", (sc) => ((sc === "all" ? (g.dns || cv.cfg.dns || {}).paused_servers : cv.cfg.paused_servers_here) || []).includes(addr), (sc, p) => pauseServer(g, addr, sc, p), lastServerWhy(g, addr)), "-", ["Delete", delSel, "danger"]];
     // Pause / resume announcing one anycast address: on this node only (kept in this node's own settings) or on every node (shared)
     const anyPauseList = (g, scope) => (scope === "all" ? "paused_vips" : "paused_vips_here");
@@ -1503,6 +1525,7 @@
       const q = effQueries(g, addr)[di];
       const on = (sc) => ((sc === "all" ? (g.dns || cv.cfg.dns || {}).paused_queries : cv.cfg.paused_queries_here) || []).includes(qKey(addr, q));
       return [["Statistics", () => domainStats(g, addr, di)], "-", ["Edit", () => domainForm(g, addr, di)],
+        ...(q ? [["Copy", () => { domClip = { name: q.name, type: q.type }; }]] : []),
         ...(q ? pauseItems("", on, (sc, p) => pauseDomain(g, addr, q, sc, p)) : []), "-", ["Delete", delSel, "danger"]];
     };
     // the cluster's nodes (the parallelograms left of the circle)
@@ -1844,7 +1867,7 @@
           { k: "type", l: "Record type", v: "A", options: QTYPES }]),
       ], (v) => {
         if (!v.addr) return "Enter an IP address or host name.";
-        if (!edit && !/^[A-Za-z0-9_.\-]+$/.test(v.name)) return "Enter a domain name such as google.com.";
+        if (!edit && badDomain(v.name)) return badDomain(v.name);
         if (!/^[A-Za-z0-9_.\-:\[\]]+$/.test(v.addr)) return "That doesn't look like an IP address or host name.";
         const flists = (v.flists || "").toLowerCase().split(/[\s,]+/).filter(Boolean);
         const haveLists = forwardListNames();
@@ -1918,7 +1941,7 @@
         { k: "name", l: "Domain to ask about", v: q ? q.name : "", ph: "google.com", hint: "The server must answer this to be counted healthy." },
         { k: "type", l: "Record type", v: q ? q.type : "A", options: QTYPES },
       ], (v) => {
-        if (!/^[A-Za-z0-9_.\-]+$/.test(v.name)) return "Enter a domain name such as google.com.";
+        if (badDomain(v.name)) return badDomain(v.name);
         const list = ownQueries(g, addr);
         if (list.some((x, i) => x.name.toLowerCase() === v.name.toLowerCase() && x.type === v.type && i !== di)) return "That domain is already tested on this server.";
         if (q) { list[di] = { name: v.name, type: v.type }; } else { list.push({ name: v.name, type: v.type }); cv.sel = { kind: "dom", addr, di: list.length - 1 }; }
@@ -1985,8 +2008,10 @@
       } catch (ex) {
         pending--;
         if (ex.message === "unauthenticated") return;
-        if (ex.status) { // refused: show what is really saved
+        if (ex.status) { // refused: show what is really saved, and say why (the form that made the change has closed by now)
           if (pending === 0) { cv.cfg = JSON.parse(JSON.stringify(cv.orig)); cv.sel = null; if (!curGroup()) setGid(groups().length ? groups()[0].group_id : null); }
+          openDialog("Not saved", h("p", {}, "The change was refused and has been undone: " + ex.message),
+            h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "button", onclick: closeEditor }, "OK")));
         } else {
           // The connection dropped (a gateway change can briefly reset the network).
           // Look at what the node actually has before reporting a failure.

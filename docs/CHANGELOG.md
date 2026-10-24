@@ -1,5 +1,13 @@
 # Changelog
 
+## [v541] - 2026-10-24 — Topology: copy a test domain to another server; a refused change says why
+
+### Added
+- Right-click a domain (trapezoid) ▸ **Copy**, then right-click a server (square) ▸ **Paste domain**: the same name and record type are added to that server's tests, and the new domain is selected. The server can be on another gateway. *Paste domain* is greyed out (with the reason as its tooltip) until something is copied and for a server that already tests that name and type. A pause is not copied.
+
+### Fixed
+- **Add domain** sometimes closed the dialog and added nothing, without a word. A name such as `.example.com` or `a..b` passed the form, but the daemon refused the whole save and the page quietly put the old settings back. The form now checks the name by the daemon's rules (parts of 1 to 63 characters, 253 in all) and stays open with the reason. And any change the Topology page makes that the daemon still refuses (a bad server address, say) now ends with a **Not saved** box that gives the daemon's reason.
+
 ## [v540] - 2026-10-24 — The server's average response time is explained
 
 ### Changed

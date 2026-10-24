@@ -1,5 +1,10 @@
 # Changelog
 
+## [v554] - 2026-10-24 — DNS over TLS and HTTPS servers can be added in the GUI
+
+### Fixed
+- Add/Edit DNS server refused `tls://dns.google` ("That doesn't look like an IP address or host name"), and would have saved it with `:53` added. `tls://host[:port]` and `https://host[:port][/path]` are now accepted and kept as written (ports 853 and 443 when none is given).
+
 ## [v553] - 2026-10-24 — Tidier Listeners and certificate cards
 
 ### Changed

@@ -645,7 +645,11 @@
     let svgHost, legendEl, pending = 0;
 
     const normAddr = (a) => {
-      a = a.trim().toLowerCase();
+      a = a.trim();
+      // tls:// and https:// servers keep their scheme, and their own default port (853, 443): never ":53"
+      const sch = /^(tls|https):\/\/(.*)$/i.exec(a);
+      if (sch) { const rest = sch[2]; const slash = rest.indexOf("/"); return sch[1].toLowerCase() + "://" + (slash < 0 ? rest.toLowerCase() : rest.slice(0, slash).toLowerCase() + rest.slice(slash)); }
+      a = a.toLowerCase();
       if (/^\[.*\]:\d+$/.test(a)) return a;
       if (a.split(":").length > 2) return "[" + a.replace(/^\[|\]$/g, "") + "]:53";
       if (/:\d+$/.test(a)) return a;
@@ -1900,7 +1904,7 @@
       ], (v) => {
         if (!v.addr) return "Enter an IP address or host name.";
         if (!edit && badDomain(v.name)) return badDomain(v.name);
-        if (!/^[A-Za-z0-9_.\-:\[\]]+$/.test(v.addr)) return "That doesn't look like an IP address or host name.";
+        if (!/^(tls:\/\/[A-Za-z0-9_.\-:\[\]]+|https:\/\/[A-Za-z0-9_.\-:\[\]]+(\/[^\s]*)?|[A-Za-z0-9_.\-:\[\]]+)$/i.test(v.addr.trim())) return "That doesn't look like an IP address or host name (or tls://host, https://host/path).";
         const flists = (v.flists || "").toLowerCase().split(/[\s,]+/).filter(Boolean);
         const haveLists = forwardListNames();
         if (v.ftype !== FWD_TYPES[0] && !flists.length) return (v.ftype === FWD_TYPES[1] ? "An Internal" : "A Public + Internal") + " server needs at least one zone list. Pick its zone lists (make them under Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding), or choose Public resolver.";

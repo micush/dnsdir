@@ -1461,7 +1461,7 @@
       else items.push(["Pause" + (noun ? " " + noun : ""), null, "", subs(true), whyNot || ""]);
       return items;
     };
-    const gwItems = (g) => [["Statistics", () => gatewayStats(g)], "-", ["Edit", () => gatewayForm(g)], ["Add DNS server", () => serverForm(g)], ["Add anycast address", () => anycastForm(g)],
+    const gwItems = (g) => [["Statistics", () => gatewayStats(g)], "-", ["Edit", () => gatewayForm(g)], ["Add DNS server", () => serverForm(g)], ["Paste server", () => pasteServer(g), "", null, pasteServerWhy()], ["Add anycast address", () => anycastForm(g)],
       ...(g.real_macs ? [] : [["Test virtual MACs", () => vmacTest(g)]]), ...addNodeItems(g),
       ...pauseItems("", (sc) => !!g[sc === "all" ? "paused_all" : "paused"], (sc, p) => pauseGateway(g, sc, p)), "-", ["Delete", delSel, "danger"]];
     // a server's address as the packet filter and the log search want it: the host, and the port its queries go to
@@ -1500,7 +1500,34 @@
       const add = newDomains(g, addr).map((q) => ({ name: q.name, type: q.type }));
       quick(() => { const list = ownQueries(g, addr); const first = list.length; list.push(...add); cv.sel = { kind: "dom", addr, di: first }; });
     }
+    // Copy a whole server (right-click it): its name, its type and zone lists, and all its test domains.  Paste it on a gateway (right-click
+    // the circle or the empty drawing), this one or another.  An address that is not on that gateway yet is added as it is; one that is
+    // already there needs its own, so the Add DNS server form opens with everything else filled in.  A pause is not copied.
+    let srvClip = null;
+    const copyServer = (g, addr) => {
+      const f = srvForward(g, addr);
+      srvClip = { addr, label: srvName(g, addr), forward: f ? { lists: (f.lists || []).slice(), ...(f.zones_only ? { zones_only: true } : {}) } : null, queries: effQueries(g, addr).map((q) => ({ name: q.name, type: q.type })) };
+    };
+    const pasteServerWhy = () => {
+      if (!srvClip) return "Nothing copied yet: right-click a server ▸ Copy server";
+      const have = forwardListNames(), missing = ((srvClip.forward || {}).lists || []).filter((l) => !have.includes(l));
+      return missing.length ? "There is no zone list called " + missing.join(", ") + " any more" : "";
+    };
+    function pasteServer(g) {
+      if (pasteServerWhy()) return;
+      const c = srvClip;
+      ensureDNS(g);
+      if (g.dns.servers.includes(c.addr)) { serverForm(g, null, { forward: c.forward, queries: c.queries }); return; }
+      quick(() => {
+        g.dns.servers.push(c.addr);
+        g.dns.server_queries[c.addr] = c.queries.map((q) => ({ ...q }));
+        if (c.forward) { g.dns.server_forward = g.dns.server_forward || {}; g.dns.server_forward[c.addr] = { ...c.forward, lists: c.forward.lists.slice() }; }
+        if (c.label) { g.dns.server_names = g.dns.server_names || {}; g.dns.server_names[c.addr] = c.label; }
+        cv.sel = { kind: "srv", addr: c.addr };
+      });
+    }
     const srvItems = (g, addr) => [["Statistics", () => serverStats(g, addr)], ["Capture", () => goCapture(addr)], ["Logs", () => goLog(addr)], "-", ["Edit", () => serverForm(g, addr)], ["Add domain", () => domainForm(g, addr, null)],
+      ["Copy server", () => copyServer(g, addr)],
       ["Copy all domains", () => { domClip = effQueries(g, addr).map((q) => ({ name: q.name, type: q.type })); }, "", null, effQueries(g, addr).length ? "" : "This server has no domains to copy"],
       [pasteLabel(), () => pasteDomain(g, addr), "", null, pasteWhy(g, addr)],
       ...pauseItems("", (sc) => ((sc === "all" ? (g.dns || cv.cfg.dns || {}).paused_servers : cv.cfg.paused_servers_here) || []).includes(addr), (sc, p) => pauseServer(g, addr, sc, p), lastServerWhy(g, addr)), "-", ["Delete", delSel, "danger"]];
@@ -1850,16 +1877,18 @@
         },
       };
     }
-    function serverForm(g, edit) {
+    function serverForm(g, edit, pre) {   // pre: a server pasted on a gateway that has its address already (forward, queries): all but the address is filled in
       const lk = lookupHooks();
-      form(edit ? "Edit DNS server" : "Add DNS server", [
-        { k: "addr", l: "IP address or host name", v: edit ? shortAddr(edit) : "", ph: "8.8.8.8", hint: "Add :port for a port other than 53. Write tls://host for DNS over TLS (port 853) or https://host/path for DNS over HTTPS (port 443).", on: lk.addr },
+      const f0 = edit ? srvForward(g, edit) : pre ? pre.forward : srvForward(g, "");
+      const q0 = pre && pre.queries[0] ? pre.queries[0] : { name: "", type: "A" };
+      form(edit ? "Edit DNS server" : pre ? "Paste server" : "Add DNS server", [
+        { k: "addr", l: "IP address or host name", v: edit ? shortAddr(edit) : "", ph: "8.8.8.8", hint: pre ? "That server is already on this gateway: give the copy its own address. " : "Add :port for a port other than 53. Write tls://host for DNS over TLS (port 853) or https://host/path for DNS over HTTPS (port 443).", on: lk.addr },
         { k: "label", l: "Name (optional)", v: edit ? srvName(g, edit) : "", ph: "e.g. dns-a", hint: "Shown under the address on the diagram. Fill in the address and its name is looked up; fill in a host name here and its address is.", on: lk.label },
-        { k: "ftype", l: "Server type", v: fwdTypeOf(srvForward(g, edit || "")), options: FWD_TYPES, initOn: true, on: (els) => { const pub = els.ftype.value === FWD_TYPES[0]; els.flists.setDisabled(pub); els.flists.parentElement.style.display = pub ? "none" : ""; }, hint: "Public resolver: answers everything except the zones other servers carry. Internal: answers only the zones of its lists (never other names). Public + Internal: answers its zones and everything else." },
-        { k: "flists", l: "Zone lists", v: (srvForward(g, edit || "") || {}).lists || [], checks: forwardListNames(), none: "There are no zone lists yet. Make them under Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding.", hint: "For an Internal or Public + Internal server: type to find the zone lists it serves and add them (they are made under Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding). A Public resolver has none." },
+        { k: "ftype", l: "Server type", v: fwdTypeOf(f0), options: FWD_TYPES, initOn: true, on: (els) => { const pub = els.ftype.value === FWD_TYPES[0]; els.flists.setDisabled(pub); els.flists.parentElement.style.display = pub ? "none" : ""; }, hint: "Public resolver: answers everything except the zones other servers carry. Internal: answers only the zones of its lists (never other names). Public + Internal: answers its zones and everything else." },
+        { k: "flists", l: "Zone lists", v: (f0 || {}).lists || [], checks: forwardListNames(), none: "There are no zone lists yet. Make them under Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding.", hint: "For an Internal or Public + Internal server: type to find the zone lists it serves and add them (they are made under Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding). A Public resolver has none." },
         ...(edit ? [] : [
-          { k: "name", l: "Domain to ask it about", v: "", ph: "google.com", hint: "A server is checked by asking it a question; add more domains afterwards. For an Internal server, use a name in one of its zones (its zone itself with type SOA works). A domain inside one of its zones decides that zone only." },
-          { k: "type", l: "Record type", v: "A", options: QTYPES }]),
+          { k: "name", l: "Domain to ask it about", v: q0.name, ph: "google.com", hint: (pre && pre.queries.length > 1 ? "The other " + (pre.queries.length - 1) + " copied domains are added too: " + pre.queries.slice(1).map((q) => q.name + " (" + q.type + ")").join(", ") + ". " : "") + "A server is checked by asking it a question; add more domains afterwards. For an Internal server, use a name in one of its zones (its zone itself with type SOA works). A domain inside one of its zones decides that zone only." },
+          { k: "type", l: "Record type", v: q0.type, options: QTYPES }]),
       ], (v) => {
         if (!v.addr) return "Enter an IP address or host name.";
         if (!edit && badDomain(v.name)) return badDomain(v.name);
@@ -1890,7 +1919,7 @@
           cv.sel = { kind: "srv", addr: a };
         } else {
           g.dns.servers.push(a);
-          g.dns.server_queries[a] = [{ name: v.name, type: v.type }];
+          g.dns.server_queries[a] = [{ name: v.name, type: v.type }, ...(pre ? pre.queries.slice(1).map((q) => ({ ...q })) : [])];
           cv.sel = { kind: "srv", addr: a };
         }
         if (flists.length) { g.dns.server_forward = g.dns.server_forward || {}; g.dns.server_forward[a] = { lists: flists, ...(v.ftype === FWD_TYPES[1] ? { zones_only: true } : {}) }; }
@@ -2058,7 +2087,7 @@
           onmouseout: (e) => { if (cv.stale && !cv.drag && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest(".shape"))) draw(); },
           // right-click on empty canvas (shapes and tabs handle their own menus)
           oncontextmenu: (e) => { cv.sel = null; refresh(); const g = curGroup();
-            openMenu(e, [["New gateway…", () => gatewayForm(null)]].concat(g ? [["Add DNS server…", () => serverForm(g)]] : [])); } });
+            openMenu(e, [["New gateway…", () => gatewayForm(null)]].concat(g ? [["Add DNS server…", () => serverForm(g)], ["Paste server", () => pasteServer(g), "", null, pasteServerWhy()]] : [])); } });
         const legend = legendEl = h("div", { class: "cv-legend muted small" },
           h("span", { class: "dot st-ok" }), "working ", h("span", { class: "dot st-warn" }), "degraded ", h("span", { class: "dot st-bad" }), "down ", h("span", { class: "dot st-idle" }), "not yet known ", h("span", { class: "dot st-paused" }), "paused ", h("span", { class: "dot line-spread" }), "active");
         main.append(svgHost, legend);

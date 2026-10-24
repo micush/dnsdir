@@ -1,5 +1,10 @@
 # Changelog
 
+## [v545] - 2026-10-24 — Topology: copy a whole server and paste it on a gateway
+
+### Added
+- Right-click a server ▸ **Copy server**, then right-click a gateway (the circle, or the empty drawing) ▸ **Paste server**. The server's name, its type and zone lists, and all its test domains are added to that gateway, which can be another one. If that gateway already has the server's address, the *Add DNS server* form opens with everything else filled in, so the copy can be given its own address (its other copied domains are added with it). *Paste server* is greyed out until something is copied, and when a zone list the server uses no longer exists. A pause is not copied.
+
 ## [v544] - 2026-10-24 — A test domain is never refused; the probe shows what is wrong
 
 ### Changed

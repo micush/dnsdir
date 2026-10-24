@@ -719,17 +719,8 @@
     };
     const gwAddr = (g) => bareIP(g.vip4) || bareIP(g.vip6) || "gateway " + g.group_id;
     const gwLabel = (g) => g.name || gwAddr(g);
-    // Why a name cannot be probed, or "" when it can: the same rules as the daemon's (parts between dots of 1 to 63 characters,
-    // at most 253 in all, one dot at the end allowed), so a name it would refuse is refused here, in the form, and not after the form has closed.
-    const badDomain = (n) => {
-      const t = String(n).replace(/\.$/, "");
-      if (!/^[A-Za-z0-9_.\-]+$/.test(n) || !t) return "Enter a domain name such as google.com.";
-      if (t.length > 253) return "A domain name is at most 253 characters.";
-      const parts = t.split(".");
-      if (parts.some((x) => !x)) return "A domain name cannot start with a dot or have two dots in a row.";
-      if (parts.some((x) => x.length > 63)) return "Each part of a domain name (between the dots) is at most 63 characters.";
-      return "";
-    };
+    // Only an empty name is refused: anything else is saved as typed, and the test shows why it fails if the daemon cannot ask it.
+    const badDomain = (n) => (n ? "" : "Enter a domain name such as google.com.");
     const effQueries = (g, addr) => {
       const d = g.dns || {};
       return (d.server_queries && d.server_queries[addr]) || d.queries || [];

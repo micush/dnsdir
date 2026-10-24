@@ -895,11 +895,8 @@ func (d *DNSConfig) Validate() error {
 		if len(qs) == 0 {
 			return fmt.Errorf("dns: server %s has no probe queries (a server can only be verified by a query)", sv)
 		}
-		for _, q := range qs {
-			if _, err := buildQuery(0, q.Name, q.Type); err != nil {
-				return fmt.Errorf("dns: query %s: %w", q, err)
-			}
-		}
+		// A name that cannot be asked (an empty part, a part over 63 characters, a type that is not known) is not refused: it is
+		// saved as typed, and its test fails every round with the reason (probeServer), which the Topology page shows.
 	}
 	if d.DownPercent < 1 || d.DownPercent > 100 {
 		return errors.New("dns: down_percent must be 1-100")

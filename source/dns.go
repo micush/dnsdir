@@ -511,10 +511,12 @@ func (p *Pool) probeServer(ctx context.Context, s *Server) {
 		}
 		ts := TestStat{Name: q.Name, Type: q.Type}
 		pkt, err := buildQuery(uint16(rand.Uint32()), q.Name, q.Type)
-		if err != nil {
+		if err != nil { // a name or type that cannot be asked: the test fails every round, and says why
 			firstErr = err.Error()
 			ts.Error = err.Error()
 			tests = append(tests, ts)
+			s.hist.addPrFail()
+			s.dh[domKey(s.Addr, q.Name, q.Type)].addPrFail()
 			continue
 		}
 		resp, rtt, err := exchangeOpt(ctx, s.Addr, pkt, false, p.cfg.probeTimeout(), p.cfg.TLSInsecure)

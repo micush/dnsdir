@@ -380,3 +380,32 @@ func TestLogDomainFlips(t *testing.T) {
 		t.Fatalf("first-round failure not logged: %s", buf.String())
 	}
 }
+
+// A probe domain that cannot be asked (an empty part, a part over 63 characters) is saved as typed, and its test fails
+// every round with the reason, so the Topology page shows what is wrong instead of the save being refused.
+func TestBadProbeDomainIsAcceptedAndFails(t *testing.T) {
+	up := newFakeDNS(t)
+	cfg := testDNSCfg(up.addr)
+	cfg.Queries = []DNSQuery{{Name: "a.example", Type: "A"}, {Name: ".example.org", Type: "A"}, {Name: "a..b", Type: "A"}, {Name: strings.Repeat("x", 64) + ".example", Type: "A"}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("a bad name must be accepted: %v", err)
+	}
+	p := NewPool(cfg)
+	p.ProbeNow(context.Background())
+	var bad int
+	for _, s := range p.Snapshot() {
+		for _, ts := range s.Tests {
+			if ts.Name != "a.example" {
+				if ts.OK || ts.Error == "" {
+					t.Errorf("%s: want a failing test with a reason, got %+v", ts.Name, ts)
+				}
+				bad++
+			} else if !ts.OK {
+				t.Errorf("the good name failed: %+v", ts)
+			}
+		}
+	}
+	if bad != 3 {
+		t.Fatalf("saw %d bad tests, want 3", bad)
+	}
+}

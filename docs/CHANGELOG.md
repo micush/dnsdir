@@ -1,5 +1,10 @@
 # Changelog
 
+## [v544] - 2026-10-24 — A test domain is never refused; the probe shows what is wrong
+
+### Changed
+- A test domain is saved as typed, even one that cannot be asked (an empty part such as `.example.com` or `a..b`, a part longer than 63 characters). Before, the daemon refused the whole save, and the Add domain dialog closed with nothing added. Now the domain's trapezoid turns red, its tooltip says why ("Invalid label in …"), and the test counts as a failed probe every round, so the Failed probes chart shows it. The form refuses only an empty name.
+
 ## [v543] - 2026-10-24 — Topology: the paste item is just "Paste domain"
 
 ### Changed

@@ -19,6 +19,7 @@ import (
 
 type cliFlags struct {
 	versions, versionSnapshot, tlsStatus, tlsInstall, tlsCSR, tlsRevert, tlsRegenerate *bool
+	dnsTLSStatus, dnsTLSInstall, dnsTLSCSR, dnsTLSRevert                               *bool
 	clusterStatus, clusterToken, clusterPromote, clusterLeave, clusterSync             *bool
 	updateStatus, updateApply, updateHistory, noWait, yes                              *bool
 	versionShow, versionDiff, versionRestore, versionExport, configImport, note        *string
@@ -53,6 +54,7 @@ func registerCLIFlags(fs *flag.FlagSet) *cliFlags {
 	return &cliFlags{
 		versions: b("versions"), versionSnapshot: b("version-snapshot"), tlsStatus: b("tls-status"),
 		tlsInstall: b("tls-install"), tlsCSR: b("tls-csr"), tlsRevert: b("tls-revert"), tlsRegenerate: b("tls-regenerate"),
+		dnsTLSStatus: b("dns-tls-status"), dnsTLSInstall: b("dns-tls-install"), dnsTLSCSR: b("dns-tls-csr"), dnsTLSRevert: b("dns-tls-revert"),
 		clusterStatus: b("cluster-status"), clusterToken: b("cluster-token"), clusterPromote: b("cluster-promote"),
 		clusterLeave: b("cluster-leave"), clusterSync: b("cluster-sync"),
 		updateStatus: b("update-status"), updateApply: b("update-apply"), updateHistory: b("update-history"),
@@ -305,6 +307,55 @@ func (f *cliFlags) run(sock string) bool {
 		var i CertInfo
 		decode(op(sock, "tls.regenerate", nil), &i)
 		fmt.Println("Self-signed certificate regenerated.")
+		printCert(i)
+
+	// ── certificate for DNS over TLS / HTTPS ──
+	case *f.dnsTLSStatus:
+		var i CertInfo
+		decode(op(sock, "dnstls.status", nil), &i)
+		printCertFor(i, "--dns-tls-install")
+		if i.Source == certSourceGUI {
+			fmt.Println("\nNo certificate of its own is set for DNS over TLS/HTTPS: the GUI's is served. Install one with --dns-tls-install.")
+		}
+	case *f.dnsTLSInstall:
+		if *f.certFile == "" {
+			fatalf("--dns-tls-install needs --cert-file (and --key-file, unless a CSR from --dns-tls-csr is pending)")
+		}
+		args := map[string]any{"cert_pem": readFileArg(*f.certFile, "the certificate file")}
+		if *f.keyFile != "" {
+			args["key_pem"] = readFileArg(*f.keyFile, "the key file")
+		}
+		var r struct {
+			Info     CertInfo `json:"info"`
+			Warnings []string `json:"warnings"`
+		}
+		decode(op(sock, "dnstls.install", args), &r)
+		fmt.Println("Certificate installed; DNS over TLS and HTTPS present it from the next connection on (no restart).")
+		for _, w := range r.Warnings {
+			fmt.Println("warning:", w)
+		}
+		fmt.Println()
+		printCert(r.Info)
+	case *f.dnsTLSCSR:
+		var r struct {
+			CSR string `json:"csr"`
+		}
+		var names, ips []string
+		for _, n := range splitCSV(*f.san) {
+			if net.ParseIP(n) != nil {
+				ips = append(ips, n)
+			} else {
+				names = append(names, n)
+			}
+		}
+		decode(op(sock, "dnstls.csr", map[string]any{"cn": *f.cn, "dns": names, "ips": ips}), &r)
+		fmt.Print(r.CSR)
+		fmt.Fprintln(os.Stderr, "\nThe matching private key stays on this node. When your CA returns the certificate:\n  dnsdir --dns-tls-install --cert-file CERT.pem")
+	case *f.dnsTLSRevert:
+		askYes("Remove the installed DNS over TLS/HTTPS certificate and serve the GUI's again?", *f.yes)
+		var i CertInfo
+		decode(op(sock, "dnstls.revert", nil), &i)
+		fmt.Println("Installed certificate removed; the GUI's certificate is served.")
 		printCert(i)
 
 	// ── cluster ──
@@ -609,7 +660,9 @@ func trunc(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
-func printCert(i CertInfo) {
+func printCert(i CertInfo) { printCertFor(i, "--tls-install") }
+
+func printCertFor(i CertInfo, installFlag string) {
 	if i.Error != "" {
 		fmt.Println("Certificate problem:", i.Error)
 		return
@@ -636,7 +689,7 @@ func printCert(i CertInfo) {
 		fmt.Printf("Installed:   by %s at %s\n", i.InstalledBy, lt(i.InstalledAt))
 	}
 	if i.PendingCSR != "" {
-		fmt.Println("A CSR is pending (its key is stored); install the issued certificate with --tls-install --cert-file FILE.")
+		fmt.Println("A CSR is pending (its key is stored); install the issued certificate with " + installFlag + " --cert-file FILE.")
 	}
 }
 

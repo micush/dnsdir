@@ -125,6 +125,16 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		return info, err
 	case "tls.regenerate":
 		return m.certs.Regenerate(actor)
+	case "dnstls.status":
+		return m.dnscerts.Status(), nil
+	case "dnstls.install":
+		info, warns, err := m.DNSTLSInstall(a.CertPEM, a.KeyPEM, actor)
+		return map[string]any{"info": info, "warnings": warns}, err
+	case "dnstls.csr":
+		csr, err := m.dnscerts.GenerateCSR(a.CN, a.DNS, a.IPs)
+		return map[string]any{"csr": csr}, err
+	case "dnstls.revert":
+		return m.DNSTLSRevert(actor)
 
 	// cluster
 	case "cluster.status":

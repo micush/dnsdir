@@ -90,6 +90,7 @@ type clusterStateMsg struct {
 	Shared      SharedConfig  `json:"shared"`
 	Seeds       []GroupSeed   `json:"seeds"`
 	Cert        *adminCert    `json:"cert,omitempty"`
+	DNSCert     *adminCert    `json:"dns_cert,omitempty"`
 	Intent      UpdateIntent  `json:"intent"`
 }
 
@@ -653,6 +654,9 @@ func (c *Cluster) handleState(rw http.ResponseWriter, r *http.Request, caller Cl
 	if dc.Cluster.ShareCert {
 		if cp, kp, meta, ok := c.mg.certs.Managed(); ok && meta.Source != "" {
 			msg.Cert = &adminCert{CertPEM: string(cp), KeyPEM: string(kp)}
+		}
+		if cp, kp, meta, ok := c.mg.dnscerts.Managed(); ok && meta.Source != "" {
+			msg.DNSCert = &adminCert{CertPEM: string(cp), KeyPEM: string(kp)}
 		}
 	}
 	writeJSON(rw, http.StatusOK, msg)
@@ -1444,6 +1448,13 @@ func (c *Cluster) pullState(ctx context.Context, snap ClusterSnapshot) error {
 		}
 		if err := c.mg.certs.ApplyCluster(cp, kp); err != nil {
 			warnf("cluster: could not apply the shared certificate: %v", err)
+		}
+		var dcp, dkp []byte
+		if st.DNSCert != nil {
+			dcp, dkp = []byte(st.DNSCert.CertPEM), []byte(st.DNSCert.KeyPEM)
+		}
+		if err := c.mg.dnscerts.ApplyCluster(dcp, dkp); err != nil {
+			warnf("cluster: could not apply the shared DNS over TLS certificate: %v", err)
 		}
 	}
 	return nil

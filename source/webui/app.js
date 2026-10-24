@@ -1281,7 +1281,7 @@
       }
     }
     // items: [label, handler, "danger"?, subitems?]. An item with subitems opens a second menu beside the first
-    // when the pointer rests on it (or on click / the right arrow key); the sub-items are [label, handler] too.
+    // when the pointer rests on it (or on click / the right arrow key); the sub-items are [label, handler, why-not?] (a reason greys one out).
     let menuAt = { x: 0, y: 0 };
     function openMenu(e, items) {
       e.preventDefault(); e.stopPropagation();
@@ -1291,8 +1291,9 @@
         closeSub();
         menuEl.querySelectorAll("button.open").forEach((b) => b.classList.remove("open"));
         btn.classList.add("open");
-        subEl = h("div", { class: "cv-menu cv-sub", role: "menu" }, subs.map(([label, fn]) =>
-          h("button", { type: "button", role: "menuitem", onclick: () => { closeMenu(); fn(); } }, plain(label))));
+        subEl = h("div", { class: "cv-menu cv-sub", role: "menu" }, subs.map(([label, fn, off]) => off
+          ? h("button", { type: "button", role: "menuitem", disabled: true, title: off }, plain(label))
+          : h("button", { type: "button", role: "menuitem", onclick: () => { closeMenu(); fn(); } }, plain(label))));
         root.append(subEl);
         const pr = menuEl.getBoundingClientRect(), br = btn.getBoundingClientRect(), sr = subEl.getBoundingClientRect();
         const left = pr.right + sr.width + 4 <= window.innerWidth ? pr.right - 2 : Math.max(4, pr.left - sr.width + 2);
@@ -1461,7 +1462,7 @@
       else items.push(["Pause" + (noun ? " " + noun : ""), null, "", subs(true), whyNot || ""]);
       return items;
     };
-    const gwItems = (g) => [["Statistics", () => gatewayStats(g)], "-", ["Edit", () => gatewayForm(g)], ["Add DNS server", () => serverForm(g)], ["Paste server", () => pasteServer(g), "", null, pasteServerWhy()], ["Add anycast address", () => anycastForm(g)],
+    const gwItems = (g) => [["Statistics", () => gatewayStats(g)], "-", ["Edit", () => gatewayForm(g)], ["Add DNS server", () => serverForm(g)], pasteGwItem(g), ["Add anycast address", () => anycastForm(g)],
       ...(g.real_macs ? [] : [["Test virtual MACs", () => vmacTest(g)]]), ...addNodeItems(g),
       ...pauseItems("", (sc) => !!g[sc === "all" ? "paused_all" : "paused"], (sc, p) => pauseGateway(g, sc, p)), "-", ["Delete", delSel, "danger"]];
     // a server's address as the packet filter and the log search want it: the host, and the port its queries go to
@@ -1487,29 +1488,28 @@
     };
     // Monitor ▸ Log searched for this server
     const goLog = (addr) => { state.prefill.log = srvTarget(addr).host; selectTab("log"); };
-    // Copy one test domain (right-click it), or all of a server's (right-click the server), and paste on a server, of this gateway or
-    // another: the names and types are added to that server's tests, and any it already has are left out.  Only the name and the
-    // type are copied; a pause stays where it was.
-    let domClip = [];
+    // Right-click ▸ Copy ▸ Server / Domain / All domains, and Paste ▸ the same.  Each kind has its own place on the clipboard.  A domain or
+    // all of a server's domains are pasted on a server (this gateway's or another's): the names and types are added to its tests, and any it
+    // already has are left out.  A server (its name, its type and zone lists, all its test domains) is pasted on a gateway: an address that is
+    // not on that gateway yet is added as it is; one that is already there needs its own, so the Add DNS server form opens with everything else
+    // filled in.  Only names, types and settings are copied; a pause stays where it was.
+    let domClip = null, domsClip = [], srvClip = null;
     const sameQuery = (a, b) => String(a.name).replace(/\.$/, "").toLowerCase() === String(b.name).replace(/\.$/, "").toLowerCase() && String(a.type).toUpperCase() === String(b.type).toUpperCase();
-    const newDomains = (g, addr) => domClip.filter((q) => !effQueries(g, addr).some((x) => sameQuery(x, q)));
-    const pasteWhy = (g, addr) => (!domClip.length ? "Nothing copied yet: right-click a domain ▸ Copy, or a server ▸ Copy all domains" : !newDomains(g, addr).length ? (domClip.length === 1 ? domClip[0].name + " (" + domClip[0].type + ") is" : "All " + domClip.length + " domains are") + " already tested on this server" : "");
-    const pasteLabel = () => (domClip.length > 1 ? "Paste all domains (" + domClip.length + ")" : "Paste domain");
-    function pasteDomain(g, addr) {
-      if (pasteWhy(g, addr)) return;
-      const add = newDomains(g, addr).map((q) => ({ name: q.name, type: q.type }));
-      quick(() => { const list = ownQueries(g, addr); const first = list.length; list.push(...add); cv.sel = { kind: "dom", addr, di: first }; });
+    const newDomains = (g, addr, list) => list.filter((q) => !effQueries(g, addr).some((x) => sameQuery(x, q)));
+    const pasteListWhy = (g, addr, list, none) => (!list.length ? none : !newDomains(g, addr, list).length ? (list.length === 1 ? list[0].name + " (" + list[0].type + ") is" : "All " + list.length + " domains are") + " already tested on this server" : "");
+    const pasteDomainWhy = (g, addr) => pasteListWhy(g, addr, domClip ? [domClip] : [], "No domain copied yet: right-click a domain ▸ Copy ▸ Domain");
+    const pasteDomainsWhy = (g, addr) => pasteListWhy(g, addr, domsClip, "No domains copied yet: right-click a server ▸ Copy ▸ All domains");
+    function pasteList(g, addr, list) {
+      const add = newDomains(g, addr, list).map((q) => ({ name: q.name, type: q.type }));
+      if (!add.length) return;
+      quick(() => { const own = ownQueries(g, addr); const first = own.length; own.push(...add); cv.sel = { kind: "dom", addr, di: first }; });
     }
-    // Copy a whole server (right-click it): its name, its type and zone lists, and all its test domains.  Paste it on a gateway (right-click
-    // the circle or the empty drawing), this one or another.  An address that is not on that gateway yet is added as it is; one that is
-    // already there needs its own, so the Add DNS server form opens with everything else filled in.  A pause is not copied.
-    let srvClip = null;
     const copyServer = (g, addr) => {
       const f = srvForward(g, addr);
       srvClip = { addr, label: srvName(g, addr), forward: f ? { lists: (f.lists || []).slice(), ...(f.zones_only ? { zones_only: true } : {}) } : null, queries: effQueries(g, addr).map((q) => ({ name: q.name, type: q.type })) };
     };
     const pasteServerWhy = () => {
-      if (!srvClip) return "Nothing copied yet: right-click a server ▸ Copy server";
+      if (!srvClip) return "No server copied yet: right-click a server ▸ Copy ▸ Server";
       const have = forwardListNames(), missing = ((srvClip.forward || {}).lists || []).filter((l) => !have.includes(l));
       return missing.length ? "There is no zone list called " + missing.join(", ") + " any more" : "";
     };
@@ -1526,10 +1526,18 @@
         cv.sel = { kind: "srv", addr: c.addr };
       });
     }
+    // the Copy and Paste items: on a domain or a server (q is the domain, when it is one), and on a gateway (only a server can be pasted there)
+    const copyItem = (g, addr, q) => ["Copy", null, "", [
+      ["Server", () => copyServer(g, addr)],
+      ...(q ? [["Domain", () => { domClip = { name: q.name, type: q.type }; }]] : []),
+      ["All domains", () => { domsClip = effQueries(g, addr).map((x) => ({ name: x.name, type: x.type })); }, effQueries(g, addr).length ? "" : "This server has no domains to copy"]]];
+    const pasteItem = (g, addr) => ["Paste", null, "", [
+      ["Server", () => pasteServer(g), pasteServerWhy()],
+      ["Domain", () => pasteList(g, addr, domClip ? [domClip] : []), pasteDomainWhy(g, addr)],
+      ["All domains", () => pasteList(g, addr, domsClip), pasteDomainsWhy(g, addr)]]];
+    const pasteGwItem = (g) => ["Paste", null, "", [["Server", () => pasteServer(g), pasteServerWhy()]]];
     const srvItems = (g, addr) => [["Statistics", () => serverStats(g, addr)], ["Capture", () => goCapture(addr)], ["Logs", () => goLog(addr)], "-", ["Edit", () => serverForm(g, addr)], ["Add domain", () => domainForm(g, addr, null)],
-      ["Copy server", () => copyServer(g, addr)],
-      ["Copy all domains", () => { domClip = effQueries(g, addr).map((q) => ({ name: q.name, type: q.type })); }, "", null, effQueries(g, addr).length ? "" : "This server has no domains to copy"],
-      [pasteLabel(), () => pasteDomain(g, addr), "", null, pasteWhy(g, addr)],
+      copyItem(g, addr), pasteItem(g, addr),
       ...pauseItems("", (sc) => ((sc === "all" ? (g.dns || cv.cfg.dns || {}).paused_servers : cv.cfg.paused_servers_here) || []).includes(addr), (sc, p) => pauseServer(g, addr, sc, p), lastServerWhy(g, addr)), "-", ["Delete", delSel, "danger"]];
     // Pause / resume announcing one anycast address: on this node only (kept in this node's own settings) or on every node (shared)
     const anyPauseList = (g, scope) => (scope === "all" ? "paused_vips" : "paused_vips_here");
@@ -1547,7 +1555,7 @@
       const q = effQueries(g, addr)[di];
       const on = (sc) => ((sc === "all" ? (g.dns || cv.cfg.dns || {}).paused_queries : cv.cfg.paused_queries_here) || []).includes(qKey(addr, q));
       return [["Statistics", () => domainStats(g, addr, di)], "-", ["Edit", () => domainForm(g, addr, di)],
-        ...(q ? [["Copy", () => { domClip = [{ name: q.name, type: q.type }]; }]] : []),
+        ...(q ? [copyItem(g, addr, q), pasteItem(g, addr)] : []),
         ...(q ? pauseItems("", on, (sc, p) => pauseDomain(g, addr, q, sc, p)) : []), "-", ["Delete", delSel, "danger"]];
     };
     // the cluster's nodes (the parallelograms left of the circle)
@@ -2087,7 +2095,7 @@
           onmouseout: (e) => { if (cv.stale && !cv.drag && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest(".shape"))) draw(); },
           // right-click on empty canvas (shapes and tabs handle their own menus)
           oncontextmenu: (e) => { cv.sel = null; refresh(); const g = curGroup();
-            openMenu(e, [["New gateway…", () => gatewayForm(null)]].concat(g ? [["Add DNS server…", () => serverForm(g)], ["Paste server", () => pasteServer(g), "", null, pasteServerWhy()]] : [])); } });
+            openMenu(e, [["New gateway…", () => gatewayForm(null)]].concat(g ? [["Add DNS server…", () => serverForm(g)], pasteGwItem(g)] : [])); } });
         const legend = legendEl = h("div", { class: "cv-legend muted small" },
           h("span", { class: "dot st-ok" }), "working ", h("span", { class: "dot st-warn" }), "degraded ", h("span", { class: "dot st-bad" }), "down ", h("span", { class: "dot st-idle" }), "not yet known ", h("span", { class: "dot st-paused" }), "paused ", h("span", { class: "dot line-spread" }), "active");
         main.append(svgHost, legend);
@@ -2280,10 +2288,12 @@
     { shared: true, k: "fail_threshold", l: "Failures before down", t: "int", min: 1 },
     { shared: true, k: "max_attempts", l: "Max servers tried", t: "int", min: 1 },
     { shared: true, k: "latency_alpha", l: "Latency smoothing (0–1]", t: "float" },
-    { section: "Listeners", note: "Plain DNS is always on. DNS over TLS (usually 853) and DNS over HTTPS (usually 443, served at /dns-query) use the GUI certificate (Configure ▸ Web GUI); 0 turns one off." },
+    { section: "Listeners", note: "Plain DNS is always on. DNS over TLS (usually 853) and DNS over HTTPS (usually 443, served at /dns-query) present the certificate below; 0 turns one off." },
     { shared: true, k: "listen_port", l: "DNS port (UDP and TCP)", t: "int", min: 1, max: 65535 },
     { shared: true, k: "dot_port", l: "DNS over TLS port", t: "int", min: 0, max: 65535 },
     { shared: true, k: "doh_port", l: "DNS over HTTPS port", t: "int", min: 0, max: 65535 },
+    { shared: true, k: "tls_cert_file", l: "Certificate file (optional)", t: "text", hint: "PEM file on every node, read again when it changes. Overrides a certificate uploaded below. Needs the key file too." },
+    { shared: true, k: "tls_key_file", l: "Key file (optional)", t: "text" },
     { shared: true, k: "forward_updates", l: "Forward dynamic DNS updates to the zone's primary server", t: "bool" },
     { section: "Sort List" },
     { shared: true, k: "sortlist_on", l: "Sort list enabled", t: "bool" },
@@ -3401,6 +3411,7 @@
           const i = TABS.findIndex(([, names]) => names.some((n) => n.toLowerCase() === titleOf(c).toLowerCase()));   // the headings are in title case ("Upstream Servers"), the lists here are not
           panes[i < 0 ? TABS.length - 1 : i].append(c);
         }
+        panes[2].append(h("div", { class: "card" }, h("header", {}, h("h2", {}, tc("Certificate for DNS over TLS and HTTPS"))), h("div", { class: "body" }, dnsCertBox)));
         // Resolution holds four functions: each gets a tab of its own under the main ones (every card stays in the page)
         const resI = TABS.findIndex(([n]) => n === "Resolution");
         const subCards = TABS[resI][1].map((n) => [...panes[resI].children].find((c) => titleOf(c).toLowerCase() === n.toLowerCase())).filter(Boolean);
@@ -3509,6 +3520,10 @@
       const certBox = h("div", {});
       certBox.addEventListener("change", (e) => e.stopPropagation());
       VIEWS.certificate.mount(certBox);
+      // the certificate DNS over TLS / HTTPS present: a card under the Listeners; its controls save through their own calls too
+      const dnsCertBox = h("div", {});
+      dnsCertBox.addEventListener("change", (e) => e.stopPropagation());
+      VIEWS.dnscertificate.mount(dnsCertBox);
       // the Web GUI page is two tabs: General and Certificates (every card stays in the page, so a save reads all of them)
       const webTabs = () => {
         const TABS = [
@@ -3896,16 +3911,18 @@
   })();
 
   // ── Certificate  (CLI: --tls-status/-install/-csr/-revert/-regenerate) ─────
-  VIEWS.certificate = (() => {
+  // The GUI's certificate and the one DNS over TLS / HTTPS present (CLI: --dns-tls-status/-install/-csr/-revert) are the same page twice.
+  const certificateView = (DNSCERT) => {
+    const API = DNSCERT ? "/api/dnstls" : "/api/tls";
     let info, status, csrBox, tools;
-    const sourceLabel = { files: "Files set in the configuration file", installed: "Uploaded on this page", cluster: "Copied from the cluster's main node", "self-signed": "Created automatically by dnsdir" };
+    const sourceLabel = { files: "Files set in the configuration file", installed: "Uploaded on this page", cluster: "Copied from the cluster's main node", "self-signed": "Created automatically by dnsdir", gui: "None set: the GUI's certificate is used" };
     const fold = (title, ...kids) => h("details", { class: "card fold" }, h("summary", {}, title), h("div", { class: "body" }, ...kids));
 
     function drawInfo(c) {
       if (tools) tools.classList.toggle("hidden", c.source === "files");
       const left = c.expired ? pill("Expired", "bad") : pill(c.days_left + " days left", c.expires_soon ? "warn" : "ok");
       clear(info).append(h("div", { class: "card" },
-        h("header", {}, h("h2", {}, tc("Current certificate")), pill(c.source === "self-signed" ? "Not trusted by browsers" : "Custom", c.source === "self-signed" ? "warn" : "ok"), c.error ? pill("problem", "bad") : left),
+        h("header", {}, h("h2", {}, tc("Current certificate")), pill(c.source === "self-signed" ? "Not trusted by browsers" : c.source === "gui" ? "Same as the GUI" : "Custom", c.source === "self-signed" || c.source === "gui" ? "warn" : "ok"), c.error ? pill("problem", "bad") : left),
         h("div", { class: "body" }, c.error ? h("div", { class: "notice bad" }, c.error) : kv([
           ["Where it comes from", sourceLabel[c.source] || c.source],
           ["Issued to", c.subject], ["Issued by", c.issuer + (c.self_signed ? " (itself)" : "")],
@@ -3915,8 +3932,9 @@
           c.source === "files" && c.cert_file ? ["Files", h("span", { class: "mono" }, c.cert_file + ", " + c.key_file)] : null,
           c.installed_by ? ["Installed", "by " + c.installed_by + " at " + when(c.installed_at)] : null,
           ["Installed certificates in chain", String(c.chain_length)]]),
+          c.source === "gui" ? h("p", { class: "hint" }, "DNS over TLS and DNS over HTTPS clients are shown the GUI's certificate, which is probably not valid for the names or addresses they connect to. Upload one made for them below.") : null,
           c.source === "self-signed" ? h("p", { class: "hint" }, "Your browser shows a security warning for this certificate. Upload one from your own certificate authority below to get rid of it.") : null,
-          c.source === "files" ? h("p", { class: "hint" }, "This certificate comes from files named in the configuration file, which override anything uploaded here. To manage it on this page instead, remove web.cert_file and web.key_file from the configuration file.") : null)));
+          c.source === "files" ? h("p", { class: "hint" }, "This certificate comes from files named in the configuration file, which override anything uploaded here. To manage it on this page instead, remove " + (DNSCERT ? "dns.tls_cert_file and dns.tls_key_file" : "web.cert_file and web.key_file") + " from the configuration file.") : null)));
       clear(csrBox);
       if (c.pending_csr) {
         const ta = h("textarea", { rows: 8, readonly: true, class: "pem", "aria-label": "Pending CSR" });
@@ -3926,13 +3944,14 @@
             h("button", { class: "btn small", type: "button", onclick: () => saveText("dnsdir.csr", ta.value) }, "Download"),
             h("button", { class: "btn small", type: "button", onclick: async () => {
               if (!confirm("Throw away the pending request?")) return;
-              try { await api("POST", "/api/tls/csr/cancel", {}); await load(); } catch (e) { fail(status)(e); }
+              try { await api("POST", API + "/csr/cancel", {}); await load(); } catch (e) { fail(status)(e); }
             } }, "Discard")));
       }
     }
-    async function load() { drawInfo((await api("GET", "/api/tls")).data); }
+    async function load() { drawInfo((await api("GET", API)).data); }
 
     return {
+      refresh: () => load().catch(() => {}),
       mount(main) {
         status = h("div", { "aria-live": "polite" });
         info = h("div", {});
@@ -3955,7 +3974,7 @@
             h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "button", onclick: async (ev) => {
               ev.target.disabled = true;
               try {
-                const r = (await api("POST", "/api/tls/install", { cert_pem: cert.value, key_pem: key.value })).data;
+                const r = (await api("POST", API + "/install", { cert_pem: cert.value, key_pem: key.value })).data;
                 cert.value = ""; key.value = "";
                 say(status, r.warnings && r.warnings.length ? "warn" : "ok", "Certificate installed. ", ...(r.warnings || []).map((w) => h("div", {}, "• " + w)));
                 drawInfo(r.info);
@@ -3965,23 +3984,25 @@
             h("p", { class: "hint" }, "Your certificate authority needs a request first. Fill this in and send the result to them. The private key is created and kept on this server; when the signed certificate comes back, upload it above without a key."),
             h("div", { class: "grid" }, h("label", { class: "f" }, "Main name", cn), h("label", { class: "f wide" }, "Other names (one per line)", names), h("label", { class: "f wide" }, "IP addresses (one per line, optional)", ips)),
             h("div", { class: "toolbar" }, h("button", { class: "btn", type: "button", onclick: async () => {
-              try { await api("POST", "/api/tls/csr", { cn: cn.value.trim(), dns: lines(names), ips: lines(ips) }); say(status, "ok", "Request created."); await load(); } catch (e) { fail(status)(e); }
+              try { await api("POST", API + "/csr", { cn: cn.value.trim(), dns: lines(names), ips: lines(ips) }); say(status, "ok", "Request created."); await load(); } catch (e) { fail(status)(e); }
             } }, "Create request")), csrBox),
-          fold("Go back to the automatic certificate",
-            h("p", { class: "hint" }, "AnyName can make its own certificate. Browsers do not trust it, but connections are still encrypted."),
+          fold(DNSCERT ? "Go back to the GUI's certificate" : "Go back to the automatic certificate",
+            h("p", { class: "hint" }, DNSCERT ? "Without a certificate of its own, DNS over TLS and HTTPS present the GUI's." : "AnyName can make its own certificate. Browsers do not trust it, but connections are still encrypted."),
             h("div", { class: "toolbar" },
               h("button", { class: "btn warn", type: "button", onclick: async () => {
-                if (!confirm("Stop using the uploaded certificate and go back to the automatic one?")) return;
-                try { await api("POST", "/api/tls/revert", {}); say(status, "ok", "Back to the automatic certificate."); await load(); } catch (e) { fail(status)(e); }
+                if (!confirm(DNSCERT ? "Stop using the uploaded certificate and present the GUI's again?" : "Stop using the uploaded certificate and go back to the automatic one?")) return;
+                try { await api("POST", API + "/revert", {}); say(status, "ok", DNSCERT ? "Back to the GUI's certificate." : "Back to the automatic certificate."); await load(); } catch (e) { fail(status)(e); }
               } }, "Stop using the uploaded certificate"),
-              h("button", { class: "btn", type: "button", onclick: async () => {
+              DNSCERT ? null : h("button", { class: "btn", type: "button", onclick: async () => {
                 try { await api("POST", "/api/tls/regenerate", {}); say(status, "ok", "A fresh automatic certificate was created."); await load(); } catch (e) { fail(status)(e); }
               } }, "Make a fresh automatic certificate"))));
         main.append(status, info, tools);
         load().catch(fail(status));
       },
     };
-  })();
+  };
+  VIEWS.certificate = certificateView(false);
+  VIEWS.dnscertificate = certificateView(true);
 
   // ── Cluster  (CLI: --cluster-status/-token/-join/-promote/-remove/-unremove/-leave/-sync) ──
   VIEWS.cluster = (() => {

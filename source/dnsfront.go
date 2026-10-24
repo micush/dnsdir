@@ -640,7 +640,7 @@ func (f *DNSFrontend) handleTCP(c net.Conn) {
 	}
 }
 
-// dotCertificate hands out the certificate for DNS over TLS: the one the web GUI serves (set in main).
+// dotCertificate hands out the certificate for DNS over TLS and DNS over HTTPS: the DNS one, which is the web GUI's while none is set (set in main).
 var dotCertificate func(*tls.ClientHelloInfo) (*tls.Certificate, error)
 
 // startDoTLocked opens the DNS-over-TLS listener (RFC 7858) when a port is set. A failure is logged and

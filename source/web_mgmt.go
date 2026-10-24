@@ -30,6 +30,12 @@ func (w *WebServer) mgmtRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tls/csr/cancel", w.authed(w.handleCSRCancel))
 	mux.HandleFunc("POST /api/tls/revert", w.authed(w.op("tls.revert", nil)))
 	mux.HandleFunc("POST /api/tls/regenerate", w.authed(w.op("tls.regenerate", nil)))
+	// the certificate DNS over TLS and DNS over HTTPS present (the GUI's when none is installed)
+	mux.HandleFunc("GET /api/dnstls", w.authed(w.op("dnstls.status", nil)))
+	mux.HandleFunc("POST /api/dnstls/install", w.authed(w.op("dnstls.install", nil)))
+	mux.HandleFunc("POST /api/dnstls/csr", w.authed(w.op("dnstls.csr", nil)))
+	mux.HandleFunc("POST /api/dnstls/csr/cancel", w.authed(w.handleDNSCSRCancel))
+	mux.HandleFunc("POST /api/dnstls/revert", w.authed(w.op("dnstls.revert", nil)))
 	// cluster
 	mux.HandleFunc("GET /api/cluster", w.authed(w.op("cluster.status", nil)))
 	mux.HandleFunc("POST /api/cluster/token", w.authed(w.op("cluster.token", nil)))
@@ -141,6 +147,11 @@ func (w *WebServer) op(cmd string, query []string) func(http.ResponseWriter, *ht
 		}
 		writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": data})
 	}
+}
+
+func (w *WebServer) handleDNSCSRCancel(rw http.ResponseWriter, r *http.Request, s *session) {
+	w.mg.dnscerts.CancelCSR()
+	writeJSON(rw, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (w *WebServer) handleCSRCancel(rw http.ResponseWriter, r *http.Request, s *session) {

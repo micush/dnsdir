@@ -192,6 +192,38 @@ func TestWebTLSFlow(t *testing.T) {
 	}
 }
 
+func TestWebDNSTLSFlow(t *testing.T) {
+	e := newWebEnv(t)
+	e.login("alice", "pw")
+	r := e.do("GET", "/api/dnstls", nil, withAuth(e, false))
+	if d := r.body["data"].(map[string]any); r.code != 200 || d["source"] != certSourceGUI {
+		t.Fatalf("status: %d %s", r.code, r.raw)
+	}
+	ca := newTestCA(t)
+	k, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	chain := string(ca.issue(t, &k.PublicKey, time.Now().Add(72*time.Hour), "dns.test"))
+	r = e.do("POST", "/api/dnstls/install", map[string]any{"cert_pem": chain, "key_pem": string(ecKeyPEM(k))}, withAuth(e, true))
+	if r.code != 200 || r.body["data"].(map[string]any)["info"].(map[string]any)["source"] != certSourceInstalled {
+		t.Fatalf("install: %d %s", r.code, r.raw)
+	}
+	if strings.Contains(string(r.raw), "PRIVATE KEY") {
+		t.Fatal("the API must never echo a private key")
+	}
+	if g := e.do("GET", "/api/tls", nil, withAuth(e, false)); g.body["data"].(map[string]any)["source"] != certSourceSelfSigned {
+		t.Fatalf("the GUI certificate must not change: %s", g.raw)
+	}
+	if r := e.do("POST", "/api/dnstls/csr", map[string]any{"cn": "x.test", "dns": []string{"x.test"}}, withAuth(e, true)); r.code != 200 {
+		t.Fatalf("csr: %d %s", r.code, r.raw)
+	}
+	if r := e.do("POST", "/api/dnstls/csr/cancel", map[string]any{}, withAuth(e, true)); r.code != 200 {
+		t.Fatalf("csr cancel: %d", r.code)
+	}
+	if r := e.do("POST", "/api/dnstls/revert", map[string]any{}, withAuth(e, true)); r.code != 200 ||
+		r.body["data"].(map[string]any)["source"] != certSourceGUI {
+		t.Fatalf("revert: %d %s", r.code, r.raw)
+	}
+}
+
 func TestWebClusterAndUpdateBasics(t *testing.T) {
 	e := newWebEnv(t)
 	e.login("alice", "pw")

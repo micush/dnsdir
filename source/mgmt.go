@@ -32,11 +32,13 @@ type Mgmt struct {
 	sched    *Scheduler // the scheduled tasks of this node (Operate ▸ Scheduler)
 	versions *VersionStore
 	certs    *CertManager
+	dnscerts *CertManager // what DoT and DoH present; the GUI's certificate when none is set
 	upd      *Updater
 	cl       *Cluster
 
 	cfgMu     sync.Mutex // serialises writes of the config file
 	webPolicy atomic.Pointer[WebConfig]
+	dnsFiles  atomic.Pointer[WebConfig] // dns.tls_cert_file / tls_key_file, in the WebConfig shape the certificate manager reads
 
 	// endSessions signs a user out of the web GUI sessions of this node (set by the web server)
 	endSessions atomic.Pointer[func(user string)]
@@ -91,11 +93,13 @@ func NewMgmt(confPath, stateDir string, dc *DaemonConfig) (*Mgmt, error) {
 	m.blocks.Apply(dc.DNS.BlockLists, dc.DNS.BlockUpdateHours)
 	w := dc.Web
 	m.webPolicy.Store(&w)
+	m.storeDNSFiles(dc)
 	var err error
 	if m.versions, err = NewVersionStore(filepath.Join(stateDir, "versions")); err != nil {
 		return nil, err
 	}
 	m.certs = NewCertManager(stateDir, confPath, func() WebConfig { return *m.webPolicy.Load() })
+	m.dnscerts = NewDNSCertManager(stateDir, confPath, func() WebConfig { return *m.dnsFiles.Load() }, m.certs)
 	if m.upd, err = NewUpdater(stateDir); err != nil {
 		return nil, err
 	}
@@ -106,6 +110,10 @@ func NewMgmt(confPath, stateDir string, dc *DaemonConfig) (*Mgmt, error) {
 }
 
 // ── configuration ────────────────────────────────────────────────────────────
+
+func (m *Mgmt) storeDNSFiles(dc *DaemonConfig) {
+	m.dnsFiles.Store(&WebConfig{CertFile: dc.DNS.TLSCertFile, KeyFile: dc.DNS.TLSKeyFile})
+}
 
 // LiveConfig reads the config file (defaults if absent) and its canonical bytes.
 func (m *Mgmt) LiveConfig() (*DaemonConfig, []byte, error) {
@@ -123,11 +131,13 @@ func (m *Mgmt) LiveConfig() (*DaemonConfig, []byte, error) {
 func (m *Mgmt) OnConfigLoaded(dc *DaemonConfig) {
 	w := dc.Web
 	m.webPolicy.Store(&w)
+	m.storeDNSFiles(dc)
 	m.bgp.Apply(dc)
 	sysSink.Apply(dc.Syslog)
 	m.sched.SetTasks(dc.DNS.Schedule)
 	m.blocks.Apply(dc.DNS.BlockLists, dc.DNS.BlockUpdateHours)
 	m.certs.Refresh()
+	m.dnscerts.Refresh()
 	if _, raw, err := m.LiveConfig(); err == nil {
 		if _, err := os.Stat(m.confPath); err == nil { // don't version a config that doesn't exist yet
 			if meta, err := m.versions.Record(raw, "file edit", "", false); err != nil {
@@ -307,9 +317,26 @@ type adminCert struct {
 }
 
 func (m *Mgmt) TLSInstall(certPEM, keyPEM, by string) (CertInfo, []string, error) {
+	return m.tlsInstall(m.certs, "cert-install", certPEM, keyPEM, by)
+}
+
+func (m *Mgmt) TLSRevert(by string) (CertInfo, error) {
+	return m.tlsRevert(m.certs, "cert-revert", by)
+}
+
+// DNSTLSInstall and DNSTLSRevert manage the certificate DoT and DoH present.
+func (m *Mgmt) DNSTLSInstall(certPEM, keyPEM, by string) (CertInfo, []string, error) {
+	return m.tlsInstall(m.dnscerts, "dnscert-install", certPEM, keyPEM, by)
+}
+
+func (m *Mgmt) DNSTLSRevert(by string) (CertInfo, error) {
+	return m.tlsRevert(m.dnscerts, "dnscert-revert", by)
+}
+
+func (m *Mgmt) tlsInstall(cm *CertManager, op, certPEM, keyPEM, by string) (CertInfo, []string, error) {
 	if m.shareCert() && m.cl.Snapshot().Role == RoleReplica {
 		// the primary validates and installs it; it comes back via sync
-		raw, err := m.cl.forwardAdmin("cert-install", by, adminCert{certPEM, keyPEM})
+		raw, err := m.cl.forwardAdmin(op, by, adminCert{certPEM, keyPEM})
 		if err != nil {
 			return CertInfo{}, nil, fmt.Errorf("this node is a replica: the primary must install the certificate, and that failed: %w", err)
 		}
@@ -318,20 +345,20 @@ func (m *Mgmt) TLSInstall(certPEM, keyPEM, by string) (CertInfo, []string, error
 		}
 		json.Unmarshal(raw, &res)
 		m.cl.syncNow()
-		return m.certs.Status(), res.Warnings, nil
+		return cm.Status(), res.Warnings, nil
 	}
-	return m.certs.Install([]byte(certPEM), []byte(keyPEM), by, certSourceInstalled)
+	return cm.Install([]byte(certPEM), []byte(keyPEM), by, certSourceInstalled)
 }
 
-func (m *Mgmt) TLSRevert(by string) (CertInfo, error) {
+func (m *Mgmt) tlsRevert(cm *CertManager, op, by string) (CertInfo, error) {
 	if m.shareCert() && m.cl.Snapshot().Role == RoleReplica {
-		if _, err := m.cl.forwardAdmin("cert-revert", by, nil); err != nil {
+		if _, err := m.cl.forwardAdmin(op, by, nil); err != nil {
 			return CertInfo{}, err
 		}
 		m.cl.syncNow()
-		return m.certs.Status(), nil
+		return cm.Status(), nil
 	}
-	return m.certs.Revert(by)
+	return cm.Revert(by)
 }
 
 // ── updates ──────────────────────────────────────────────────────────────────
@@ -525,6 +552,21 @@ func (m *Mgmt) execAdminOp(op, by string, payload json.RawMessage) (json.RawMess
 		return ok(map[string]any{"info": info, "warnings": warns})
 	case "cert-revert":
 		if _, err := m.certs.Revert(by); err != nil {
+			return nil, err
+		}
+		return ok(map[string]any{})
+	case "dnscert-install":
+		var p adminCert
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return nil, err
+		}
+		info, warns, err := m.dnscerts.Install([]byte(p.CertPEM), []byte(p.KeyPEM), by, certSourceInstalled)
+		if err != nil {
+			return nil, err
+		}
+		return ok(map[string]any{"info": info, "warnings": warns})
+	case "dnscert-revert":
+		if _, err := m.dnscerts.Revert(by); err != nil {
 			return nil, err
 		}
 		return ok(map[string]any{})

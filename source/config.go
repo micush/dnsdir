@@ -530,11 +530,17 @@ type DNSConfig struct {
 	// ListenPort is the port the proxy serves on the VIP (UDP and TCP).
 	ListenPort int `json:"listen_port"`
 	// DoTPort serves DNS over TLS (RFC 7858) to clients on the VIP on this TCP port; 0 (the default) is off. The
-	// certificate is the one the web GUI uses (Configure ▸ Web GUI).
+	// certificate is the DNS one (TLSCertFile, or installed under Configure ▸ DNS ▸ Listeners), or the web GUI's
+	// when none is set.
 	DoTPort int `json:"dot_port,omitempty"`
 	// DoHPort serves DNS over HTTPS (RFC 8484) to clients on the VIP on this TCP port, at /dns-query; 0 (the
-	// default) is off. The certificate is the web GUI's.
+	// default) is off. It uses the same certificate as DoT.
 	DoHPort int `json:"doh_port,omitempty"`
+	// TLSCertFile/TLSKeyFile name a PEM certificate and key for DoT and DoH, read again when the files change (so
+	// a renewal is picked up).  Shared setting: only the top-level dns block's are used.  They take precedence over
+	// a certificate installed through the GUI or CLI; with neither, DoT and DoH serve the web GUI's certificate.
+	TLSCertFile string `json:"tls_cert_file,omitempty"`
+	TLSKeyFile  string `json:"tls_key_file,omitempty"`
 	// ECS passes the client's network to the servers (EDNS Client Subnet,
 	// RFC 7871) so they do not see every query coming from the dnsdir node.  Only
 	// a prefix is sent: ecs_prefix4 bits of an IPv4 client (default 24),
@@ -903,6 +909,9 @@ func (d *DNSConfig) Validate() error {
 	}
 	if d.ListenPort < 1 || d.ListenPort > 65535 {
 		return errors.New("dns: listen_port must be 1-65535")
+	}
+	if (d.TLSCertFile == "") != (d.TLSKeyFile == "") {
+		return errors.New("dns: tls_cert_file and tls_key_file go together: set both or neither")
 	}
 	if d.DoTPort < 0 || d.DoTPort > 65535 {
 		return errors.New("dns: dot_port must be 0 (off) or 1-65535")

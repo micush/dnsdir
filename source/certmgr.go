@@ -90,6 +90,11 @@ type CertManager struct {
 	confPath string
 	webCfg   func() WebConfig
 
+	// label names the certificate in log lines ("web" for the GUI's, "dns" for the DNS-over-TLS/HTTPS one).
+	label string
+	// fallback, when set, is served while nothing is configured here: the DNS certificate falls back to the GUI's.
+	fallback *CertManager
+
 	mu       sync.Mutex
 	cur      *loadedCert
 	checked  time.Time
@@ -97,7 +102,18 @@ type CertManager struct {
 }
 
 func NewCertManager(stateDir, confPath string, webCfg func() WebConfig) *CertManager {
-	return &CertManager{dir: filepath.Join(stateDir, "webcert"), confPath: confPath, webCfg: webCfg}
+	return &CertManager{dir: filepath.Join(stateDir, "webcert"), confPath: confPath, webCfg: webCfg, label: "web"}
+}
+
+// certSourceGUI is the source shown for a DNS certificate that is not set: DoT and DoH then serve the GUI's.
+const certSourceGUI = "gui"
+
+// NewDNSCertManager manages the certificate DNS over TLS and DNS over HTTPS present to clients.  It has the same
+// sources as the GUI's (files named in the config, one installed through the GUI/CLI or replicated by the cluster)
+// but no self-signed one of its own: with nothing set, it serves whatever gui serves.  files gives dns.tls_cert_file
+// and dns.tls_key_file.
+func NewDNSCertManager(stateDir, confPath string, files func() WebConfig, gui *CertManager) *CertManager {
+	return &CertManager{dir: filepath.Join(stateDir, "dnscert"), confPath: confPath, webCfg: files, label: "dns", fallback: gui}
 }
 
 func (m *CertManager) managedPaths() (crt, key string) {
@@ -154,7 +170,7 @@ func (m *CertManager) current(force bool) (*loadedCert, error) {
 		if m.cur != nil { // keep serving what worked
 			if msg := err.Error(); msg != m.lastWarn {
 				m.lastWarn = msg
-				warnf("web: certificate reload failed (%v) — continuing with the previous certificate", err)
+				warnf("%s: certificate reload failed (%v) — continuing with the previous certificate", m.label, err)
 			}
 			return m.cur, nil
 		}
@@ -162,8 +178,8 @@ func (m *CertManager) current(force bool) (*loadedCert, error) {
 	}
 	m.lastWarn = ""
 	if m.cur == nil || m.cur.stamp != lc.stamp || m.cur.info.Fingerprint != lc.info.Fingerprint {
-		infof("web: serving %s certificate %q (sha256 %s, expires %s)",
-			lc.info.Source, lc.info.Subject, lc.info.Fingerprint[:16], lc.info.NotAfter.Format("2006-01-02"))
+		infof("%s: serving %s certificate %q (sha256 %s, expires %s)",
+			m.label, lc.info.Source, lc.info.Subject, lc.info.Fingerprint[:16], lc.info.NotAfter.Format("2006-01-02"))
 	}
 	m.cur = lc
 	return lc, nil
@@ -178,7 +194,7 @@ func (m *CertManager) evaluateLocked() (*loadedCert, error) {
 		}
 		c, err := tls.LoadX509KeyPair(wc.CertFile, wc.KeyFile)
 		if err != nil {
-			return nil, fmt.Errorf("web.cert_file/key_file: %w", err)
+			return nil, fmt.Errorf("%s: %w", m.filesName(), err)
 		}
 		info := describeCert(c, certSourceFiles)
 		info.CertFile, info.KeyFile = wc.CertFile, wc.KeyFile
@@ -202,7 +218,16 @@ func (m *CertManager) evaluateLocked() (*loadedCert, error) {
 			info.InstalledBy, info.InstalledAt = meta.By, meta.At
 			return &loadedCert{cert: c, info: info, stamp: stamp, loaded: time.Now()}, nil
 		}
-		warnf("web: installed certificate unusable (%v) — falling back to the self-signed certificate", err)
+		warnf("%s: installed certificate unusable (%v) — falling back to the %s certificate", m.label, err, m.fallbackName())
+	}
+	if m.fallback != nil {
+		fb, err := m.fallback.current(false)
+		if err != nil {
+			return nil, err
+		}
+		info := fb.info
+		info.Source = certSourceGUI
+		return &loadedCert{cert: fb.cert, info: info, stamp: "gui|" + fb.stamp + "|" + fb.info.Fingerprint, loaded: time.Now()}, nil
 	}
 	scrt, skey := selfSignedPaths(m.confPath)
 	stamp := "self|" + fileStamp(scrt, skey)
@@ -217,6 +242,20 @@ func (m *CertManager) evaluateLocked() (*loadedCert, error) {
 	info := describeCert(c, certSourceSelfSigned)
 	info.CertFile, info.KeyFile = scrt, skey
 	return &loadedCert{cert: c, info: info, stamp: "self|" + fileStamp(scrt, skey), loaded: time.Now()}, nil
+}
+
+func (m *CertManager) filesName() string {
+	if m.fallback != nil {
+		return "dns.tls_cert_file/tls_key_file"
+	}
+	return "web.cert_file/key_file"
+}
+
+func (m *CertManager) fallbackName() string {
+	if m.fallback != nil {
+		return "GUI"
+	}
+	return "self-signed"
 }
 
 func (m *CertManager) readMeta() certMeta {
@@ -398,7 +437,7 @@ func (m *CertManager) Install(certPEM, keyPEM []byte, by, source string) (CertIn
 	}
 	m.Refresh()
 	info := m.Status()
-	infof("web: certificate installed by %s (%s, sha256 %s)", by, info.Subject, shortFP(info.Fingerprint))
+	infof("%s: certificate installed by %s (%s, sha256 %s)", m.label, by, info.Subject, shortFP(info.Fingerprint))
 	return info, warns, nil
 }
 
@@ -435,13 +474,16 @@ func (m *CertManager) Revert(by string) (CertInfo, error) {
 		}
 	}
 	m.Refresh()
-	infof("web: installed certificate removed by %s", by)
+	infof("%s: installed certificate removed by %s", m.label, by)
 	return m.Status(), nil
 }
 
 // Regenerate replaces the self-signed certificate with a fresh one.  It is
 // served only while no installed certificate or web.cert_file is in effect.
 func (m *CertManager) Regenerate(by string) (CertInfo, error) {
+	if m.fallback != nil {
+		return CertInfo{}, errors.New("this certificate has no automatic version of its own: without one installed, the GUI's certificate is served")
+	}
 	if _, err := loadOrCreateSelfSigned(m.confPath, true); err != nil {
 		return CertInfo{}, err
 	}
@@ -543,13 +585,17 @@ func (m *CertManager) CancelCSR() {
 // expired or expires soon ("" otherwise).
 func (m *CertManager) ExpiryWarning() string {
 	info := m.Status()
+	what := "the GUI certificate"
+	if m.fallback != nil {
+		what = "the DNS over TLS/HTTPS certificate"
+	}
 	switch {
-	case info.Error != "":
+	case info.Error != "" || info.Source == certSourceGUI: // the GUI's own is reported on its own
 		return ""
 	case info.Expired:
-		return fmt.Sprintf("the GUI certificate expired on %s", info.NotAfter.Format("2006-01-02"))
+		return fmt.Sprintf("%s expired on %s", what, info.NotAfter.Format("2006-01-02"))
 	case info.ExpiresSoon && info.Source != certSourceSelfSigned:
-		return fmt.Sprintf("the GUI certificate expires in %d day(s) (%s)", info.DaysLeft, info.NotAfter.Format("2006-01-02"))
+		return fmt.Sprintf("%s expires in %d day(s) (%s)", what, info.DaysLeft, info.NotAfter.Format("2006-01-02"))
 	}
 	return ""
 }

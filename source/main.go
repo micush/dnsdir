@@ -115,6 +115,9 @@ the web GUI):
   GUI certificate  --tls-status  --tls-install --cert-file F --key-file F
                    --tls-csr --cn NAME [--san NAME_OR_IP,...]
                    --tls-revert  --tls-regenerate
+  DoT/DoH certificate  --dns-tls-status  --dns-tls-install --cert-file F --key-file F
+                   --dns-tls-csr --cn NAME [--san NAME_OR_IP,...]  --dns-tls-revert
+                   (the certificate DNS over TLS and DNS over HTTPS present; the GUI's when none is installed)
   BGP (FRR)        --bgp   (this node's settings, announced addresses, neighbor and BFD state)
                    --asn N|off [--router-id A.B.C.D|-]     (BGP runs while an AS is set)
                    [--keepalive S] [--hold S] [--as-prepend on|off]   (on: the local AS three more times on every announcement)
@@ -202,9 +205,11 @@ DNS proxy ("dns" block at the top level of the config):
                      "require" key is read and ignored
   listen_port        port served on the VIP, UDP+TCP (default 53)
   doh_port           serve DNS over HTTPS to clients at /dns-query on this TCP port, e.g. 443 (default 0 = off);
-                     the certificate is the GUI's
-  dot_port           serve DNS over TLS to clients on this TCP port, e.g. 853 (default 0 = off);
-                     the certificate is the GUI's (see --tls-status)
+                     same certificate as DoT
+  dot_port           serve DNS over TLS to clients on this TCP port, e.g. 853 (default 0 = off); the certificate is
+                     tls_cert_file/tls_key_file, else one installed with --dns-tls-install, else the GUI's
+  tls_cert_file      PEM certificate (and tls_key_file, its key) for DoT and DoH, read again when the files change;
+  tls_key_file       shared setting (top-level dns block only), both or neither
   allowed_clients    networks that may use the proxy, e.g. ["10.0.0.0/8", "192.168.1.5"]; empty (default) =
                      everyone. Anyone else is answered REFUSED, dynamic updates included; the node itself always may
   client_rate        queries per second one client (an IPv4 address or an IPv6 /64) may send; 0 (default) = no limit
@@ -494,7 +499,7 @@ func run(dc *DaemonConfig, confFile, sockPath, stateDir string) error {
 	// the saved statistics come back before any query is counted; the last save happens once the DNS frontends have stopped
 	savedStats := startPersistence(stateDir, ctx.Done())
 
-	dotCertificate = mg.certs.GetCertificate
+	dotCertificate = mg.dnscerts.GetCertificate
 	sup := NewSupervisor(ctx, dc)
 	sup.StartAll()
 	memguard.caches = sup.allCaches
@@ -663,6 +668,9 @@ func certExpiryWatch(ctx context.Context, mg *Mgmt) {
 	for {
 		if w := mg.certs.ExpiryWarning(); w != "" {
 			warnf("web: %s — replace it under Configure ▸ Web GUI or with dnsdir --tls-install", w)
+		}
+		if w := mg.dnscerts.ExpiryWarning(); w != "" {
+			warnf("dns: %s — replace it under Configure ▸ DNS ▸ Listeners or with dnsdir --dns-tls-install", w)
 		}
 		select {
 		case <-ctx.Done():

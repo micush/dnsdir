@@ -1,5 +1,21 @@
 # Changelog
 
+## [v547] - 2026-10-24 — DNS over TLS and HTTPS: a certificate of their own
+
+### Added
+- DoT and DoH can present their own certificate instead of the web GUI's. Configure ▸ DNS ▸ Listeners has a **Certificate for DNS over TLS and HTTPS** card (upload a certificate and key, create a request for your CA, go back to the GUI's), the same commands as for the GUI's exist as `--dns-tls-status`, `--dns-tls-install`, `--dns-tls-csr` and `--dns-tls-revert`, and `dns.tls_cert_file` / `dns.tls_key_file` (shared, both or neither, re-read when the files change) take precedence over an installed one.
+- The certificate is copied to every cluster member like the GUI's, and installing it on a replica goes through the primary.
+
+### Changed
+- Nothing changes until you set one: with no DNS certificate DoT and DoH still present the GUI's, and follow it if it changes. Installing or reverting either certificate never touches the other.
+- The log warns at start and daily when the DNS certificate expires within 30 days.
+
+## [v546] - 2026-10-24 — Topology: Copy and Paste menus (Server, Domain, All domains)
+
+### Changed
+- The copy and paste items of v541 to v545 are now two menus on a server, a domain and a gateway: **Copy ▸ Server / Domain / All domains** and **Paste ▸ Server / Domain / All domains**. A server offers Copy ▸ Server and All domains, a domain adds Copy ▸ Domain, and the circle and the empty drawing offer Paste ▸ Server only. Each kind has its own place on the clipboard, so copying a domain does not replace a copied server. An entry that has nothing to paste is greyed out, and its tooltip says why. What each one does is as before.
+- A greyed-out entry in a submenu now shows its reason as a tooltip, as the first-level items do.
+
 ## [v545] - 2026-10-24 — Topology: copy a whole server and paste it on a gateway
 
 ### Added

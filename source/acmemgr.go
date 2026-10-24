@@ -82,6 +82,7 @@ type ACMEManager struct {
 	hc          *http.Client
 	lookupCNAME func(ctx context.Context, host string) (string, error)
 	settle      time.Duration // after publishing the proofs, before the CA is told to look
+	pollEvery   time.Duration // how often the watcher looks for the CNAMEs (30 s)
 	jitter      time.Duration // an automatic run waits up to this long first, so clusters sharing a name do not collide
 
 	mu       sync.Mutex
@@ -89,12 +90,15 @@ type ACMEManager struct {
 	running  bool
 	progress []string
 	checks   map[string]acmeCheck
+	regErr   string // why the last automatic registration with acme-dns failed
+	waitGen  int    // the watcher that waits for the CNAMEs (a new one replaces the old)
+	waiting  bool
 }
 
 func newACMEManager(mg *Mgmt, stateDir string) *ACMEManager {
 	m := &ACMEManager{
 		mg: mg, path: filepath.Join(stateDir, "acme", "state.json"),
-		hc:          &http.Client{Timeout: 30 * time.Second},
+		hc:          acmeHTTPClient(),
 		lookupCNAME: func(ctx context.Context, h string) (string, error) { return net.DefaultResolver.LookupCNAME(ctx, h) },
 		settle:      5 * time.Second, jitter: 30 * time.Second,
 		checks: map[string]acmeCheck{},
@@ -107,6 +111,26 @@ func newACMEManager(mg *Mgmt, stateDir string) *ACMEManager {
 	}
 	m.fill()
 	return m
+}
+
+// acmeHTTPClient reaches the CA and the acme-dns server over IPv4 when it can and over IPv6 only when there is no IPv4
+// way (a host whose IPv6 route is broken otherwise stalls until the handshake times out).
+func acmeHTTPClient() *http.Client {
+	d := &net.Dialer{Timeout: 10 * time.Second}
+	return &http.Client{Timeout: 45 * time.Second, Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if network == "tcp" {
+				if c, err := d.DialContext(ctx, "tcp4", addr); err == nil {
+					return c, nil
+				}
+			}
+			return d.DialContext(ctx, network, addr)
+		},
+		TLSHandshakeTimeout: 15 * time.Second,
+		MaxIdleConns:        4,
+		IdleConnTimeout:     30 * time.Second,
+	}}
 }
 
 func (m *ACMEManager) fill() {
@@ -200,18 +224,20 @@ type ACMERecord struct {
 }
 
 type ACMEView struct {
-	Settings   ACMESettings `json:"settings"`
-	EABKeySet  bool         `json:"eab_key_set"`
-	Records    []ACMERecord `json:"records"`
-	Issued     *acmeIssued  `json:"issued,omitempty"`
-	LastTry    time.Time    `json:"last_try,omitempty"`
-	LastError  string       `json:"last_error,omitempty"`
-	Running    bool         `json:"running"`
-	Progress   []string     `json:"progress"`
-	Due        bool         `json:"due"`
-	Note       string       `json:"note,omitempty"` // why nothing happens, or when it renews
-	Primary    bool         `json:"primary"`
-	TaskExists bool         `json:"task_exists"`
+	Settings      ACMESettings `json:"settings"`
+	EABKeySet     bool         `json:"eab_key_set"`
+	Records       []ACMERecord `json:"records"`
+	Issued        *acmeIssued  `json:"issued,omitempty"`
+	LastTry       time.Time    `json:"last_try,omitempty"`
+	LastError     string       `json:"last_error,omitempty"`
+	Running       bool         `json:"running"`
+	Progress      []string     `json:"progress"`
+	Due           bool         `json:"due"`
+	Note          string       `json:"note,omitempty"` // why nothing happens, or when it renews
+	Primary       bool         `json:"primary"`
+	TaskExists    bool         `json:"task_exists"`
+	RegisterError string       `json:"register_error,omitempty"`
+	Waiting       bool         `json:"waiting"` // the CNAMEs are not all in place yet: the primary keeps checking and orders when they are
 }
 
 func (m *ACMEManager) isPrimary() bool {
@@ -236,6 +262,8 @@ func (m *ACMEManager) Status() ACMEView {
 	defer m.mu.Unlock()
 	v := ACMEView{Settings: m.st.Settings, Issued: m.st.Issued, LastTry: m.st.LastTry, LastError: m.st.LastError,
 		Running: m.running, Progress: append([]string{}, m.progress...), Records: []ACMERecord{}, Primary: m.isPrimary(), TaskExists: task}
+	v.RegisterError = m.regErr
+	v.Waiting = m.waiting
 	v.EABKeySet = v.Settings.EABKey != ""
 	v.Settings.EABKey = ""
 	seen := map[string]bool{}
@@ -379,7 +407,15 @@ func (m *ACMEManager) ensureTask(by string) {
 }
 
 // Register asks the acme-dns server for a name for every domain that has none yet.
-func (m *ACMEManager) Register(ctx context.Context) error {
+func (m *ACMEManager) Register(ctx context.Context) (err error) {
+	defer func() {
+		m.mu.Lock()
+		m.regErr = ""
+		if err != nil {
+			m.regErr = err.Error()
+		}
+		m.mu.Unlock()
+	}()
 	m.mu.Lock()
 	s := m.st.Settings
 	var need []string
@@ -456,6 +492,96 @@ func (m *ACMEManager) ImportRegs(in map[string]acmeDNSReg, by string) error {
 	}
 	infof("acme: acme-dns credentials for %d name(s) imported by %s", len(in), by)
 	return m.saveLocked()
+}
+
+// allInPlace says whether every name's CNAME was found pointing at its acme-dns entry by the last Check.
+func (m *ACMEManager) allInPlace() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.st.Settings.Names) == 0 {
+		return false
+	}
+	for _, n := range m.st.Settings.Names {
+		b := acmeBase(n)
+		reg, ok := m.st.Regs[b]
+		c, checked := m.checks[b]
+		if !ok || !checked || !c.OK || c.Seen != strings.ToLower(reg.FullDomain) {
+			return false
+		}
+	}
+	return true
+}
+
+const (
+	acmeWatchEvery = 30 * time.Second
+	acmeWatchFor   = 24 * time.Hour
+)
+
+// Go is the one button: the names have been saved and registered; order the certificate now when every CNAME is in
+// place, otherwise keep looking every 30 seconds (for a day) and order as soon as they are.  Nothing more to press.
+func (m *ACMEManager) Go(by string) error {
+	m.mu.Lock()
+	if m.running {
+		m.mu.Unlock()
+		return errors.New("an order is already in progress")
+	}
+	m.waitGen++
+	gen := m.waitGen
+	m.waiting = false
+	m.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	m.Check(ctx)
+	cancel()
+	if m.allInPlace() {
+		return m.Request(by)
+	}
+	m.mu.Lock()
+	m.waiting = true
+	m.mu.Unlock()
+	go m.watch(by, gen)
+	return nil
+}
+
+func (m *ACMEManager) watch(by string, gen int) {
+	end := time.Now().Add(acmeWatchFor)
+	for time.Now().Before(end) {
+		time.Sleep(m.watchEvery())
+		m.mu.Lock()
+		if gen != m.waitGen || !m.st.Settings.Enabled {
+			m.mu.Unlock()
+			return
+		}
+		m.mu.Unlock()
+		if !m.isPrimary() {
+			break
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		m.Check(ctx)
+		cancel()
+		if m.allInPlace() {
+			m.mu.Lock()
+			if gen == m.waitGen {
+				m.waiting = false
+			}
+			m.mu.Unlock()
+			if err := m.Request(by); err != nil {
+				warnf("acme: %v", err)
+			}
+			return
+		}
+	}
+	m.mu.Lock()
+	if gen == m.waitGen {
+		m.waiting = false
+	}
+	m.mu.Unlock()
+}
+
+func (m *ACMEManager) watchEvery() time.Duration {
+	if m.pollEvery > 0 {
+		return m.pollEvery
+	}
+	return acmeWatchEvery
 }
 
 // Check looks up every CNAME and remembers whether it points where it should.

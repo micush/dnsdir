@@ -151,6 +151,11 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 			return nil, errors.New("no credentials given")
 		}
 		return m.ACMEImport(a.ACMERegs, actor)
+	case "acme.go":
+		if a.ACME == nil {
+			return nil, errors.New("no settings given")
+		}
+		return m.ACMEGo(*a.ACME, actor)
 	case "acme.register":
 		return m.ACMERegister(actor)
 	case "acme.check":

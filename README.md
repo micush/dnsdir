@@ -886,19 +886,16 @@ AnyName can order a certificate from Let's Encrypt (or any ACME CA, RFC 8555) an
 
 How it works, once:
 
-1. Configure ▸ DNS ▸ Listeners ▸ **Get the certificate automatically**: give the names (public names; `*.example.com` works), an email address, what the certificate is for, and tick the box. Saving adds a daily task to the Scheduler (action `certificate_renew`).
-2. **Set up DNS records** registers each name's domain with the acme-dns server (default `https://auth.acme-dns.io`; put the address of your own acme-dns instance in the card's **acme-dns server** box if you prefer) and lists the CNAMEs to add, such as `_acme-challenge.dns.example.com  CNAME  <id>.auth.acme-dns.io`. A name and its wildcard (`example.com`, `*.example.com`) share one record.
-3. Add those CNAMEs at whoever hosts your DNS, once, and press **Check DNS**.
-4. **Get certificate now**. The progress shows on the page; the certificate is installed like an uploaded one and reaches every node.
+1. Configure ▸ DNS ▸ Listeners ▸ **Get the certificate automatically**: give the names (public names; `*.example.com` works), an email address and what the certificate is for, and press **Save and get the certificate**. (Tick *Try it first with the Let's Encrypt test CA* to try the whole path with a certificate browsers do not trust.) This saves, gets a name for each domain from the acme-dns server (default `https://auth.acme-dns.io`; put your own instance in **Advanced**), adds a daily task to the Scheduler (action `certificate_renew`), and shows the CNAMEs to add, such as `_acme-challenge.dns.example.com  CNAME  <id>.auth.acme-dns.io`. A name and its wildcard (`example.com`, `*.example.com`) share one record.
+2. Add those CNAMEs at whoever hosts your DNS, once. The primary looks for them every 30 seconds (for a day) and orders the certificate as soon as they are all in place; there is nothing more to press. The progress shows on the page, and the certificate is installed like an uploaded one and reaches every node.
 
 From then on, the Scheduler task **Renew the automatic certificate** runs daily on every node. It does something only on the primary and only when the certificate is within 30 days of expiring (Let's Encrypt certificates last 90 days, so about every 60), so it can stay on every node and a change of primary needs nothing. Before it publishes a proof it checks the CNAME and says plainly if it is missing or points elsewhere. After a failure it waits 6 hours before trying again; the Scheduler history and the page show the reason, and the installed certificate keeps serving until it expires.
 
 ```
-dnsdir --acme-set --acme-names dns.example.com,*.example.com --acme-email me@example.com --acme-enable on
-dnsdir --acme-register          # lists the CNAMEs to add
-dnsdir --acme-check
-dnsdir --acme-request           # order now
-dnsdir --acme-status
+dnsdir --acme-go --acme-names dns.example.com,*.example.com --acme-email me@example.com   # the button: save, register, order when the CNAMEs are in
+dnsdir --acme-status            # the CNAMEs to add, and where it stands
+dnsdir --acme-set ...           # change settings only (also --acme-enable off)
+dnsdir --acme-register  --acme-check  --acme-request    # the single steps
 ```
 
 Things to know:

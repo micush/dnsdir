@@ -577,3 +577,73 @@ func TestACMEShareCredentialsBetweenClusters(t *testing.T) {
 		t.Fatalf("one acme-dns entry for both: %d", len(f.regs))
 	}
 }
+
+func TestACMESaveRegistersTheNames(t *testing.T) {
+	f := newFakeCA(t)
+	n := newTNode(t, "A")
+	m := acmeTestMgr(t, f, n)
+	v, err := n.mg.ACMESet(ACMESettings{Enabled: true, Directory: f.dir(), Names: []string{"dns.example.com"}, DNSServer: f.acmeDNS()}, "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Records) != 1 || !v.Records[0].Registered || v.Records[0].Target == "" || v.RegisterError != "" {
+		t.Fatalf("saving must leave the CNAME target ready to copy: %+v", v)
+	}
+	// a server that cannot be reached is reported on the page, and the settings stay saved
+	f.srv.Close()
+	m.mu.Lock()
+	m.st.Regs = map[string]acmeDNSReg{}
+	m.mu.Unlock()
+	v, err = n.mg.ACMESet(ACMESettings{Enabled: true, Directory: f.dir(), Names: []string{"dns.example.com"}, DNSServer: f.acmeDNS()}, "t")
+	if err != nil || v.RegisterError == "" || len(v.Settings.Names) != 1 {
+		t.Fatalf("unreachable acme-dns: %+v %v", v, err)
+	}
+}
+
+func TestACMEGoWaitsForTheCNAMEsAndThenOrders(t *testing.T) {
+	f := newFakeCA(t)
+	n := newTNode(t, "A")
+	m := acmeTestMgr(t, f, n)
+	m.pollEvery = 20 * time.Millisecond
+	set := ACMESettings{Directory: f.dir(), Names: []string{"dns.example.com"}, DNSServer: f.acmeDNS()}
+	v, err := n.mg.ACMEGo(set, "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.Settings.Enabled || !v.Waiting || len(v.Records) != 1 || v.Records[0].Target == "" {
+		t.Fatalf("with no CNAME yet it waits and shows what to add: %+v", v)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if m.Status().Issued != nil {
+		t.Fatal("nothing may be ordered before the CNAME exists")
+	}
+	f.point(m) // the person adds the CNAME
+	deadline := time.Now().Add(10 * time.Second)
+	for m.Status().Issued == nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("the watcher never ordered: %+v", m.Status())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if v := waitACME(t, m); v.LastError != "" || v.Waiting || n.mg.dnscerts.Status().Source != certSourceInstalled {
+		t.Fatalf("after: %+v", v)
+	}
+	// with the CNAME already there, pressing the button orders at once
+	if v, err = n.mg.ACMEGo(set, "t"); err != nil || v.Waiting {
+		t.Fatalf("immediate: %+v %v", v, err)
+	}
+	waitACME(t, m)
+}
+
+func TestACMEClientPrefersIPv4(t *testing.T) {
+	hc := acmeHTTPClient()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) }))
+	defer srv.Close()
+	// "localhost" has both ::1 and 127.0.0.1; the server listens on IPv4 only, so this works only if IPv4 is tried first
+	u := strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)
+	resp, err := hc.Get(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+}

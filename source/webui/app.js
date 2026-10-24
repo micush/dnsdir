@@ -4009,6 +4009,7 @@
   VIEWS.dnscertificate = certificateView(true);
 
   // ── Automatic certificates: Let's Encrypt (or another ACME CA) through an acme-dns CNAME  (CLI: --acme-*) ─────
+  // One button: save, get the names from acme-dns, and order as soon as the CNAMEs are in DNS (the primary keeps looking).
   VIEWS.acme = (() => {
     const LE = "https://acme-v02.api.letsencrypt.org/directory", LES = "https://acme-staging-v02.api.letsencrypt.org/directory";
     let status, body, timer, boxEl;
@@ -4019,72 +4020,67 @@
       clearTimeout(timer);
       if (!boxEl || !boxEl.isConnected) return;
       const s = v.settings;
-      const caSel = h("select", { "aria-label": "Certificate authority" },
-        h("option", { value: LE }, "Let's Encrypt"), h("option", { value: LES }, "Let's Encrypt test (for trying it out; browsers do not trust it)"), h("option", { value: "" }, "Another CA…"));
-      const known = s.directory === LE || s.directory === LES;
-      caSel.value = known ? s.directory : "";
-      const caUrl = h("input", { type: "text", spellcheck: "false", autocomplete: "off", value: known ? "" : s.directory, placeholder: "https://ca.example.com/acme/directory", "aria-label": "ACME directory address" });
-      const sync = () => { caUrl.parentElement.hidden = caSel.value !== ""; };
-      caSel.addEventListener("change", sync);
-      const enabled = h("input", { type: "checkbox", checked: s.enabled });
+      const test = h("input", { type: "checkbox", checked: s.directory === LES });
       const email = h("input", { type: "text", value: s.email || "", autocomplete: "off", placeholder: "you@example.com", "aria-label": "Email address" });
       const names = h("textarea", { rows: 3, spellcheck: "false", placeholder: "dns.example.com\n*.example.com", "aria-label": "Certificate names" });
       names.value = (s.names || []).join("\n");
       const target = h("select", { "aria-label": "Use the certificate for" },
         h("option", { value: "dns" }, "DNS over TLS and HTTPS"), h("option", { value: "gui" }, "The web GUI"), h("option", { value: "both" }, "Both"));
       target.value = s.target || "dns";
+      // advanced
+      const known = s.directory === LE || s.directory === LES;
+      const caUrl = h("input", { type: "text", spellcheck: "false", autocomplete: "off", value: known ? "" : s.directory, placeholder: "empty: Let's Encrypt", "aria-label": "ACME directory address" });
       const dnsServer = h("input", { type: "text", value: s.dns_server || "", spellcheck: "false", autocomplete: "off", "aria-label": "acme-dns server" });
       const kid = h("input", { type: "text", value: s.eab_kid || "", autocomplete: "off", spellcheck: "false", "aria-label": "Account key id" });
       const hkey = h("input", { type: "password", value: "", autocomplete: "off", placeholder: v.eab_key_set ? "(set: leave empty to keep it)" : "", "aria-label": "Account key" });
-      const collect = () => ({ enabled: enabled.checked, directory: caSel.value || caUrl.value.trim(), email: email.value.trim(), names: names.value.split("\n").map((x) => x.trim()).filter(Boolean), target: target.value, dns_server: dnsServer.value.trim(), eab_kid: kid.value.trim(), eab_key: hkey.value.trim() });
+      const credsBox = h("textarea", { rows: 6, spellcheck: "false", class: "pem", "aria-label": "acme-dns credentials", autocomplete: "off" });
+      const collect = () => ({ enabled: true, directory: caUrl.value.trim() || (test.checked ? LES : LE), email: email.value.trim(), names: names.value.split("\n").map((x) => x.trim()).filter(Boolean), target: target.value, dns_server: dnsServer.value.trim(), eab_kid: kid.value.trim(), eab_key: hkey.value.trim() });
       const busy = (btn, fn) => async () => { btn.disabled = true; try { await fn(); } catch (e) { if (e.message !== "unauthenticated") note("bad", e.message); } finally { btn.disabled = false; } };
       const mk = (label, cls, fn) => { const b = h("button", { class: "btn " + cls, type: "button" }, label); b.addEventListener("click", busy(b, fn)); return b; };
 
       const rows = (v.records || []).map((r) => h("tr", {},
         h("td", { class: "mono wrapall" }, r.name, " ", copyBtn(() => r.name)),
         h("td", { class: "mono wrapall" }, r.registered ? [r.target, " ", copyBtn(() => r.target)] : "–"),
-        h("td", {}, !r.registered ? pill("not set up", "") : !r.checked ? pill("not checked", "") : r.ok ? pill("in place", "ok") : pill(r.seen ? "points to " + r.seen : "missing", "bad"))));
+        h("td", {}, !r.registered ? pill("waiting", "") : !r.checked ? pill("not checked", "") : r.ok ? pill("in place", "ok") : pill(r.seen ? "points to " + r.seen : "not there yet", "warn"))));
       const issued = v.issued;
-      const credsBox = h("textarea", { rows: 6, spellcheck: "false", class: "pem", "aria-label": "acme-dns credentials", autocomplete: "off" });
-      const save = mk("Save", "primary", async () => { sync(); const r = await call("settings", { acme: collect() }); note("ok", "Saved." + (r.task_exists ? " Renewal is a daily task on the Scheduler page." : "")); });
+      const go = mk(issued ? "Save and get a new certificate" : "Save and get the certificate", "primary", async () => { await call("go", { acme: collect() }); });
+      const stop = mk("Turn automatic certificates off", "", async () => { const c = collect(); c.enabled = false; await call("settings", { acme: c }); note("ok", "Off. The certificate stays as it is."); });
+      const running = v.running, waiting = v.waiting;
       body.replaceChildren(...[
-        h("p", { class: "hint" }, "Orders a certificate from Let's Encrypt (or another ACME CA) and renews it by itself, with no change to your DNS after the first one. The CA is shown a proof in DNS: you add a CNAME for each name once, pointing at a name on an acme-dns server, and AnyName writes the proof there over HTTPS whenever it renews. Nothing has to reach your hosts from outside. Names must be public names. A wildcard such as *.example.com is fine."),
-        h("label", { class: "f check" }, enabled, "Order and renew the certificate automatically"),
-        h("div", { class: "grid2" },
-          h("label", { class: "f" }, "Certificate authority", caSel, h("span", { hidden: known }, caUrl)),
-          h("label", { class: "f" }, "Email address (the CA warns this address about problems)", email)),
+        h("p", { class: "hint" }, "Gets a certificate from Let's Encrypt and renews it by itself, with nothing to change in your DNS after the first time and nothing reaching your hosts from outside. Names must be public names; *.example.com is fine."),
         h("div", { class: "grid2" },
           h("label", { class: "f" }, "Names (one per line)", names),
           h("div", {}, h("label", { class: "f" }, "Use the certificate for", target),
-            h("label", { class: "f" }, "acme-dns server", dnsServer))),
-        h("details", { class: "fold" }, h("summary", {}, "My CA needs an account key (EAB)"),
-          h("p", { class: "hint" }, "Some CAs (Google, ZeroSSL) give you a key id and a key to tie the account to you. Let's Encrypt does not need one."),
-          h("div", { class: "grid2" }, h("label", { class: "f" }, "Key id", kid), h("label", { class: "f" }, "Key", hkey))),
-        h("div", { class: "toolbar" }, save),
-        h("h3", {}, "DNS records"),
-        h("p", { class: "hint" }, "Add each CNAME once at whoever hosts your DNS. Then Check DNS."),
-        rows.length ? h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, h("th", {}, "Add this name"), h("th", {}, "as a CNAME to"), h("th", {}, ""))), h("tbody", {}, rows)) : h("p", { class: "hint" }, "Save the names first."),
-        h("details", { class: "fold" }, h("summary", {}, "Another cluster uses the same names?"),
-          h("p", { class: "hint" }, "Two clusters can share the CNAMEs. On the first, press Show the credentials and copy the text; on the other, paste it into the box and press Use these credentials. They then point at the same acme-dns name and need nothing more in DNS. Keep the credentials private."),
+            h("label", { class: "f" }, "Email address (the CA writes to it about problems)", email))),
+        h("label", { class: "f check" }, test, "Try it first with the Let's Encrypt test CA (browsers do not trust its certificate)"),
+        h("div", { class: "toolbar" }, go, s.enabled ? stop : null),
+        v.register_error ? h("div", { class: "notice bad", role: "alert" }, "Could not get the names from the acme-dns server: " + v.register_error) : null,
+        rows.length && (v.records || []).some((r) => r.registered) ? h("div", {},
+          h("h3", {}, "Add these to your DNS, once"),
+          h("p", { class: "hint" }, waiting ? "Waiting for them: AnyName looks every 30 seconds and orders the certificate as soon as they are all in place." : "Each is a CNAME at whoever hosts your DNS."),
+          h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, h("th", {}, "Name"), h("th", {}, "CNAME to"), h("th", {}, ""))), h("tbody", {}, rows))) : null,
+        v.last_error ? h("div", { class: "notice bad", role: "alert" }, v.last_error) : null,
+        (issued || running || (v.progress && v.progress.length)) ? h("div", {},
+          h("h3", {}, "Certificate"),
+          kv([
+            ["Issued", issued ? "until " + when(issued.not_after) + " for " + issued.names.join(", ") : running ? "ordering…" : "not yet"],
+            issued ? ["Renewal", v.note || "–"] : null,
+            ["Runs on", v.primary ? "this node (the primary)" : "the primary; this node shows what it copied"],
+          ]),
+          (v.progress && v.progress.length) ? h("pre", { class: "mono", style: "max-height:12em;overflow:auto" }, v.progress.join("\n")) : null) : null,
+        s.enabled && !v.task_exists ? h("div", { class: "notice bad" }, "No renewal task: add a daily \"Renew the automatic certificate\" task on the Scheduler page.") : null,
+        h("details", { class: "fold" }, h("summary", {}, "Advanced"),
+          h("div", { class: "grid2" },
+            h("label", { class: "f" }, "Another ACME CA (address of its directory)", caUrl),
+            h("label", { class: "f" }, "acme-dns server", dnsServer)),
+          h("div", { class: "grid2" },
+            h("label", { class: "f" }, "Account key id (only CAs that ask for one: Google, ZeroSSL)", kid),
+            h("label", { class: "f" }, "Account key", hkey)),
+          h("p", { class: "hint" }, "Another cluster using the same names can share these CNAMEs: press Show the credentials here, and paste them there under Use these credentials. Keep them private."),
           credsBox, h("div", { class: "toolbar" },
             mk("Show the credentials", "", async () => { credsBox.value = JSON.stringify((await api("POST", "/api/acme/export", {})).data, null, 2); }),
-            mk("Use these credentials", "", async () => { let regs; try { regs = JSON.parse(credsBox.value); } catch (_) { throw new Error("that is not the text Show the credentials gave"); } await call("import", { regs }); note("ok", "Credentials taken. Press Check DNS."); }))),
-        h("div", { class: "toolbar" },
-          mk("Set up DNS records", "", async () => { await call("register"); note("ok", "Done. Add the CNAME records above, then press Check DNS."); }),
-          mk("Check DNS", "", async () => { await call("check"); }),
-          mk("Get certificate now", "primary", async () => { await call("request"); })),
-        h("h3", {}, "Certificate"),
-        kv([
-          ["Issued", issued ? "until " + when(issued.not_after) + " for " + issued.names.join(", ") : "not yet"],
-          ["Renewal", v.note || "–"],
-          ["Last attempt", v.last_try && !String(v.last_try).startsWith("0001") ? when(v.last_try) : "–"],
-          v.last_error ? ["Last problem", h("span", { class: "bad" }, v.last_error)] : null,
-          ["Runs on", v.primary ? "this node (the primary)" : "the primary; this node shows what it copied"],
-          !v.task_exists && s.enabled ? ["Scheduler", h("span", { class: "bad" }, "no renewal task: add a daily \"Renew the automatic certificate\" task on the Scheduler page")] : null,
-        ]),
-        (v.progress && v.progress.length) ? h("pre", { class: "mono", style: "max-height:12em;overflow:auto" }, v.progress.join("\n")) : null].filter(Boolean));
-      sync();
-      if (v.running) timer = setTimeout(() => api("GET", "/api/acme").then((r) => draw(r.data)).catch(() => {}), 2000);
+            mk("Use these credentials", "", async () => { let regs; try { regs = JSON.parse(credsBox.value); } catch (_) { throw new Error("that is not the text Show the credentials gave"); } await call("import", { regs }); note("ok", "Credentials taken."); })))].filter(Boolean));
+      if (running || waiting) timer = setTimeout(() => api("GET", "/api/acme").then((r) => draw(r.data)).catch(() => {}), 3000);
     }
     return {
       mount(main) {

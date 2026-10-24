@@ -355,7 +355,8 @@ func (m *Mgmt) acmeOp(op, by string, payload any) (ACMEView, error) {
 func (m *Mgmt) ACMESet(s ACMESettings, by string) (ACMEView, error) {
 	return m.acmeOp("acme-set", by, s)
 }
-func (m *Mgmt) ACMERegister(by string) (ACMEView, error) { return m.acmeOp("acme-register", by, nil) }
+func (m *Mgmt) ACMEGo(s ACMESettings, by string) (ACMEView, error) { return m.acmeOp("acme-go", by, s) }
+func (m *Mgmt) ACMERegister(by string) (ACMEView, error)           { return m.acmeOp("acme-register", by, nil) }
 func (m *Mgmt) ACMEImport(regs map[string]acmeDNSReg, by string) (ACMEView, error) {
 	return m.acmeOp("acme-import", by, regs)
 }
@@ -590,6 +591,34 @@ func (m *Mgmt) execAdminOp(op, by string, payload json.RawMessage) (json.RawMess
 			return nil, err
 		}
 		if err := m.acme.Set(p, by); err != nil {
+			return nil, err
+		}
+		if p.Enabled && len(p.Names) > 0 {
+			// the names get their acme-dns entries at once, so the CNAMEs to add are on the page as soon as it is saved
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			if err := m.acme.Register(ctx); err != nil {
+				warnf("acme: %v", err)
+			}
+			cancel()
+		}
+		return ok(m.acme.Status())
+	case "acme-go":
+		var p ACMESettings
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return nil, err
+		}
+		p.Enabled = true
+		if err := m.acme.Set(p, by); err != nil {
+			return nil, err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		err := m.acme.Register(ctx)
+		cancel()
+		if err != nil {
+			warnf("acme: %v", err)
+			return ok(m.acme.Status())
+		}
+		if err := m.acme.Go(by); err != nil {
 			return nil, err
 		}
 		return ok(m.acme.Status())

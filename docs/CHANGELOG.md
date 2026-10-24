@@ -1,5 +1,16 @@
 # Changelog
 
+## [v550] - 2026-10-24 — Automatic certificates: one button
+
+### Changed
+- Automatic certificates reach Let's Encrypt and the acme-dns server over IPv4 first, and over IPv6 only when there is no IPv4 way, so a broken IPv6 route no longer ends in "TLS handshake timeout".
+- The card is now one step: **Save and get the certificate** saves, gets the CNAME targets from acme-dns, and, as soon as every CNAME is in your DNS, orders the certificate. If they are not there yet it shows what to add and the primary keeps looking every 30 seconds (for a day), then orders by itself. Set up DNS records, Check DNS and Get certificate now are gone from the page (the command line keeps `--acme-register`, `--acme-check` and `--acme-request`; `--acme-go` is the button). The test CA is a tick box, and the CA address, the acme-dns server, the account key and sharing between clusters are under **Advanced**.
+
+## [v549] - 2026-10-24 — Automatic certificates: the CNAME targets appear when you save
+
+### Fixed
+- The DNS records table showed "–" as the name to point the CNAME at until **Set up DNS records** was pressed, which left nothing to copy. Saving the settings with the names and the box ticked now gets the names from the acme-dns server at once, so the targets are on the page straight away; a server that cannot be reached is reported under the table. The table also says where the target will appear when there is none yet.
+
 ## [v548] - 2026-10-24 — Automatic certificates (ACME, Let's Encrypt)
 
 ### Added

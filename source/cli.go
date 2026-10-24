@@ -18,16 +18,16 @@ import (
 // calls the same code), so the two always agree.
 
 type cliFlags struct {
-	versions, versionSnapshot, tlsStatus, tlsInstall, tlsCSR, tlsRevert, tlsRegenerate                              *bool
-	acmeNames, acmeEmail, acmeDirectory, acmeTarget, acmeDNS, acmeEnable                                            *string
-	dnsTLSStatus, dnsTLSInstall, dnsTLSCSR, dnsTLSRevert, acmeStatus, acmeSet, acmeRegister, acmeCheck, acmeRequest *bool
-	clusterStatus, clusterToken, clusterPromote, clusterLeave, clusterSync                                          *bool
-	updateStatus, updateApply, updateHistory, noWait, yes                                                           *bool
-	versionShow, versionDiff, versionRestore, versionExport, configImport, note                                     *string
-	certFile, keyFile, cn, san                                                                                      *string
-	clusterJoin, clusterRemove, clusterUnremove, clusterDelete                                                      *string
-	schedule, scheduleHistory                                                                                       *bool
-	scheduleSet, scheduleDel, scheduleRun                                                                           *string
+	versions, versionSnapshot, tlsStatus, tlsInstall, tlsCSR, tlsRevert, tlsRegenerate                                      *bool
+	acmeNames, acmeEmail, acmeDirectory, acmeTarget, acmeDNS, acmeEnable                                                    *string
+	dnsTLSStatus, dnsTLSInstall, dnsTLSCSR, dnsTLSRevert, acmeStatus, acmeSet, acmeGo, acmeRegister, acmeCheck, acmeRequest *bool
+	clusterStatus, clusterToken, clusterPromote, clusterLeave, clusterSync                                                  *bool
+	updateStatus, updateApply, updateHistory, noWait, yes                                                                   *bool
+	versionShow, versionDiff, versionRestore, versionExport, configImport, note                                             *string
+	certFile, keyFile, cn, san                                                                                              *string
+	clusterJoin, clusterRemove, clusterUnremove, clusterDelete                                                              *string
+	schedule, scheduleHistory                                                                                               *bool
+	scheduleSet, scheduleDel, scheduleRun                                                                                   *string
 
 	users                                                                                                                                                                                                                                            *bool
 	userAdd, userPasswd, userExpiry, userDel, userGrant, userRevoke, expires, hostname                                                                                                                                                               *string
@@ -56,7 +56,7 @@ func registerCLIFlags(fs *flag.FlagSet) *cliFlags {
 		versions: b("versions"), versionSnapshot: b("version-snapshot"), tlsStatus: b("tls-status"),
 		tlsInstall: b("tls-install"), tlsCSR: b("tls-csr"), tlsRevert: b("tls-revert"), tlsRegenerate: b("tls-regenerate"),
 		dnsTLSStatus: b("dns-tls-status"), dnsTLSInstall: b("dns-tls-install"), dnsTLSCSR: b("dns-tls-csr"), dnsTLSRevert: b("dns-tls-revert"),
-		acmeStatus: b("acme-status"), acmeSet: b("acme-set"), acmeRegister: b("acme-register"), acmeCheck: b("acme-check"), acmeRequest: b("acme-request"),
+		acmeStatus: b("acme-status"), acmeSet: b("acme-set"), acmeGo: b("acme-go"), acmeRegister: b("acme-register"), acmeCheck: b("acme-check"), acmeRequest: b("acme-request"),
 		acmeNames: s("acme-names"), acmeEmail: s("acme-email"), acmeDirectory: s("acme-directory"), acmeTarget: s("acme-target"), acmeDNS: s("acme-dns-server"), acmeEnable: s("acme-enable"),
 		clusterStatus: b("cluster-status"), clusterToken: b("cluster-token"), clusterPromote: b("cluster-promote"),
 		clusterLeave: b("cluster-leave"), clusterSync: b("cluster-sync"),
@@ -366,7 +366,7 @@ func (f *cliFlags) run(sock string) bool {
 		var v ACMEView
 		decode(op(sock, "acme.status", nil), &v)
 		printACME(v)
-	case *f.acmeSet:
+	case *f.acmeSet || *f.acmeGo:
 		var cur ACMEView
 		decode(op(sock, "acme.status", nil), &cur)
 		s := cur.Settings
@@ -395,8 +395,15 @@ func (f *cliFlags) run(sock string) bool {
 		default:
 			fatalf("--acme-enable takes on or off")
 		}
-		decode(op(sock, "acme.set", map[string]any{"acme": s}), &cur)
+		cmd := "acme.set"
+		if *f.acmeGo {
+			cmd = "acme.go"
+		}
+		decode(op(sock, cmd, map[string]any{"acme": s}), &cur)
 		printACME(cur)
+		if *f.acmeGo {
+			fmt.Println("\nAdd any CNAME above that is not in place at your DNS host. The primary keeps looking and orders the certificate by itself; follow it with dnsdir --acme-status.")
+		}
 	case *f.acmeRegister:
 		var v ACMEView
 		decode(op(sock, "acme.register", nil), &v)

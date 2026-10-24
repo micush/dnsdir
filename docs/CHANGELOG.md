@@ -1,5 +1,10 @@
 # Changelog
 
+## [v539] - 2026-10-24 — Topology: a test domain's tooltip is one fact per line
+
+### Changed
+- The tooltip of a test domain reads: the name and type; how it answered (or why not); how long it has been online; and what the server returned. The zone note ("for the zone …: a failure takes the server out of that zone only") is gone from it.
+
 ## [v538] - 2026-10-24 — Topology: no "for ordinary names" in a test domain's tooltip
 
 ### Changed

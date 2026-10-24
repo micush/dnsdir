@@ -200,6 +200,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .grid .fsec .hint { margin-top: .25rem; }
 .grid label.f.check { grid-column: 1 / -1; padding-top: 0; }
 .grid.c3 { grid-template-columns: repeat(3, 1fr); }
+.grid.ldap6 { grid-template-columns: repeat(6, 1fr); }
+.grid.ldap6 > .span2 { grid-column: span 2; }
+.grid.ldap6 > .span3 { grid-column: span 3; }
+@media (max-width: 700px) { .grid.ldap6 { grid-template-columns: 1fr; } .grid.ldap6 > .span2, .grid.ldap6 > .span3 { grid-column: auto; } }
 @media (max-width: 700px) { .grid.c3 { grid-template-columns: 1fr; } }
 .hint { font-size: .78rem; color: var(--muted); }
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }

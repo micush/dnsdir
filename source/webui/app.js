@@ -2317,6 +2317,9 @@
   ];
   function ldapTab(obj) {
     const fs = fieldset(LDAP_FIELDS, obj);
+    // two lines: bind account, bind password and search base; then the full-access and the read-only group
+    fs.el.classList.add("ldap6");
+    [...fs.el.querySelectorAll(":scope > label.f:not(.check)")].forEach((el, i) => el.classList.add(i < 3 ? "span2" : "span3"));
     const user = h("input", { type: "text", autocomplete: "off", spellcheck: "false", "aria-label": "User name to test", placeholder: "alice" });
     const pass = h("input", { type: "password", autocomplete: "new-password", "aria-label": "Password to test", placeholder: "optional" });
     const out = h("pre", { class: "ldap-out hidden", role: "status", "aria-live": "polite" });

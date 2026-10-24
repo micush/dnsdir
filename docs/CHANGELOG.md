@@ -1,5 +1,13 @@
 # Changelog
 
+## [v536] - 2026-10-23 — Configure ▸ Users ▸ LDAP: the fields are laid out on two lines
+
+### Changed
+- The LDAP sign-in form shows bind account, bind password and search base on the first line, and the full-access group and the read-only group on the second (they were four across and one on its own). On a narrow window they stack.
+
+### Verified
+- `gofmt`, `go vet`, `go test -race` on the full suite; the form looked at in Chromium (ntpdir; the same code and style in all three).
+
 ## [v535] - 2026-10-23 — LDAP sign-in: an account whose UPN differs from name@domain can sign in by account name
 
 ### Fixed

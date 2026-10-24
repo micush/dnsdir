@@ -235,7 +235,7 @@ DNS proxy ("dns" block at the top level of the config):
   probe_interval_ms  default 5000     probe_timeout_ms  default 1000
   query_timeout_ms   default 1500     max_attempts      default 3
   fail_threshold     consecutive failures before a server is dropped (2)
-  latency_alpha      EWMA smoothing for response latency (default 0.3)
+  latency_alpha      how fast the average response time follows new answers, 0-1 (default 0.3)
   server_queries     optional per-server probe queries: {"8.8.8.8": ["google.com"]}
   server_names       optional names shown under the addresses: {"8.8.8.8": "google-a"}
 A server may also be a host name. A group can have its own pool: put the same
@@ -855,7 +855,7 @@ func showDNSTable(sock string) {
 		if p.UsingFB {
 			fmt.Println("no configured server is in service (down or paused): answering from the fallback servers")
 		}
-		fmt.Printf(f, "RANK", "SERVER NAME", "SERVER IP", "STATE", "EWMA(ms)", "LAST(ms)", "OK", "FAIL", "SERVED", "LAST ERROR")
+		fmt.Printf(f, "RANK", "SERVER NAME", "SERVER IP", "STATE", "AVG(ms)", "LAST(ms)", "OK", "FAIL", "SERVED", "LAST ERROR")
 		fmt.Println(strings.Repeat("-", 127))
 		for _, s := range p.Servers {
 			rank, state := "-", "down"

@@ -1,5 +1,11 @@
 # Changelog
 
+## [v540] - 2026-10-24 — The server's average response time is explained
+
+### Changed
+- Monitor ▸ DNS and `--show-dns` call the column **Average (ms)** (it was "EWMA"). Hovering the heading says what it is.
+- The help for Monitor ▸ DNS and for Latency smoothing, the README and `--help` explain it: an exponentially weighted moving average, updated by every answer as `new = smoothing × this answer + (1 − smoothing) × old`, so recent answers count most and one slow answer barely moves the ranking.
+
 ## [v539] - 2026-10-24 — Topology: a test domain's tooltip is one fact per line
 
 ### Changed

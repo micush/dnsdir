@@ -2177,7 +2177,7 @@
                 return on.length ? h("span", { class: "mono small" }, "answering on " + on.join(" · ")) : h("span", { class: "muted small" }, "not answering on this node");
               })()),
             h("div", { class: "scroll" }, h("table", { class: "dns" },
-              h("thead", {}, h("tr", {}, ["Rank", "Server name", "Server IP", "State", "EWMA (ms)", "Last (ms)", "OK", "Fail", "Served", "Last error"].map((t, i) => h("th", { class: i >= 4 && i <= 8 ? "num" : "" }, t)))),
+              h("thead", {}, h("tr", {}, ["Rank", "Server name", "Server IP", "State", "Average (ms)", "Last (ms)", "OK", "Fail", "Served", "Last error"].map((t, i) => h("th", { class: i >= 4 && i <= 8 ? "num" : "", title: i === 4 ? "Average response time. Newer answers count more than older ones (Configure ▸ DNS ▸ Health & balancing ▸ Latency smoothing). Servers are ranked by it." : i === 5 ? "The latest single answer time" : null }, t)))),
               h("tbody", {}, p.servers.map((s) => h("tr", {},
                 h("td", {}, s.healthy && s.rank ? s.rank : "–"),
                 h("td", { class: "sname", title: s.name || null }, s.name || "–"),   // a long name is cut short; the whole is the tooltip

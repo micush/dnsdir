@@ -4038,36 +4038,41 @@
       const busy = (btn, fn) => async () => { btn.disabled = true; try { await fn(); } catch (e) { if (e.message !== "unauthenticated") note("bad", e.message); } finally { btn.disabled = false; } };
       const mk = (label, cls, fn) => { const b = h("button", { class: "btn " + cls, type: "button" }, label); b.addEventListener("click", busy(b, fn)); return b; };
 
-      const rows = (v.records || []).map((r) => h("tr", {},
-        h("td", { class: "mono wrapall" }, r.name, " ", copyBtn(() => r.name)),
-        h("td", { class: "mono wrapall" }, r.registered ? [r.target, " ", copyBtn(() => r.target)] : "–"),
-        h("td", {}, !r.registered ? pill("waiting", "") : !r.checked ? pill("not checked", "") : r.ok ? pill("in place", "ok") : pill(r.seen ? "points to " + r.seen : "not there yet", "warn"))));
+      const rows = (v.records || []).map((r) => h("div", { class: "acme-rec" },
+        h("div", { class: "acme-rec-body" },
+          h("div", { class: "acme-k" }, "Name"),
+          h("div", { class: "mono wrapall" }, r.name, " ", copyBtn(() => r.name)),
+          h("div", { class: "acme-k" }, "CNAME to"),
+          h("div", { class: "mono wrapall" }, r.registered ? [r.target, " ", copyBtn(() => r.target)] : "–")),
+        h("div", { class: "acme-rec-state" }, !r.registered ? pill("waiting", "") : !r.checked ? pill("not checked", "") : r.ok ? pill("in place", "ok") : pill(r.seen ? "points to " + r.seen : "not there yet", "warn"))));
       const issued = v.issued;
       const go = mk(issued ? "Save and get a new certificate" : "Save and get the certificate", "primary", async () => { await call("go", { acme: collect() }); });
       const stop = mk("Turn automatic certificates off", "", async () => { const c = collect(); c.enabled = false; await call("settings", { acme: c }); note("ok", "Off. The certificate stays as it is."); });
       const running = v.running, waiting = v.waiting;
+      const step = (n, title, ...kids) => h("section", { class: "acme-step" }, h("h3", {}, h("span", { class: "acme-n" }, n), title), ...kids);
+      const haveRecs = rows.length && (v.records || []).some((r) => r.registered);
       body.replaceChildren(...[
-        h("p", { class: "hint" }, "Gets a certificate from Let's Encrypt and renews it by itself, with nothing to change in your DNS after the first time and nothing reaching your hosts from outside. Names must be public names; *.example.com is fine."),
-        h("div", { class: "grid2" },
-          h("label", { class: "f" }, "Names (one per line)", names),
-          h("div", {}, h("label", { class: "f" }, "Use the certificate for", target),
-            h("label", { class: "f" }, "Email address (the CA writes to it about problems)", email))),
-        h("label", { class: "f check" }, test, "Try it first with the Let's Encrypt test CA (browsers do not trust its certificate)"),
-        h("div", { class: "toolbar" }, go, s.enabled ? stop : null),
-        v.register_error ? h("div", { class: "notice bad", role: "alert" }, "Could not get the names from the acme-dns server: " + v.register_error) : null,
-        rows.length && (v.records || []).some((r) => r.registered) ? h("div", {},
-          h("h3", {}, "Add these to your DNS, once"),
-          h("p", { class: "hint" }, waiting ? "Waiting for them: AnyName looks every 30 seconds and orders the certificate as soon as they are all in place." : "Each is a CNAME at whoever hosts your DNS."),
-          h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, h("th", {}, "Name"), h("th", {}, "CNAME to"), h("th", {}, ""))), h("tbody", {}, rows))) : null,
+        h("p", { class: "hint nomargin" }, "Gets a certificate from Let's Encrypt and renews it by itself, with nothing to change in your DNS after the first time and nothing reaching your hosts from outside. Names must be public names; *.example.com is fine."),
+        step(1, "Choose the names",
+          h("div", { class: "grid2" },
+            h("label", { class: "f" }, "Names (one per line)", names),
+            h("div", { class: "stack" },
+              h("label", { class: "f" }, "Use the certificate for", target),
+              h("label", { class: "f" }, "Email address (the CA writes to it about problems)", email))),
+          h("label", { class: "f check acme-test" }, test, "Try it first with the Let's Encrypt test CA (browsers do not trust its certificate)"),
+          h("div", { class: "toolbar nomargin" }, go, s.enabled ? stop : null),
+          v.register_error ? h("div", { class: "notice bad", role: "alert" }, "Could not get the names from the acme-dns server: " + v.register_error) : null),
+        haveRecs ? step(2, "Add this to your DNS, once",
+          h("p", { class: "hint" }, waiting ? "Waiting for it: AnyName looks every 30 seconds and orders the certificate as soon as every CNAME is in place." : "Each is a CNAME at whoever hosts your DNS. After this, nothing in your DNS ever changes again."),
+          h("div", { class: "acme-recs" }, rows)) : null,
         v.last_error ? h("div", { class: "notice bad", role: "alert" }, v.last_error) : null,
-        (issued || running || (v.progress && v.progress.length)) ? h("div", {},
-          h("h3", {}, "Certificate"),
+        (issued || running || (v.progress && v.progress.length)) ? step(haveRecs ? 3 : 2, "Certificate",
           kv([
             ["Issued", issued ? "until " + when(issued.not_after) + " for " + issued.names.join(", ") : running ? "ordering…" : "not yet"],
             issued ? ["Renewal", v.note || "–"] : null,
             ["Runs on", v.primary ? "this node (the primary)" : "the primary; this node shows what it copied"],
           ]),
-          (v.progress && v.progress.length) ? h("pre", { class: "mono", style: "max-height:12em;overflow:auto" }, v.progress.join("\n")) : null) : null,
+          (v.progress && v.progress.length) ? h("pre", { class: "acme-log mono" }, v.progress.join("\n")) : null) : null,
         s.enabled && !v.task_exists ? h("div", { class: "notice bad" }, "No renewal task: add a daily \"Renew the automatic certificate\" task on the Scheduler page.") : null,
         h("details", { class: "fold" }, h("summary", {}, "Advanced"),
           h("div", { class: "grid2" },

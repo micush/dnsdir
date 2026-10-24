@@ -991,7 +991,13 @@ func interactiveConfigure(path string) error {
 			dc.DNS.Queries = append(dc.DNS.Queries, dq)
 		}
 		dc.DNS.DownPercent = p.askInt("A server is down when this % of its probe queries fail", dc.DNS.DownPercent)
-		dc.DNS.ListenPort = p.askInt("Listen port", dc.DNS.ListenPort)
+		dc.DNS.ListenPort = p.askInt("DNS port (UDP and TCP)", dc.DNS.ListenPort)
+		dc.DNS.DoTPort = p.askInt("DNS over TLS port (0 = off, usually 853)", dc.DNS.DoTPort)
+		dc.DNS.DoHPort = p.askInt("DNS over HTTPS port (0 = off, usually 443)", dc.DNS.DoHPort)
+		fmt.Println("    A certificate file overrides one installed in the GUI; it needs the key file too (- = none).")
+		dc.DNS.TLSCertFile = blankable(p.ask("Certificate file", orDash(dc.DNS.TLSCertFile)))
+		dc.DNS.TLSKeyFile = blankable(p.ask("Key file", orDash(dc.DNS.TLSKeyFile)))
+		dc.DNS.ForwardUpdates = yes(p.ask("Forward dynamic DNS updates to the zone's primary server? (yes/no)", yn(dc.DNS.ForwardUpdates)))
 	}
 	if err := dc.Validate(); err != nil {
 		return fmt.Errorf("not saved: %w", err)

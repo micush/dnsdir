@@ -1,5 +1,11 @@
 # Changelog
 
+## [v552] - 2026-10-24 — `--configure` asks for the DNS listeners
+
+### Changed
+- The `--configure` wizard now asks for everything on the Listeners page: the DNS, DNS over TLS and DNS over HTTPS ports, the certificate and key files, and whether to forward dynamic DNS updates. It used to ask only for the DNS port, so DoT and DoH could not be set from the command line.
+- The automatic certificate card is laid out in three numbered steps (choose the names, add the CNAME, the certificate), the CNAME to add is a boxed row with its status beside it, and the progress log is a boxed panel, instead of one run-together block.
+
 ## [v551] - 2026-10-24 — DNS over TLS and HTTPS start on gateways with their own DNS pool
 
 ### Fixed

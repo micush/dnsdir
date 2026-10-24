@@ -1,5 +1,10 @@
 # Changelog
 
+## [v542] - 2026-10-24 — Topology: copy all of a server's domains to another server
+
+### Added
+- Right-click a server ▸ **Copy all domains**, then right-click another server ▸ **Paste all domains**. Only the domains the other server does not test yet are added, so nothing is listed twice; *Paste* is greyed out (the reason is its tooltip) when there is nothing to add. It works across gateways. A pause is not copied. Copying one domain and pasting it works as before.
+
 ## [v541] - 2026-10-24 — Topology: copy a test domain to another server; a refused change says why
 
 ### Added

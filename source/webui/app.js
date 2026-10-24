@@ -1496,18 +1496,22 @@
     };
     // Monitor ▸ Log searched for this server
     const goLog = (addr) => { state.prefill.log = srvTarget(addr).host; selectTab("log"); };
-    // Copy a test domain, paste it on a server (of this gateway or another): the same name and type are added to that server's tests.
-    // What is copied is only the name and the type; a pause stays where it was.
-    let domClip = null;
+    // Copy one test domain (right-click it), or all of a server's (right-click the server), and paste on a server, of this gateway or
+    // another: the names and types are added to that server's tests, and any it already has are left out.  Only the name and the
+    // type are copied; a pause stays where it was.
+    let domClip = [];
     const sameQuery = (a, b) => String(a.name).replace(/\.$/, "").toLowerCase() === String(b.name).replace(/\.$/, "").toLowerCase() && String(a.type).toUpperCase() === String(b.type).toUpperCase();
-    const pasteWhy = (g, addr) => (!domClip ? "Nothing copied yet: right-click a domain ▸ Copy" : effQueries(g, addr).some((x) => sameQuery(x, domClip)) ? domClip.name + " (" + domClip.type + ") is already tested on this server" : "");
+    const newDomains = (g, addr) => domClip.filter((q) => !effQueries(g, addr).some((x) => sameQuery(x, q)));
+    const pasteWhy = (g, addr) => (!domClip.length ? "Nothing copied yet: right-click a domain ▸ Copy, or a server ▸ Copy all domains" : !newDomains(g, addr).length ? (domClip.length === 1 ? domClip[0].name + " (" + domClip[0].type + ") is" : "All " + domClip.length + " domains are") + " already tested on this server" : "");
+    const pasteLabel = () => (domClip.length > 1 ? "Paste all domains (" + domClip.length + ")" : domClip.length ? "Paste domain " + domClip[0].name + " (" + domClip[0].type + ")" : "Paste domain");
     function pasteDomain(g, addr) {
       if (pasteWhy(g, addr)) return;
-      const q = { name: domClip.name, type: domClip.type };
-      quick(() => { const list = ownQueries(g, addr); list.push(q); cv.sel = { kind: "dom", addr, di: list.length - 1 }; });
+      const add = newDomains(g, addr).map((q) => ({ name: q.name, type: q.type }));
+      quick(() => { const list = ownQueries(g, addr); const first = list.length; list.push(...add); cv.sel = { kind: "dom", addr, di: first }; });
     }
     const srvItems = (g, addr) => [["Statistics", () => serverStats(g, addr)], ["Capture", () => goCapture(addr)], ["Logs", () => goLog(addr)], "-", ["Edit", () => serverForm(g, addr)], ["Add domain", () => domainForm(g, addr, null)],
-      ["Paste domain" + (domClip ? " " + domClip.name + " (" + domClip.type + ")" : ""), () => pasteDomain(g, addr), "", null, pasteWhy(g, addr)],
+      ["Copy all domains", () => { domClip = effQueries(g, addr).map((q) => ({ name: q.name, type: q.type })); }, "", null, effQueries(g, addr).length ? "" : "This server has no domains to copy"],
+      [pasteLabel(), () => pasteDomain(g, addr), "", null, pasteWhy(g, addr)],
       ...pauseItems("", (sc) => ((sc === "all" ? (g.dns || cv.cfg.dns || {}).paused_servers : cv.cfg.paused_servers_here) || []).includes(addr), (sc, p) => pauseServer(g, addr, sc, p), lastServerWhy(g, addr)), "-", ["Delete", delSel, "danger"]];
     // Pause / resume announcing one anycast address: on this node only (kept in this node's own settings) or on every node (shared)
     const anyPauseList = (g, scope) => (scope === "all" ? "paused_vips" : "paused_vips_here");
@@ -1525,7 +1529,7 @@
       const q = effQueries(g, addr)[di];
       const on = (sc) => ((sc === "all" ? (g.dns || cv.cfg.dns || {}).paused_queries : cv.cfg.paused_queries_here) || []).includes(qKey(addr, q));
       return [["Statistics", () => domainStats(g, addr, di)], "-", ["Edit", () => domainForm(g, addr, di)],
-        ...(q ? [["Copy", () => { domClip = { name: q.name, type: q.type }; }]] : []),
+        ...(q ? [["Copy", () => { domClip = [{ name: q.name, type: q.type }]; }]] : []),
         ...(q ? pauseItems("", on, (sc, p) => pauseDomain(g, addr, q, sc, p)) : []), "-", ["Delete", delSel, "danger"]];
     };
     // the cluster's nodes (the parallelograms left of the circle)

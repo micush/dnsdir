@@ -1503,7 +1503,7 @@
     const sameQuery = (a, b) => String(a.name).replace(/\.$/, "").toLowerCase() === String(b.name).replace(/\.$/, "").toLowerCase() && String(a.type).toUpperCase() === String(b.type).toUpperCase();
     const newDomains = (g, addr) => domClip.filter((q) => !effQueries(g, addr).some((x) => sameQuery(x, q)));
     const pasteWhy = (g, addr) => (!domClip.length ? "Nothing copied yet: right-click a domain ▸ Copy, or a server ▸ Copy all domains" : !newDomains(g, addr).length ? (domClip.length === 1 ? domClip[0].name + " (" + domClip[0].type + ") is" : "All " + domClip.length + " domains are") + " already tested on this server" : "");
-    const pasteLabel = () => (domClip.length > 1 ? "Paste all domains (" + domClip.length + ")" : domClip.length ? "Paste domain " + domClip[0].name + " (" + domClip[0].type + ")" : "Paste domain");
+    const pasteLabel = () => (domClip.length > 1 ? "Paste all domains (" + domClip.length + ")" : "Paste domain");
     function pasteDomain(g, addr) {
       if (pasteWhy(g, addr)) return;
       const add = newDomains(g, addr).map((q) => ({ name: q.name, type: q.type }));

@@ -1,5 +1,10 @@
 # Changelog
 
+## [v543] - 2026-10-24 — Topology: the paste item is just "Paste domain"
+
+### Changed
+- The server menu's paste item reads **Paste domain** (it no longer adds the copied name and type to its label). After *Copy all domains* it reads **Paste all domains (N)**.
+
 ## [v542] - 2026-10-24 — Topology: copy all of a server's domains to another server
 
 ### Added

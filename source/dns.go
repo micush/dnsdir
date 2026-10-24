@@ -307,6 +307,8 @@ type TestStat struct {
 	OK    bool    `json:"ok"`
 	MS    float64 `json:"ms"`
 	Error string  `json:"error,omitempty"`
+	// Answer is what the server returned, in short (the records of the type asked for); empty when it failed.
+	Answer string `json:"answer,omitempty"`
 }
 
 func (s *Server) sample(rtt time.Duration, alpha float64) {
@@ -546,6 +548,9 @@ func (p *Pool) probeServer(ctx context.Context, s *Server) {
 		ds.lat(rtt)
 		total += rtt
 		ts.OK, ts.MS = true, round2(float64(rtt)/float64(time.Millisecond))
+		if qt, err := parseQType(q.Type); err == nil {
+			ts.Answer = answerText(resp, qt)
+		}
 		tests = append(tests, ts)
 	}
 	if ctx.Err() != nil {

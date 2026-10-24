@@ -332,7 +332,7 @@ The drawing has three kinds of shape:
 
 - a **circle** for the gateway (its shared address, the VIP),
 - a **square** under it for every DNS server it forwards to, and
-- a **trapezoid** under each square for every domain that server has to answer.
+- a **trapezoid** under each square for every domain that server has to answer. It shows the name only; hover it for the record type, how it answered and the value the server returned.
 
 **The drawing is the gateway, not the selected node.** When the node picked in the Node menu does not serve the gateway (another subnet, removed from it, or paused there), it has no servers probed of its own. The circle, servers, domains and anycast addresses are then those of a node that does serve it, asked over the cluster channel, and the circle's tooltip says which ("As NODE sees it"). The node shapes still say what each node, this one included, is doing. If no node serves the gateway, or the one asked does not answer within a few seconds, you see the selected node's own view. `dnsdir --canvas` is always the node's own view.
 

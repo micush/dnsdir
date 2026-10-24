@@ -1,5 +1,22 @@
 # Changelog
 
+## [v538] - 2026-10-24 — Topology: no "for ordinary names" in a test domain's tooltip
+
+### Changed
+- The tooltip of a test domain no longer says "for ordinary names" (the usual case); the zone note stays on tests for a zone a server serves. The returned value is the last line.
+
+## [v537] - 2026-10-24 — Topology: the record type moves from the trapezoid to its tooltip, and the tooltip shows what the server returned
+
+### Changed
+- A test domain's trapezoid shows the name only (it showed "name TXT" for any type but A). The tooltip has the type as before and now a "Returned:" line with the value the server answered: addresses for A and AAAA, the target for CNAME, NS and PTR, "preference host" for MX, the text for TXT, primary, contact and serial for SOA. At most six records, each cut at 160 characters, with the CNAMEs on the way marked.
+- The answer is kept with each probe result (`answer` in the canvas JSON) and appears after the next probe round.
+
+### Verified
+- `gofmt`, `go vet`, `go test -race` on the full suite; `TestAnswerText` decodes A, TXT, MX, CNAME chains, long answers and a garbled message.
+
+### Not verified
+- Not looked at in a browser with a real server answering.
+
 ## [v536] - 2026-10-23 — Configure ▸ Users ▸ LDAP: the fields are laid out on two lines
 
 ### Changed

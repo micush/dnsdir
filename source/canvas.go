@@ -30,6 +30,7 @@ type CanvasTest struct {
 	Status string  `json:"status"`
 	Detail string  `json:"detail"`
 	MS     float64 `json:"ms"`
+	Answer string  `json:"answer,omitempty"` // what the server returned, in short
 	Uptime *UpInfo `json:"uptime,omitempty"`
 	Paused string  `json:"paused,omitempty"` // "node" or "all" when this probe domain is paused
 	// Zone is the zone of a list the server serves that this probe domain is in ("" for a probe of ordinary names): it
@@ -285,6 +286,7 @@ func buildCanvas(dc *DaemonConfig, rows []SnapshotRow, pools []poolInfo) []Canva
 					for _, t := range st.Tests {
 						if t.Name == q.Name && t.Type == q.Type {
 							ct.MS = t.MS
+							ct.Answer = t.Answer
 							if t.OK {
 								ct.Status, ct.Detail = "ok", fmt.Sprintf("answered in %.2f ms", t.MS)
 							} else {

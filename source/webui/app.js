@@ -1058,10 +1058,10 @@
             ghost: (k) => { const gy = DY0 + k * DGE; return sv("polygon", { class: "dropslot", points: `${mx - DW / 2 + 14},${gy} ${mx + DW / 2 - 14},${gy} ${mx + DW / 2},${gy + DH} ${mx - DW / 2},${gy + DH}` }); },
             drop: (k) => { ensureDNS(g); reorder(ownQueries(g, addr), di, k); cv.sel = { kind: "dom", addr, di: k }; commit(); } }),
             onkeydown: (e) => { if (e.key === "Enter") pick("dom", addr, di)(e); } },
-            sv("title", {}, q.name + " (" + q.type + ") — " + why + (probeZone(g, addr, q.name) ? " — for the zone " + probeZone(g, addr, q.name) + ": a failure takes the server out of that zone only" : " — for ordinary names") + (t && !sp && c !== "idle" ? upLine(t.uptime) : "")),
+            sv("title", {}, q.name + " (" + q.type + ") — " + why + (probeZone(g, addr, q.name) ? " — for the zone " + probeZone(g, addr, q.name) + ": a failure takes the server out of that zone only" : "") + (t && !sp && c !== "idle" ? upLine(t.uptime) : "") + (t && t.answer && !sp ? "\nReturned: " + t.answer : "")),
             sv("polygon", { points: `${mx - DW / 2 + 14},${y} ${mx + DW / 2 - 14},${y} ${mx + DW / 2},${y + DH} ${mx - DW / 2},${y + DH}` }),
             sv("text", { x: mx - DW / 2 + 12, y: y + DH - 5, "text-anchor": "start", class: "t2 srvtype" }, probeZone(g, addr, q.name) ? "I" : "P"),
-            label(mx, y + 21, fitPx(q.name + (q.type === "A" ? "" : " " + q.type), DW - 46, "400 13px system-ui, sans-serif"), "t1 dn")));
+            label(mx, y + 21, fitPx(q.name, DW - 46, "400 13px system-ui, sans-serif"), "t1 dn")));
         });
       });
       svg.append(...lines, ...shapes);

@@ -99,6 +99,8 @@ var schedActions = map[string]string{
 	"stats_clear":    "Clear the statistics",
 	"update_online":  "Update from online",
 	"node_reboot":    "Reboot this node",
+	// on the primary only, and only when the certificate is due: safe to leave on every node (acmemgr.go)
+	"certificate_renew": "Renew the automatic certificate",
 }
 
 var schedEveryMax = map[string]int{"once": 1, "hourly": 720, "daily": 366, "weekly": 52, "monthly": 24, "yearly": 10}
@@ -965,6 +967,8 @@ func (s *Scheduler) builtin(action, actor string) (string, error) {
 		return s.m.NodePause(action == "node_pause", actor)
 	case "update_online":
 		return s.updateOnline(actor)
+	case "certificate_renew":
+		return s.m.acme.RunScheduled(actor)
 	case "node_reboot":
 		return s.rebootHost(actor)
 	case "stats_clear":

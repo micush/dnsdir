@@ -118,6 +118,10 @@ the web GUI):
   DoT/DoH certificate  --dns-tls-status  --dns-tls-install --cert-file F --key-file F
                    --dns-tls-csr --cn NAME [--san NAME_OR_IP,...]  --dns-tls-revert
                    (the certificate DNS over TLS and DNS over HTTPS present; the GUI's when none is installed)
+  Automatic cert   --acme-status  --acme-register  --acme-check  --acme-request
+                   --acme-set [--acme-names a.example.com,*.example.com] [--acme-email E] [--acme-target dns|gui|both]
+                              [--acme-directory letsencrypt|staging|URL] [--acme-dns-server URL] [--acme-enable on|off]
+                   (Let's Encrypt or another ACME CA, proved through a one-time CNAME to an acme-dns server; renewed by a Scheduler task)
   BGP (FRR)        --bgp   (this node's settings, announced addresses, neighbor and BFD state)
                    --asn N|off [--router-id A.B.C.D|-]     (BGP runs while an AS is set)
                    [--keepalive S] [--hold S] [--as-prepend on|off]   (on: the local AS three more times on every announcement)

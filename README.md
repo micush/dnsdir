@@ -26,6 +26,7 @@ What you get:
 - [Config history](#config-history)
 - [The GUI certificate](#the-gui-certificate)
 - [The DNS over TLS and HTTPS certificate](#the-dns-over-tls-and-https-certificate)
+- [Automatic certificates (ACME)](#automatic-certificates-acme)
 - [Clustering](#clustering)
 - [Monitoring: statistics, host, capture and log](#monitoring)
 - [Operating a node](#operating-a-node)
@@ -761,6 +762,7 @@ A directory account keeps its password and expiry date in the directory. **Add a
 | `--users`, `--user-add`, `--user-grant`, `--user-revoke`, `--user-passwd`, `--user-expiry`, `--user-del` | Configure ▸ Users |
 | `--tls-status/-install/-csr/-revert/-regenerate` | Configure ▸ Web GUI (certificate) |
 | `--dns-tls-status/-install/-csr/-revert` | Configure ▸ DNS ▸ Listeners (certificate for DNS over TLS and HTTPS) |
+| `--acme-status/-set/-register/-check/-request` | Configure ▸ DNS ▸ Listeners ▸ Get the certificate automatically |
 | `--cluster-status/-token/-join/-promote/-remove/-unremove/-leave/-sync` | Cluster tab |
 | `--cluster-failover auto\|on\|off` | none: the GUI always uses Auto (on from three members); the command forces it on or off |
 | `--update-status/-history/-upload/-apply/-push` | Upgrade tab (stats at the top, upload, a paged History of every update event (`--update-history` prints them all; `--update-status` the newest 50), Nodes card: tick members, **Update this node now** / **Update N selected**) |
@@ -877,6 +879,36 @@ dnsdir --dns-tls-revert                                                      # b
 ```
 
 The order of precedence is: `dns.tls_cert_file` and `dns.tls_key_file` (shared settings in the top-level `dns` block, both or neither, re-read when the files change so a renewal needs no restart), then the installed certificate (or the one replicated from the cluster), then the GUI's certificate, which is what you get until you set one. Installing is checked like the GUI's (chain order, key match, validity, server auth, names), takes effect from the next connection with no restart, and is copied to every cluster member. Installing or reverting it never touches the GUI's certificate. The log warns daily when it expires within 30 days. There is no self-signed certificate of its own, so `--dns-tls-revert` only ever goes back to the GUI's.
+
+## Automatic certificates (ACME)
+
+AnyName can order a certificate from Let's Encrypt (or any ACME CA, RFC 8555) and renew it by itself, for the DoT/DoH certificate, the GUI's, or both. It is written with the standard library only. Nothing needs to reach your hosts from outside and none of your DNS servers needs to accept updates: the names are proved with the **dns-01** challenge through an [acme-dns](https://github.com/joohoi/acme-dns) server.
+
+How it works, once:
+
+1. Configure ▸ DNS ▸ Listeners ▸ **Get the certificate automatically**: give the names (public names; `*.example.com` works), an email address, what the certificate is for, and tick the box. Saving adds a daily task to the Scheduler (action `certificate_renew`).
+2. **Set up DNS records** registers each name's domain with the acme-dns server (default `https://auth.acme-dns.io`; put the address of your own acme-dns instance in the card's **acme-dns server** box if you prefer) and lists the CNAMEs to add, such as `_acme-challenge.dns.example.com  CNAME  <id>.auth.acme-dns.io`. A name and its wildcard (`example.com`, `*.example.com`) share one record.
+3. Add those CNAMEs at whoever hosts your DNS, once, and press **Check DNS**.
+4. **Get certificate now**. The progress shows on the page; the certificate is installed like an uploaded one and reaches every node.
+
+From then on, the Scheduler task **Renew the automatic certificate** runs daily on every node. It does something only on the primary and only when the certificate is within 30 days of expiring (Let's Encrypt certificates last 90 days, so about every 60), so it can stay on every node and a change of primary needs nothing. Before it publishes a proof it checks the CNAME and says plainly if it is missing or points elsewhere. After a failure it waits 6 hours before trying again; the Scheduler history and the page show the reason, and the installed certificate keeps serving until it expires.
+
+```
+dnsdir --acme-set --acme-names dns.example.com,*.example.com --acme-email me@example.com --acme-enable on
+dnsdir --acme-register          # lists the CNAMEs to add
+dnsdir --acme-check
+dnsdir --acme-request           # order now
+dnsdir --acme-status
+```
+
+Things to know:
+
+- The settings, the ACME account key, the acme-dns credentials and what was issued are one small file (`acme/state.json` in the state directory, mode 0600) that the primary copies to the other nodes, the way it copies the certificates. A new primary carries on from where the old one was. The key and the acme-dns password are never shown in the GUI, the API or the CLI.
+- A change made on a replica goes through the primary.
+- If a certificate is installed by hand afterwards, automatic renewal pauses until **Get certificate now** is pressed (the page says so). Certificate files named in the configuration file take precedence and make an order refuse.
+- Several clusters can use the same names. The CNAME can point at one place only, so register on the first cluster, then on each other cluster open **Another cluster uses the same names?**, press **Show the credentials** on the first and paste the text under **Use these credentials** on the others. All clusters then write to the same acme-dns name. An automatic run waits a random moment (up to 30 s) before publishing its proof, since acme-dns keeps the two newest values of a name, so two clusters renewing together both succeed.
+- Some CAs (Google Trust Services, ZeroSSL) need an External Account Binding key id and key: the card has fields for them. The account is made with an ES256 (P-256) key, and each certificate gets a fresh P-256 key.
+- Only `dns-01` through acme-dns is built in. The newer `dns-persist-01` (one standing record) is not yet offered by Let's Encrypt; it can be added when a CA you use supports it.
 
 ## Clustering
 
@@ -1129,7 +1161,7 @@ dnsdir --power cancel
 
 ## Scheduled tasks
 
-Operate ▸ **Scheduler** runs tasks on every node of the cluster, or on the nodes you pick: restart dnsdir, empty the answer cache, pause or resume the node, clear the statistics, or a **shell command** (`/bin/sh -c`, as root; anyone who can sign in to the GUI can therefore run commands on every node). The task list is part of the shared settings, so every node has it; what ran is kept per node (the last 300 runs, with the output of a command) and shown for the node picked at the top right.
+Operate ▸ **Scheduler** runs tasks on every node of the cluster, or on the nodes you pick: restart dnsdir, empty the answer cache, pause or resume the node, clear the statistics, renew the automatic certificate, or a **shell command** (`/bin/sh -c`, as root; anyone who can sign in to the GUI can therefore run commands on every node). The task list is part of the shared settings, so every node has it; what ran is kept per node (the last 300 runs, with the output of a command) and shown for the node picked at the top right.
 
 A task repeats **hourly, daily, weekly, monthly or yearly**, every N of them if you like. A monthly or yearly task can be on a day of the month (the 31st means the last day in a shorter month, `-1` the last day) or on the **1st to 4th or last** occurrence of one or more weekdays — "the 3rd Saturday of every month", or "the 2nd or 3rd Saturday or Sunday". The window is a **To** time next to **At** ("any time between 01:00 and 10:00": At 01:00, To 10:00; for an hourly task, a minute past the hour). **All times are UTC**, on every node.
 

@@ -17,55 +17,57 @@ import (
 // methods directly, so both front ends behave identically.
 func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 	var a struct {
-		ID       string     `json:"id"`
-		A        string     `json:"a"`
-		B        string     `json:"b"`
-		Note     string     `json:"note"`
-		Config   string     `json:"config"`
-		CertPEM  string     `json:"cert_pem"`
-		KeyPEM   string     `json:"key_pem"`
-		CN       string     `json:"cn"`
-		DNS      []string   `json:"dns"`
-		IPs      []string   `json:"ips"`
-		Code     string     `json:"code"`
-		Addr     string     `json:"addr"`
-		Nodes    []string   `json:"nodes"`
-		Force    bool       `json:"force"`
-		Enabled  bool       `json:"enabled"`
-		Repo     string     `json:"repo"`
-		Failover string     `json:"failover"`
-		DataB64  string     `json:"data"`
-		Limit    int        `json:"limit"`
-		Hostname string     `json:"hostname"`
-		LogLevel string     `json:"level"`
-		LogText  string     `json:"q"`
-		LogSince string     `json:"since"`
-		LogN     string     `json:"n"`
-		QFrom    string     `json:"from"`
-		QTo      string     `json:"to"`
-		QRcode   string     `json:"rcode"`
-		QClient  string     `json:"client"`
-		NetKind  string     `json:"kind"`
-		QDomain  string     `json:"domain"`
-		QName    string     `json:"name"`
-		QOld     string     `json:"old"`
-		QCMatch  string     `json:"cmatch"`
-		QGW      string     `json:"gw"` // qstats.cluster: only the nodes of this gateway (group number)
-		QDMatch  string     `json:"dmatch"`
-		Lookup   string     `json:"lookup"`
-		Paused   bool       `json:"paused"`
-		User     string     `json:"username"`
-		Password string     `json:"password"`
-		Expires  int64      `json:"expires"`
-		ReadOnly bool       `json:"read_only"`
-		Iface    string     `json:"iface"`
-		Filter   string     `json:"filter"`
-		Seconds  int        `json:"seconds"`
-		Group    int        `json:"group"`
-		Task     *SchedTask `json:"task"`
-		All      bool       `json:"all"`       // schedule.run: on every node of the task
-		Queue    bool       `json:"queue"`     // schedule.run: wait for the running job instead of refusing
-		DelaySec int        `json:"delay_sec"` // schedule.run with queue: not before this many seconds
+		ID       string                `json:"id"`
+		A        string                `json:"a"`
+		B        string                `json:"b"`
+		Note     string                `json:"note"`
+		Config   string                `json:"config"`
+		CertPEM  string                `json:"cert_pem"`
+		KeyPEM   string                `json:"key_pem"`
+		CN       string                `json:"cn"`
+		DNS      []string              `json:"dns"`
+		IPs      []string              `json:"ips"`
+		Code     string                `json:"code"`
+		Addr     string                `json:"addr"`
+		Nodes    []string              `json:"nodes"`
+		Force    bool                  `json:"force"`
+		Enabled  bool                  `json:"enabled"`
+		Repo     string                `json:"repo"`
+		Failover string                `json:"failover"`
+		DataB64  string                `json:"data"`
+		Limit    int                   `json:"limit"`
+		Hostname string                `json:"hostname"`
+		LogLevel string                `json:"level"`
+		LogText  string                `json:"q"`
+		LogSince string                `json:"since"`
+		LogN     string                `json:"n"`
+		QFrom    string                `json:"from"`
+		QTo      string                `json:"to"`
+		QRcode   string                `json:"rcode"`
+		QClient  string                `json:"client"`
+		NetKind  string                `json:"kind"`
+		QDomain  string                `json:"domain"`
+		QName    string                `json:"name"`
+		QOld     string                `json:"old"`
+		QCMatch  string                `json:"cmatch"`
+		QGW      string                `json:"gw"` // qstats.cluster: only the nodes of this gateway (group number)
+		QDMatch  string                `json:"dmatch"`
+		Lookup   string                `json:"lookup"`
+		Paused   bool                  `json:"paused"`
+		User     string                `json:"username"`
+		Password string                `json:"password"`
+		Expires  int64                 `json:"expires"`
+		ReadOnly bool                  `json:"read_only"`
+		Iface    string                `json:"iface"`
+		Filter   string                `json:"filter"`
+		Seconds  int                   `json:"seconds"`
+		Group    int                   `json:"group"`
+		Task     *SchedTask            `json:"task"`
+		ACME     *ACMESettings         `json:"acme"`
+		ACMERegs map[string]acmeDNSReg `json:"regs"`
+		All      bool                  `json:"all"`       // schedule.run: on every node of the task
+		Queue    bool                  `json:"queue"`     // schedule.run: wait for the running job instead of refusing
+		DelaySec int                   `json:"delay_sec"` // schedule.run with queue: not before this many seconds
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &a); err != nil {
@@ -135,6 +137,26 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		return map[string]any{"csr": csr}, err
 	case "dnstls.revert":
 		return m.DNSTLSRevert(actor)
+	case "acme.status":
+		return m.acme.Status(), nil
+	case "acme.set":
+		if a.ACME == nil {
+			return nil, errors.New("no settings given")
+		}
+		return m.ACMESet(*a.ACME, actor)
+	case "acme.export":
+		return m.acme.ExportRegs(), nil
+	case "acme.import":
+		if a.ACMERegs == nil {
+			return nil, errors.New("no credentials given")
+		}
+		return m.ACMEImport(a.ACMERegs, actor)
+	case "acme.register":
+		return m.ACMERegister(actor)
+	case "acme.check":
+		return m.ACMECheck(actor)
+	case "acme.request":
+		return m.ACMERequest(actor)
 
 	// cluster
 	case "cluster.status":

@@ -1,5 +1,15 @@
 # Changelog
 
+## [v548] - 2026-10-24 — Automatic certificates (ACME, Let's Encrypt)
+
+### Added
+- Configure ▸ DNS ▸ Listeners ▸ **Get the certificate automatically**: orders a certificate from Let's Encrypt (or another ACME CA) for a list of names and renews it by itself, as the DNS over TLS/HTTPS certificate, the GUI's, or both. The names are proved with dns-01 through an acme-dns server: you add one CNAME per name, once, and nothing else in your DNS ever changes; nothing has to reach your hosts from outside. Wildcards work; External Account Binding is supported for CAs that need it.
+- Renewal is a Scheduler task, **Renew the automatic certificate** (`certificate_renew`), added when the feature is turned on. It runs daily on every node but acts only on the primary and only when the certificate is within 30 days of expiring, so a change of primary needs nothing, and failures appear in the Scheduler history.
+- The settings, account key, acme-dns credentials and what was issued are copied from the primary to the other nodes with the certificates, so a new primary carries on. A change on a replica goes through the primary.
+- `--acme-status`, `--acme-set`, `--acme-register`, `--acme-check`, `--acme-request`.
+- A certificate installed by hand afterwards pauses automatic renewal until Get certificate now is pressed.
+- Several clusters can share the same CNAMEs: **Show the credentials** on one and **Use these credentials** on the others (acme-dns keeps the two newest values, and an automatic run waits a random moment, so renewals at the same time both succeed).
+
 ## [v547] - 2026-10-24 — DNS over TLS and HTTPS: a certificate of their own
 
 ### Added

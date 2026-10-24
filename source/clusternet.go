@@ -91,6 +91,7 @@ type clusterStateMsg struct {
 	Seeds       []GroupSeed   `json:"seeds"`
 	Cert        *adminCert    `json:"cert,omitempty"`
 	DNSCert     *adminCert    `json:"dns_cert,omitempty"`
+	ACME        *ACMEState    `json:"acme,omitempty"`
 	Intent      UpdateIntent  `json:"intent"`
 }
 
@@ -658,6 +659,7 @@ func (c *Cluster) handleState(rw http.ResponseWriter, r *http.Request, caller Cl
 		if cp, kp, meta, ok := c.mg.dnscerts.Managed(); ok && meta.Source != "" {
 			msg.DNSCert = &adminCert{CertPEM: string(cp), KeyPEM: string(kp)}
 		}
+		msg.ACME = c.mg.acme.Export()
 	}
 	writeJSON(rw, http.StatusOK, msg)
 }
@@ -1455,6 +1457,9 @@ func (c *Cluster) pullState(ctx context.Context, snap ClusterSnapshot) error {
 		}
 		if err := c.mg.dnscerts.ApplyCluster(dcp, dkp); err != nil {
 			warnf("cluster: could not apply the shared DNS over TLS certificate: %v", err)
+		}
+		if err := c.mg.acme.ApplyCluster(st.ACME); err != nil {
+			warnf("cluster: could not apply the automatic certificate settings: %v", err)
 		}
 	}
 	return nil

@@ -33,6 +33,7 @@ type Mgmt struct {
 	versions *VersionStore
 	certs    *CertManager
 	dnscerts *CertManager // what DoT and DoH present; the GUI's certificate when none is set
+	acme     *ACMEManager // orders and renews the certificates by itself (acmemgr.go)
 	upd      *Updater
 	cl       *Cluster
 
@@ -100,6 +101,7 @@ func NewMgmt(confPath, stateDir string, dc *DaemonConfig) (*Mgmt, error) {
 	}
 	m.certs = NewCertManager(stateDir, confPath, func() WebConfig { return *m.webPolicy.Load() })
 	m.dnscerts = NewDNSCertManager(stateDir, confPath, func() WebConfig { return *m.dnsFiles.Load() }, m.certs)
+	m.acme = newACMEManager(m, stateDir)
 	if m.upd, err = NewUpdater(stateDir); err != nil {
 		return nil, err
 	}
@@ -333,6 +335,33 @@ func (m *Mgmt) DNSTLSRevert(by string) (CertInfo, error) {
 	return m.tlsRevert(m.dnscerts, "dnscert-revert", by)
 }
 
+// ACME* are the automatic certificate calls (Configure ▸ DNS ▸ Listeners, --acme-*): the primary does the work, so on a
+// replica they are sent there and the primary's view comes back.
+func (m *Mgmt) acmeOp(op, by string, payload any) (ACMEView, error) {
+	raw, err := m.runOnPrimary(op, by, payload)
+	var v ACMEView
+	if err != nil {
+		return v, err
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return v, err
+	}
+	if m.cl != nil && m.cl.Enabled() && m.cl.Snapshot().Role != RolePrimary {
+		m.cl.syncNow()
+	}
+	return v, nil
+}
+
+func (m *Mgmt) ACMESet(s ACMESettings, by string) (ACMEView, error) {
+	return m.acmeOp("acme-set", by, s)
+}
+func (m *Mgmt) ACMERegister(by string) (ACMEView, error) { return m.acmeOp("acme-register", by, nil) }
+func (m *Mgmt) ACMEImport(regs map[string]acmeDNSReg, by string) (ACMEView, error) {
+	return m.acmeOp("acme-import", by, regs)
+}
+func (m *Mgmt) ACMECheck(by string) (ACMEView, error)   { return m.acmeOp("acme-check", by, nil) }
+func (m *Mgmt) ACMERequest(by string) (ACMEView, error) { return m.acmeOp("acme-request", by, nil) }
+
 func (m *Mgmt) tlsInstall(cm *CertManager, op, certPEM, keyPEM, by string) (CertInfo, []string, error) {
 	if m.shareCert() && m.cl.Snapshot().Role == RoleReplica {
 		// the primary validates and installs it; it comes back via sync
@@ -555,6 +584,42 @@ func (m *Mgmt) execAdminOp(op, by string, payload json.RawMessage) (json.RawMess
 			return nil, err
 		}
 		return ok(map[string]any{})
+	case "acme-set":
+		var p ACMESettings
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return nil, err
+		}
+		if err := m.acme.Set(p, by); err != nil {
+			return nil, err
+		}
+		return ok(m.acme.Status())
+	case "acme-register":
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		if err := m.acme.Register(ctx); err != nil {
+			return nil, err
+		}
+		m.acme.Check(ctx)
+		return ok(m.acme.Status())
+	case "acme-check":
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		m.acme.Check(ctx)
+		return ok(m.acme.Status())
+	case "acme-import":
+		var p map[string]acmeDNSReg
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return nil, err
+		}
+		if err := m.acme.ImportRegs(p, by); err != nil {
+			return nil, err
+		}
+		return ok(m.acme.Status())
+	case "acme-request":
+		if err := m.acme.Request(by); err != nil {
+			return nil, err
+		}
+		return ok(m.acme.Status())
 	case "dnscert-install":
 		var p adminCert
 		if err := json.Unmarshal(payload, &p); err != nil {

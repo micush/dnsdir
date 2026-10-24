@@ -36,6 +36,14 @@ func (w *WebServer) mgmtRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/dnstls/csr", w.authed(w.op("dnstls.csr", nil)))
 	mux.HandleFunc("POST /api/dnstls/csr/cancel", w.authed(w.handleDNSCSRCancel))
 	mux.HandleFunc("POST /api/dnstls/revert", w.authed(w.op("dnstls.revert", nil)))
+	// automatic certificates
+	mux.HandleFunc("GET /api/acme", w.authed(w.op("acme.status", nil)))
+	mux.HandleFunc("POST /api/acme/settings", w.authed(w.op("acme.set", nil)))
+	mux.HandleFunc("POST /api/acme/register", w.authed(w.op("acme.register", nil)))
+	mux.HandleFunc("POST /api/acme/export", w.authed(w.op("acme.export", nil)))
+	mux.HandleFunc("POST /api/acme/import", w.authed(w.op("acme.import", nil)))
+	mux.HandleFunc("POST /api/acme/check", w.authed(w.op("acme.check", nil)))
+	mux.HandleFunc("POST /api/acme/request", w.authed(w.op("acme.request", nil)))
 	// cluster
 	mux.HandleFunc("GET /api/cluster", w.authed(w.op("cluster.status", nil)))
 	mux.HandleFunc("POST /api/cluster/token", w.authed(w.op("cluster.token", nil)))

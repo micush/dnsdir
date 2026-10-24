@@ -4016,13 +4016,17 @@
   // One button: save, get the names from acme-dns, and order as soon as the CNAMEs are in DNS (the primary keeps looking).
   VIEWS.acme = (() => {
     const LE = "https://acme-v02.api.letsencrypt.org/directory";
-    let status, body, timer, boxEl;
+    let status, body, timer, boxEl, advOpen = false, advCreds = "", lastJSON = "";
     const note = (kind, ...msg) => clear(status).append(h("div", { class: "notice " + kind, role: kind === "bad" ? "alert" : "status" }, ...msg));
     const call = async (path, payload) => { const v = (await api("POST", "/api/acme/" + path, payload || {})).data; draw(v); return v; };
 
     function draw(v) {
       clearTimeout(timer);
       if (!boxEl || !boxEl.isConnected) return;
+      // a poll that brings nothing new leaves the page alone (what you are typing, and an open Advanced, stay)
+      const js = JSON.stringify(v);
+      if (js === lastJSON && body.children.length) { if (v.running || v.waiting) timer = setTimeout(poll, 3000); return; }
+      lastJSON = js;
       const s = v.settings;
       const email = h("input", { type: "text", value: s.email || "", autocomplete: "off", placeholder: "you@example.com", "aria-label": "Email address" });
       const names = h("textarea", { rows: 3, spellcheck: "false", placeholder: "dns.example.com\n*.example.com", "aria-label": "Certificate names" });
@@ -4036,7 +4040,8 @@
       const dnsServer = h("input", { type: "text", value: s.dns_server || "", spellcheck: "false", autocomplete: "off", "aria-label": "acme-dns server" });
       const kid = h("input", { type: "text", value: s.eab_kid || "", autocomplete: "off", spellcheck: "false", "aria-label": "Account key id" });
       const hkey = h("input", { type: "password", value: "", autocomplete: "off", placeholder: v.eab_key_set ? "(set: leave empty to keep it)" : "", "aria-label": "Account key" });
-      const credsBox = h("textarea", { rows: 6, spellcheck: "false", class: "pem", "aria-label": "acme-dns credentials", autocomplete: "off" });
+      const credsBox = h("textarea", { rows: 6, spellcheck: "false", class: "pem", "aria-label": "acme-dns credentials", autocomplete: "off", oninput: () => { advCreds = credsBox.value; } });
+      credsBox.value = advCreds;
       const collect = () => ({ enabled: true, directory: caUrl.value.trim() || LE, email: email.value.trim(), names: names.value.split("\n").map((x) => x.trim()).filter(Boolean), target: target.value, dns_server: dnsServer.value.trim(), eab_kid: kid.value.trim(), eab_key: hkey.value.trim() });
       const busy = (btn, fn) => async () => { btn.disabled = true; try { await fn(); } catch (e) { if (e.message !== "unauthenticated") note("bad", e.message); } finally { btn.disabled = false; } };
       const mk = (label, cls, fn) => { const b = h("button", { class: "btn " + cls, type: "button" }, label); b.addEventListener("click", busy(b, fn)); return b; };
@@ -4076,7 +4081,7 @@
           ]),
           (v.progress && v.progress.length) ? h("pre", { class: "acme-log mono" }, v.progress.join("\n")) : null) : null,
         s.enabled && !v.task_exists ? h("div", { class: "notice bad" }, "No renewal task: add a daily \"Renew the automatic certificate\" task on the Scheduler page.") : null,
-        h("details", { class: "fold" }, h("summary", {}, "Advanced"),
+        h("details", { class: "fold", open: advOpen, ontoggle: (ev) => { advOpen = ev.target.open; } }, h("summary", {}, "Advanced"),
           h("div", { class: "grid2" },
             h("label", { class: "f" }, "Another ACME CA, or the Let's Encrypt test CA (address of its directory)", caUrl),
             h("label", { class: "f" }, "acme-dns server", dnsServer)),
@@ -4087,8 +4092,9 @@
           credsBox, h("div", { class: "toolbar" },
             mk("Show the credentials", "", async () => { credsBox.value = JSON.stringify((await api("POST", "/api/acme/export", {})).data, null, 2); }),
             mk("Use these credentials", "", async () => { let regs; try { regs = JSON.parse(credsBox.value); } catch (_) { throw new Error("that is not the text Show the credentials gave"); } await call("import", { regs }); note("ok", "Credentials taken."); })))].filter(Boolean));
-      if (running || waiting) timer = setTimeout(() => api("GET", "/api/acme").then((r) => draw(r.data)).catch(() => {}), 3000);
+      if (running || waiting) timer = setTimeout(poll, 3000);
     }
+    const poll = () => api("GET", "/api/acme").then((r) => draw(r.data)).catch(() => {});
     return {
       mount(main) {
         boxEl = main;

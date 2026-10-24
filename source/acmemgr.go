@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -307,7 +308,7 @@ func (m *ACMEManager) dueLocked(now time.Time) (bool, string) {
 	if is == nil {
 		return true, "no certificate has been ordered yet"
 	}
-	if strings.Join(is.Names, ",") != strings.Join(s.Names, ",") {
+	if !sameNameSet(is.Names, s.Names) {
 		return true, "the names changed"
 	}
 	if is.Directory != s.Directory {
@@ -852,4 +853,12 @@ func (m *ACMEManager) ApplyCluster(st *ACMEState) error {
 	m.st = *st
 	m.fill()
 	return m.saveLocked()
+}
+
+// sameNameSet says whether two name lists hold the same names, whatever their order.
+func sameNameSet(a, b []string) bool {
+	x, y := append([]string(nil), a...), append([]string(nil), b...)
+	sort.Strings(x)
+	sort.Strings(y)
+	return strings.Join(x, ",") == strings.Join(y, ",")
 }

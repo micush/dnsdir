@@ -647,3 +647,12 @@ func TestACMEClientPrefersIPv4(t *testing.T) {
 	}
 	resp.Body.Close()
 }
+
+func TestSameNameSetIgnoresOrder(t *testing.T) {
+	if !sameNameSet([]string{"b.example.com", "a.example.com"}, []string{"a.example.com", "b.example.com"}) {
+		t.Fatal("the same names in another order are the same set")
+	}
+	if sameNameSet([]string{"a.example.com"}, []string{"a.example.com", "b.example.com"}) {
+		t.Fatal("different names are not the same set")
+	}
+}

@@ -1,5 +1,11 @@
 # Changelog
 
+## [v555] - 2026-10-24 — The certificate card keeps Advanced open
+
+### Fixed
+- While a certificate was being ordered or waited for, the card redrew itself every 3 seconds and closed **Advanced** (and dropped what was typed in it). A refresh that brings nothing new now leaves the page alone, and an open Advanced stays open when it does redraw.
+- The names an issued certificate was made for are compared with the settings whatever their order, so the same names in another order no longer count as "the names changed".
+
 ## [v554] - 2026-10-24 — DNS over TLS and HTTPS servers can be added in the GUI
 
 ### Fixed

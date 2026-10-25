@@ -1,5 +1,10 @@
 # Changelog
 
+## [v561] - 2026-10-24 — More field descriptions moved to the help
+
+### Changed
+- The grey description lines under Certificate file, Failure cache, Registration key name, Registration key and Registered record TTL (Configure ▸ DNS) are gone from the form; the help already has each (the key name's help now gives the `dnsdir-key` example).
+
 ## [v560] - 2026-10-24 — Field descriptions live in the help
 
 ### Changed

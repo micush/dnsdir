@@ -2296,7 +2296,7 @@
     { shared: true, k: "listen_port", l: "DNS port (UDP and TCP)", t: "int", min: 1, max: 65535 },
     { shared: true, k: "dot_port", l: "DNS over TLS port", t: "int", min: 0, max: 65535 },
     { shared: true, k: "doh_port", l: "DNS over HTTPS port", t: "int", min: 0, max: 65535 },
-    { shared: true, k: "tls_cert_file", l: "Certificate file (optional)", t: "text", hint: "PEM file on every node, read again when it changes. Overrides a certificate uploaded below. Needs the key file too." },
+    { shared: true, k: "tls_cert_file", l: "Certificate file (optional)", t: "text" },
     { shared: true, k: "tls_key_file", l: "Key file (optional)", t: "text" },
     { shared: true, k: "forward_updates", l: "Forward dynamic DNS updates to the zone's primary server", t: "bool" },
     { section: "Sort List" },
@@ -2329,15 +2329,15 @@
     { shared: true, k: "cache", l: "Answer repeated queries from a cache", t: "bool" },
     { shared: true, k: "cache_entries", l: "Most answers kept", t: "int", min: 100, max: 1000000000 },
     { shared: true, k: "cache_max_ttl", l: "Cache TTL (s)", t: "int", min: 1, max: 604800 },
-    { shared: true, k: "failure_cache_seconds", l: "Failure cache (s)", t: "int", min: 0, max: 300, hint: "how long a failure (SERVFAIL, REFUSED, or no server answering) is remembered, so the same failing name is not sent upstream again and again; 0 = off, at most 300 (RFC 9520)" },
+    { shared: true, k: "failure_cache_seconds", l: "Failure cache (s)", t: "int", min: 0, max: 300 },
     { section: "Timing" },
     { shared: true, k: "probe_interval_ms", l: "Probe interval (ms)", t: "int", min: 1 },
     { shared: true, k: "probe_timeout_ms", l: "Probe timeout (ms)", t: "int", min: 1 },
     { shared: true, k: "query_timeout_ms", l: "Forward timeout (ms)", t: "int", min: 1 },
     { section: "Client names", note: "Top Clients ▸ right-click ▸ Name… sends a dynamic update (RFC 2136) for the name and its reverse record to the primary server of the zone." },
-    { shared: true, k: "register_key_name", l: "Registration key name", t: "text", hint: "optional TSIG key name, e.g. dnsdir-key; empty sends the update unsigned" },
-    { shared: true, k: "register_key", l: "Registration key (base64)", t: "text", hint: "the key's secret as base64 (HMAC-SHA256)" },
-    { shared: true, k: "register_ttl", l: "Registered record TTL (s)", t: "int", min: 0, max: 604800, hint: "0 = 300" },
+    { shared: true, k: "register_key_name", l: "Registration key name", t: "text" },
+    { shared: true, k: "register_key", l: "Registration key (base64)", t: "text" },
+    { shared: true, k: "register_ttl", l: "Registered record TTL (s)", t: "int", min: 0, max: 604800 },
   ];
   // Configure ▸ Users ▸ SSO: a tab for the settings every provider shares (the console's address, who may sign in) and one for each provider
   const SSO_TABS = [

@@ -1,5 +1,10 @@
 # Changelog
 
+## [v568] - 2026-10-25 — Limit a domain from Statistics
+
+### Added
+- Statistics ▸ Top Domains ▸ right-click a domain ▸ **Limit…** sets or removes the per-domain limit of that exact name, as Top Clients does for a client.
+
 ## [v567] - 2026-10-25 — Per-domain rate limits
 
 ### Added

@@ -4599,18 +4599,18 @@
       try { await navigator.clipboard.writeText(text); } catch (_) { /* no permission: nothing copied */ }
     }
     // Limit…: a rate of its own for one client (Settings ▸ client_limits, "ADDRESS RATE"); 0 removes it
-    async function setClientLimit(addr, rate) {
+    async function setClientLimit(addr, rate, key = "client_limits") {
       try {
         const cfg = (await api("GET", "/api/config")).config;
         cfg.dns = cfg.dns || {};
-        const list = (cfg.dns.client_limits || []).filter((x) => x.trim().split(/\s+/)[0] !== addr);
+        const list = (cfg.dns[key] || []).filter((x) => x.trim().split(/\s+/)[0] !== addr);
         if (rate > 0) list.push(addr + " " + rate);
-        if (list.length) cfg.dns.client_limits = list; else delete cfg.dns.client_limits;
-        await api("PUT", "/api/config", { config: cfg, note: "Client limit from Statistics: " + addr + (rate > 0 ? " " + rate + " queries/s" : " removed") });
+        if (list.length) cfg.dns[key] = list; else delete cfg.dns[key];
+        await api("PUT", "/api/config", { config: cfg, note: (key === "domain_limits" ? "Domain" : "Client") + " limit from Statistics: " + addr + (rate > 0 ? " " + rate + " queries/s" : " removed") });
         await load();
       } catch (e) { if (e.message !== "unauthenticated") say(status, "bad", "Limit not saved: " + e.message); }
     }
-    function askLimit(addr, current) {
+    function askLimit(addr, current, key = "client_limits") {
       const input = h("input", { type: "text", inputmode: "numeric", autocomplete: "off", spellcheck: "false", value: current ? String(current) : "", placeholder: "queries per second", "aria-label": "Queries per second" });
       const err = h("div", { "aria-live": "polite" });
       const d = h("dialog", { class: "cv-dialog", "aria-label": "Limit " + addr });
@@ -4621,11 +4621,11 @@
           ev.preventDefault();
           const v = input.value.trim();
           if (!/^\d+$/.test(v) || Number(v) < 1 || Number(v) > 10000000) { errorBox(err, "Write a number of queries per second, 1 to 10000000."); return; }
-          close(); setClientLimit(addr, Number(v));
+          close(); setClientLimit(addr, Number(v), key);
         } },
         h("label", { class: "f wide" }, "Queries per second", input), err,
         h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "submit" }, "Save"),
-          current ? h("button", { class: "btn", type: "button", onclick: () => { close(); setClientLimit(addr, 0); } }, "Remove limit") : null,
+          current ? h("button", { class: "btn", type: "button", onclick: () => { close(); setClientLimit(addr, 0, key); } }, "Remove limit") : null,
           h("button", { class: "btn", type: "button", onclick: close }, "Cancel"))));
       root.append(d);
       d.showModal();
@@ -4841,15 +4841,19 @@
     }
     async function domainMenu(e, name) {
       e.preventDefault(); e.stopPropagation();
-      let has = false, rewritten = false;
+      let has = false, rewritten = false, limit = 0;
       try {
-        const list = (((await api("GET", "/api/config")).config.dns || {}).policy || []);
+        const dns = (await api("GET", "/api/config")).config.dns || {};
+        const own = (dns.domain_limits || []).map((x) => x.trim().split(/\s+/)).find((f) => f[0] === name.toLowerCase());
+        limit = own ? Number(own[1]) || 0 : 0;
+        const list = dns.policy || [];
         has = list.some((r) => isNameRow(r, name)); rewritten = list.some((r) => isRewriteRow(r, name));
       } catch (_) { /* offer Block and Rewrite */ }
       rowMenu([["Whois", () => whoisPopup(name)], ["Lookup", () => lookupPopup(name)], "-",
         ["Ping", () => netTool("ping", name)], ["Traceroute", () => netTool("trace", name)], "-",
         ["Copy", () => copyAddr(name)], "-",
         ["Flush", () => flushPopup(name)],
+        ["Limit…" + (limit ? " (" + limit + "/s)" : ""), () => askLimit(name.toLowerCase(), limit, "domain_limits")],
         ...(rewritten ? [["Remove rewrite", () => unblockName(name, true)]]
           : [["Rewrite…", () => askRewrite(name)], has ? ["Unblock", () => unblockName(name)] : ["Block", () => addPolicyRow(name, "nodata")]])])(e);
     }

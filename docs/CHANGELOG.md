@@ -1,5 +1,20 @@
 # Changelog
 
+## [v565] - 2026-10-25 — Label case
+
+### Changed
+- **Local listeners**, in the case of the other labels.
+
+## [v564] - 2026-10-25 — Shorter name
+
+### Changed
+- The tick box for answering on the node's own addresses is called **Local listeners**; what it does is in the help.
+
+## [v563] - 2026-10-25 — Answer on the node's own addresses
+
+### Added
+- **Also answer on this node's own addresses** (Configure ▸ DNS ▸ Listeners; `listen_local` in the `dns` block; shared, off by default). Every node then answers DNS, DNS over TLS and DNS over HTTPS (on the configured ports) on the addresses of its own network interfaces as well as on the shared and anycast addresses, whether or not it holds the shared address, so one particular node can be asked. Loopback, link-local and container-bridge addresses and a gateway's own addresses are left out; changes in the node's addresses are picked up within ten seconds, and the addresses show in the DNS page's listener list as "this node …".
+
 ## [v562] - 2026-10-24 — Gateway form: the VIPs on their own row
 
 ### Changed

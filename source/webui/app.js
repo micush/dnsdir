@@ -2299,6 +2299,7 @@
     { shared: true, k: "doh_port", l: "DNS over HTTPS port", t: "int", min: 0, max: 65535 },
     { shared: true, k: "tls_cert_file", l: "Certificate file (optional)", t: "text" },
     { shared: true, k: "tls_key_file", l: "Key file (optional)", t: "text" },
+    { shared: true, k: "listen_local", l: "Local listeners", t: "bool" },
     { shared: true, k: "forward_updates", l: "Forward dynamic DNS updates to the zone's primary server", t: "bool" },
     { section: "Sort List" },
     { shared: true, k: "sortlist_on", l: "Sort list enabled", t: "bool" },

@@ -533,6 +533,9 @@ type DNSConfig struct {
 	// certificate is the DNS one (TLSCertFile, or installed under Configure ▸ DNS ▸ Listeners), or the web GUI's
 	// when none is set.
 	DoTPort int `json:"dot_port,omitempty"`
+	// ListenLocal also answers (on the DNS, DoT and DoH ports) on the addresses of this node's own network interfaces,
+	// not only on the shared and anycast addresses, so one particular node can be asked.  Off by default.
+	ListenLocal bool `json:"listen_local,omitempty"`
 	// DoHPort serves DNS over HTTPS (RFC 8484) to clients on the VIP on this TCP port, at /dns-query; 0 (the
 	// default) is off. It uses the same certificate as DoT.
 	DoHPort int `json:"doh_port,omitempty"`
@@ -1593,8 +1596,9 @@ func keepQueries(l []string, valid map[string]bool) []string {
 
 // live is the configuration the probe pool runs with: paused servers left out.
 func (d DNSConfig) live() DNSConfig {
-	d.Schedule = nil    // the scheduler's tasks are not the pool's: a change must not restart it
-	d.ServerNames = nil // labels only: a rename must not restart the pool
+	d.ListenLocal = false // read by the node's own listeners (locallisten.go), not by the pool: a change must not restart it
+	d.Schedule = nil      // the scheduler's tasks are not the pool's: a change must not restart it
+	d.ServerNames = nil   // labels only: a rename must not restart the pool
 	if len(d.PausedServers) != 0 || len(d.PausedServersHere) != 0 {
 		var up []string
 		for _, s := range d.Servers {

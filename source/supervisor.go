@@ -53,6 +53,9 @@ type Supervisor struct {
 
 	// Anycast address sets of the running groups (guarded by mu).
 	anycast map[int]*anycastSet
+
+	// The node's own addresses, when dns.listen_local is on (locallisten.go).
+	local localListeners
 }
 
 type offnetWait struct {
@@ -191,9 +194,15 @@ func (s *Supervisor) StartAll() {
 		s.startGroupWhenReadyLocked(gc)
 	}
 	s.mu.Unlock()
+	s.local.mu.Lock()
+	s.local.stopped = false
+	s.local.mu.Unlock()
+	s.reconcileLocal()
+	go s.localLoop(s.ctx)
 }
 
 func (s *Supervisor) StopAll() {
+	s.stopLocal()
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
 	s.mu.Lock()
@@ -673,6 +682,7 @@ func (s *Supervisor) Reload(nu *DaemonConfig) {
 	}
 	s.dc = nu
 	s.mu.Unlock()
+	s.reconcileLocal()
 
 	// Stop outside the lock; Stop tears down interfaces and can be slow.  Gateways that restart are stopped with the
 	// removed ones, all at once, and started again when every stop is done.

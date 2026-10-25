@@ -244,6 +244,7 @@ func (s *StatusServer) dnsStatus() map[string]any {
 				strings.SplitN(vip, "/", 2)[0]+":"+itoa(s.sup.dnsFor(r.GroupID).ListenPort))
 		}
 	}
+	listeners = append(listeners, s.sup.localListenerNames()...)
 	var total, answered, servfail uint64
 	var list []map[string]any
 	for _, pi := range pools {

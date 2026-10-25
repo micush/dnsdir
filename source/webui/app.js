@@ -2264,6 +2264,7 @@
     { shared: true, k: "name", l: "Name", t: "text", hint: "optional label shown instead of the address" },
     { shared: true, k: "group_id", l: "Group ID", t: "int", min: 1, max: 255 },
     { k: "interface", l: "Interface", t: "text" },
+    { br: true },
     { shared: true, k: "vip4", l: "IPv4 VIP/prefix", t: "text", hint: "e.g. 10.0.0.1/24 — empty to disable" },
     { shared: true, k: "vip6", l: "IPv6 VIP/prefix", t: "text", hint: "e.g. 2001:db8::1/64 — empty to disable" },
     { shared: true, k: "more_vip4", l: "More IPv4 addresses", t: "rows", rows: "morevip4", wide: true, hint: "Same subnet as the VIP, one per row, no prefix length." },
@@ -3292,6 +3293,7 @@
           h("div", { class: "body" }, f.note ? h("p", { class: "hint" }, f.note) : null, grid)));
         continue;
       }
+      if (f.br) { grid.append(h("div", { class: "fbreak" })); continue; }   // the next field starts a new row
       const v = obj[f.k];
       let input, get;
       if (f.t === "bool") {

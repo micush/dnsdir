@@ -194,6 +194,7 @@ textarea.json { min-height: 28rem; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: .85rem 1rem; align-items: start; }
 .grid .wide { grid-column: 1 / -1; }
+.grid .fbreak { grid-column: 1 / -1; height: 0; margin-top: -.85rem; }
 .grid .fsec { grid-column: 1 / -1; margin-top: .6rem; padding-bottom: .3rem; border-bottom: 1px solid var(--border); }
 .grid .fsec:first-child { margin-top: 0; }
 .grid .fsec h3 { margin: 0; font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }

@@ -1,5 +1,10 @@
 # Changelog
 
+## [v562] - 2026-10-24 — Gateway form: the VIPs on their own row
+
+### Changed
+- Configure ▸ Gateways: Name, Group ID and Interface are one row, and the IPv4 and IPv6 VIP/prefix are the next row, instead of the VIPs wrapping on from the first row.
+
 ## [v561] - 2026-10-24 — More field descriptions moved to the help
 
 ### Changed

@@ -1,5 +1,15 @@
 # Changelog
 
+## [v566] - 2026-10-25 — IPv4 first for everything the daemon connects out to
+
+### Fixed
+- Block list downloads failed with "TLS handshake timeout" on a host whose IPv6 route is broken, as the certificate requests did before v550. Everything the daemon connects out to by name now tries IPv4 first and uses IPv6 only when the target is an IPv6 address or has no IPv4 one: upstream DNS servers (plain, `tls://` and `https://`), block lists, releases from GitHub, the certificate authority and acme-dns, LDAP, syslog, whois, single sign-on and cluster peers given by name.
+
+## [v566] - 2026-10-25 — Block list and release downloads try IPv4 first
+
+### Fixed
+- Block list downloads (and fetching a release from GitHub) failed with "TLS handshake timeout" on a host whose IPv6 route is broken, as the certificate requests did before v550. They now dial IPv4 first and use IPv6 only when there is no IPv4 way.
+
 ## [v565] - 2026-10-25 — Label case
 
 ### Changed

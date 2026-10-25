@@ -194,7 +194,7 @@ func exchangeOptID(ctx context.Context, addr string, query []byte, tcp bool, tim
 		// name (or IP), then the same length-prefixed messages as DNS over TCP.
 		tcp = true
 		host, _, _ := net.SplitHostPort(hp)
-		tc, derr := d.DialContext(ctx, "tcp", hp)
+		tc, derr := dialPrefer4(ctx, &d, "tcp", hp)
 		if derr != nil {
 			return nil, 0, derr
 		}
@@ -205,7 +205,7 @@ func exchangeOptID(ctx context.Context, addr string, query []byte, tcp bool, tim
 			return nil, 0, herr
 		}
 		conn = tl
-	} else if conn, err = d.DialContext(ctx, network, addr); err != nil {
+	} else if conn, err = dialPrefer4(ctx, &d, network, addr); err != nil {
 		return nil, 0, err
 	}
 	defer conn.Close()

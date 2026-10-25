@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -298,7 +299,7 @@ func (s *syslogSink) dial(c SyslogConfig) (net.Conn, error) {
 	d := &net.Dialer{Timeout: syslogDialWait}
 	switch c.protocol() {
 	case "udp":
-		return d.Dial("udp", addr)
+		return dialPrefer4(context.Background(), d, "udp", addr)
 	case "tls":
 		tc := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12, InsecureSkipVerify: c.Insecure}
 		if f := strings.TrimSpace(c.CAFile); f != "" {
@@ -312,9 +313,20 @@ func (s *syslogSink) dial(c SyslogConfig) (net.Conn, error) {
 			}
 			tc.RootCAs = pool
 		}
-		return tls.DialWithDialer(d, "tcp", addr, tc)
+		raw, err := dialPrefer4(context.Background(), d, "tcp", addr)
+		if err != nil {
+			return nil, err
+		}
+		tl := tls.Client(raw, tc)
+		raw.SetDeadline(time.Now().Add(syslogDialWait))
+		if err := tl.Handshake(); err != nil {
+			raw.Close()
+			return nil, err
+		}
+		raw.SetDeadline(time.Time{})
+		return tl, nil
 	}
-	return d.Dial("tcp", addr)
+	return dialPrefer4(context.Background(), d, "tcp", addr)
 }
 
 func (s *syslogSink) note(err error, sent bool) {

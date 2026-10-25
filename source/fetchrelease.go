@@ -39,7 +39,7 @@ func ghGet(ctx context.Context, url string, limit int64) ([]byte, error) {
 	}
 	req.Header.Set("User-Agent", "dnsdir/"+version())
 	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := (&http.Client{Timeout: fetchTimeout}).Do(req)
+	resp, err := ipv4FirstClient(fetchTimeout).Do(req)
 	if err != nil {
 		return nil, err
 	}

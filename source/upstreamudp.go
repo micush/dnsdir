@@ -176,7 +176,7 @@ func (u *udpUpstreams) closeAll() {
 
 func dialUDP(ctx context.Context, addr string) (*net.UDPConn, error) {
 	var d net.Dialer
-	c, err := d.DialContext(ctx, "udp", addr)
+	c, err := dialPrefer4(ctx, &d, "udp", addr)
 	if err != nil {
 		return nil, err
 	}

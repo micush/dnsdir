@@ -185,7 +185,7 @@ func whoisRaw(server, query string) (string, error) {
 
 // whoisRawAt asks one address of a whois server.
 func whoisRawAt(server, addr, query string) (string, error) {
-	c, err := net.DialTimeout("tcp", addr, whoisTimeout)
+	c, err := dialPrefer4(context.Background(), &net.Dialer{Timeout: whoisTimeout}, "tcp", addr)
 	if err != nil {
 		return "", &whoisNetError{fmt.Errorf("whois server %s is not reachable from this node (%v)", server, shortErr(err))}
 	}

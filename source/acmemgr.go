@@ -116,23 +116,7 @@ func newACMEManager(mg *Mgmt, stateDir string) *ACMEManager {
 
 // acmeHTTPClient reaches the CA and the acme-dns server over IPv4 when it can and over IPv6 only when there is no IPv4
 // way (a host whose IPv6 route is broken otherwise stalls until the handshake times out).
-func acmeHTTPClient() *http.Client {
-	d := &net.Dialer{Timeout: 10 * time.Second}
-	return &http.Client{Timeout: 45 * time.Second, Transport: &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			if network == "tcp" {
-				if c, err := d.DialContext(ctx, "tcp4", addr); err == nil {
-					return c, nil
-				}
-			}
-			return d.DialContext(ctx, network, addr)
-		},
-		TLSHandshakeTimeout: 15 * time.Second,
-		MaxIdleConns:        4,
-		IdleConnTimeout:     30 * time.Second,
-	}}
-}
+func acmeHTTPClient() *http.Client { return ipv4FirstClient(45 * time.Second) }
 
 func (m *ACMEManager) fill() {
 	s := &m.st.Settings

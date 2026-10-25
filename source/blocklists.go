@@ -336,7 +336,7 @@ func NewBlockManager(dir, nodeKey string) *BlockManager {
 	m := &BlockManager{
 		dir: dir, jitter: h.Sum32(), meta: map[string]*blMeta{}, hitsOf: map[string]*atomic.Int64{}, force: map[string]bool{},
 		kick: make(chan struct{}, 1), stop: make(chan struct{}),
-		client: &http.Client{Timeout: 15 * time.Minute},
+		client: ipv4FirstClient(15 * time.Minute),
 	}
 	m.loadMeta()
 	return m

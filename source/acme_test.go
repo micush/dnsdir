@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -654,5 +655,55 @@ func TestSameNameSetIgnoresOrder(t *testing.T) {
 	}
 	if sameNameSet([]string{"a.example.com"}, []string{"a.example.com", "b.example.com"}) {
 		t.Fatal("different names are not the same set")
+	}
+}
+
+func TestIPv4FirstOrdersAddresses(t *testing.T) {
+	got := ipv4First([]string{"2001:db8::1", "192.0.2.1", "2001:db8::2", "192.0.2.2"})
+	want := []string{"192.0.2.1", "192.0.2.2", "2001:db8::1", "2001:db8::2"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}
+
+// dialPrefer4 uses IPv4 for a name that has both, and still reaches an IPv6-only target.
+func TestDialPrefer4(t *testing.T) {
+	l4, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer l4.Close()
+	go func() {
+		for {
+			c, err := l4.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	c, err := dialPrefer4(context.Background(), &net.Dialer{}, "tcp", l4.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	if l6, err := net.Listen("tcp6", "[::1]:0"); err == nil {
+		defer l6.Close()
+		go func() {
+			for {
+				c, err := l6.Accept()
+				if err != nil {
+					return
+				}
+				c.Close()
+			}
+		}()
+		c, err := dialPrefer4(context.Background(), &net.Dialer{}, "tcp", l6.Addr().String())
+		if err != nil {
+			t.Fatalf("an IPv6 target must still work: %v", err)
+		}
+		c.Close()
 	}
 }

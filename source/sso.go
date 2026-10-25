@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -11,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -196,7 +198,7 @@ var (
 	ssoGoogleIssuer = "https://accounts.google.com"
 	ssoEntraBase    = "https://login.microsoftonline.com"
 	ssoInsecure     = false // tests: allow http:// provider addresses
-	ssoHTTP         = &http.Client{Timeout: 15 * time.Second}
+	ssoHTTP         = ipv4FirstClient(15 * time.Second)
 )
 
 type ssoProvider struct {
@@ -294,6 +296,9 @@ func (p *ssoProvider) client() *http.Client {
 	if ssoInsecureClient.c == nil {
 		ssoInsecureClient.c = &http.Client{Timeout: ssoHTTP.Timeout, Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}, // Do not check the provider's certificate is on
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return dialPrefer4(ctx, &net.Dialer{Timeout: 10 * time.Second}, network, addr)
+			},
 		}}
 	}
 	return ssoInsecureClient.c

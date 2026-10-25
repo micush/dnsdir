@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -335,7 +336,7 @@ func ldapDial(server string, skip bool) (*ldapConn, error) {
 		return nil, err
 	}
 	d := net.Dialer{Timeout: 8 * time.Second}
-	raw, err := d.Dial("tcp", net.JoinHostPort(host, port))
+	raw, err := dialPrefer4(context.Background(), &d, "tcp", net.JoinHostPort(host, port))
 	if err != nil {
 		return nil, err
 	}

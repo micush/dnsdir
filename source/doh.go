@@ -66,7 +66,9 @@ func dohExchange(ctx context.Context, addr string, query []byte, timeout time.Du
 		DisableKeepAlives: true,
 		ForceAttemptHTTP2: true,
 		Proxy:             nil, // never through a proxy from the environment
-		DialContext:       (&net.Dialer{}).DialContext,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialPrefer4(ctx, &net.Dialer{}, network, addr)
+		},
 	}
 	defer tr.CloseIdleConnections()
 	// RFC 8484 asks for ID 0 on the wire; the caller's ID is put back on the answer

@@ -169,6 +169,11 @@ func (f *DNSFrontend) Listening() bool {
 // resolve forwards one query; on failure it answers SERVFAIL so clients fail
 // fast instead of timing out.
 func (f *DNSFrontend) resolve(query []byte, tcp bool, client netip.Addr) []byte {
+	return f.resolveVia(query, tcp, viaPlain, client)
+}
+
+// resolveVia is resolve for a query that may have come over DNS over TLS or HTTPS: the statistics count those apart.
+func (f *DNSFrontend) resolveVia(query []byte, tcp bool, via uint8, client netip.Addr) []byte {
 	// the node's own self-check (selfcheck.go) is not a client: it is not admitted, counted or timed
 	probe := client == f.addr && isSelfCheckQuery(query)
 	// who may ask, and how often, comes first: before the cache and before dynamic updates are relayed
@@ -201,7 +206,7 @@ func (f *DNSFrontend) resolve(query []byte, tcp bool, client netip.Addr) []byte 
 			if h, hok := parseHeader(resp); hok {
 				rc = h.rcode
 			}
-			qstats.Record(client, name, qt, tcp, rc)
+			qstats.RecordVia(client, name, qt, tcp, via, rc)
 			if rc == rcodeServFail || rc == rcodeRefused {
 				f.gw.addFail()
 			} else {
@@ -602,6 +607,10 @@ func (f *DNSFrontend) handleTCP(c net.Conn) {
 	defer recoverPanic("a TCP query from " + c.RemoteAddr().String())
 	stop := context.AfterFunc(f.ctx, func() { c.Close() })
 	defer stop()
+	via := viaPlain
+	if _, secure := c.(*tls.Conn); secure {
+		via = viaDoT
+	}
 	for {
 		c.SetReadDeadline(time.Now().Add(tcpIdle))
 		var lb [2]byte
@@ -616,7 +625,7 @@ func (f *DNSFrontend) handleTCP(c net.Conn) {
 		if err != nil {
 			return
 		}
-		resp := f.resolve(q, true, addrOf(c.RemoteAddr()))
+		resp := f.resolveVia(q, true, via, addrOf(c.RemoteAddr()))
 		if qbp != nil {
 			queryBufs.Put(qbp) // nothing keeps the query once resolve has returned
 		}
@@ -750,7 +759,7 @@ func (f *DNSFrontend) serveDoH(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "shutting down", http.StatusServiceUnavailable)
 		return
 	}
-	resp := f.resolve(q, true, httpClientAddr(r))
+	resp := f.resolveVia(q, true, viaDoH, httpClientAddr(r))
 	if resp == nil {
 		http.Error(w, "no answer", http.StatusBadGateway)
 		return

@@ -1,5 +1,10 @@
 # Changelog
 
+## [v556] - 2026-10-24 — DNS over TLS and HTTPS in the statistics
+
+### Added
+- The Transport chart on the Statistics page lists **DoT · IPv4/IPv6** and **DoH · IPv4/IPv6** apart from plain TCP and UDP. Queries that came over DNS over TLS or HTTPS used to be counted as TCP; from this version they are not, and are not in the plain TCP total. Counts saved before the upgrade stay as they were (older DoT and DoH queries remain in TCP), and the clustered statistics add the new rows across nodes.
+
 ## [v555] - 2026-10-24 — The certificate card keeps Advanced open
 
 ### Fixed

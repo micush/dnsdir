@@ -4304,7 +4304,7 @@
     const TYPE_CLS = { A: "t1", AAAA: "t2", HTTPS: "t3", PTR: "t4", SRV: "t5", TXT: "t6", SOA: "t7", MX: "t8" };
     // UDP over IPv4 blue, over IPv6 purple; TCP over IPv4 orange, over IPv6 pink.  Plain UDP / TCP (counted before the split
     // existed, or by a node on an older version) are the muted blue-grey and tan.
-    const PROTO_CLS = { "UDP · IPv4": "t1", "UDP · IPv6": "t7", "TCP · IPv4": "t2", "TCP · IPv6": "t5", UDP: "t9", TCP: "t10" };
+    const PROTO_CLS = { "UDP · IPv4": "t1", "UDP · IPv6": "t7", "TCP · IPv4": "t2", "TCP · IPv6": "t5", "DoT · IPv4": "t3", "DoT · IPv6": "t6", "DoH · IPv4": "t4", "DoH · IPv6": "t8", UDP: "t9", TCP: "t10" };
     const RANGES = [["now", "Now"], ["1h", "Last Hour"], ["1d", "Last Day"], ["7d", "Last Week"], ["30d", "Last Month"], ["custom", "Custom"]];
     const REFRESH_MS = 10000;
     const n0 = (n) => Number(n || 0).toLocaleString();

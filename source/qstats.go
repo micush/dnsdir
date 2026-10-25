@@ -101,21 +101,37 @@ type qsKind struct {
 	// proto splits those by the IP version of the client: index 0 UDP over IPv4, 1 UDP over IPv6, 2 TCP over IPv4,
 	// 3 TCP over IPv6 (see protoIdx).  Counts saved by an older version have no split: what udp and tcp hold beyond
 	// the split is shown as plain UDP and TCP.
-	proto [4]uint32
+	proto [8]uint32
 }
 
 // protoNames are the names of the proto counters, in index order.
-var protoNames = [4]string{"UDP · IPv4", "UDP · IPv6", "TCP · IPv4", "TCP · IPv6"}
+var protoNames = [8]string{"UDP · IPv4", "UDP · IPv6", "TCP · IPv4", "TCP · IPv6", "DoT · IPv4", "DoT · IPv6", "DoH · IPv4", "DoH · IPv6"}
 
 // protoOrder is every name a transport slice can have, in the order they are listed: the split ones and, from counts made
 // before the split existed (or a node on an older version), plain UDP and TCP.
-var protoOrder = []string{"UDP · IPv4", "UDP · IPv6", "UDP", "TCP · IPv4", "TCP · IPv6", "TCP"}
+var protoOrder = []string{"UDP · IPv4", "UDP · IPv6", "UDP", "TCP · IPv4", "TCP · IPv6", "TCP", "DoT · IPv4", "DoT · IPv6", "DoH · IPv4", "DoH · IPv6"}
 
 // protoIdx is the index into qsKind.proto of a query: its transport and whether the client address is IPv6 (an unknown
 // address counts as IPv4).
-func protoIdx(tcp bool, client netip.Addr) int {
+func protoIdx(tcp bool, client netip.Addr) int { return protoIdxVia(viaPlain, tcp, client) }
+
+// How a query reached the proxy: on a plain UDP or TCP socket, over TLS (DNS over TLS) or over HTTPS (DNS over HTTPS).
+// The last two are counted apart from TCP.
+const (
+	viaPlain uint8 = iota
+	viaDoT
+	viaDoH
+)
+
+// protoIdxVia is protoIdx for a query that may have come over DoT or DoH (their counters are 4-5 and 6-7).
+func protoIdxVia(via uint8, tcp bool, client netip.Addr) int {
 	i := 0
-	if tcp {
+	switch {
+	case via == viaDoT:
+		i = 4
+	case via == viaDoH:
+		i = 6
+	case tcp:
 		i = 2
 	}
 	if client.IsValid() && client.Unmap().Is6() {
@@ -274,7 +290,12 @@ func (s *QStats) applyCache(e qEvent) {
 
 // Record counts one answered client query.
 func (s *QStats) Record(client netip.Addr, name string, qtype uint16, tcp bool, rcode int) {
-	s.enqueue(qEvent{t: s.now().Unix(), kind: qeQuery, client: client, name: name, qtype: qtype, tcp: tcp, rcode: int32(rcode)})
+	s.RecordVia(client, name, qtype, tcp, viaPlain, rcode)
+}
+
+// RecordVia is Record for a query that arrived over DNS over TLS or HTTPS (via); those are not counted as TCP.
+func (s *QStats) RecordVia(client netip.Addr, name string, qtype uint16, tcp bool, via uint8, rcode int) {
+	s.enqueue(qEvent{t: s.now().Unix(), kind: qeQuery, client: client, name: name, qtype: qtype, tcp: tcp, via: via, rcode: int32(rcode)})
 }
 
 // qsWhoMax is how many client address strings are kept for reuse (see whoString).
@@ -301,7 +322,7 @@ func (s *QStats) whoString(client netip.Addr) string {
 
 // apply counts one query; s.mu is held.
 func (s *QStats) apply(e qEvent) {
-	client, name, qtype, tcp, rcode := e.client, e.name, e.qtype, e.tcp, int(e.rcode)
+	client, name, qtype, tcp, via, rcode := e.client, e.name, e.qtype, e.tcp, e.via, int(e.rcode)
 	m := e.t / 60
 	who := s.whoString(client)
 	ms := &s.mins[m%qsMinSlots]
@@ -348,12 +369,14 @@ func (s *QStats) apply(e qEvent) {
 		bump(k.clients, who, qsCaps[kind][0])
 		bump(k.domains, name, qsCaps[kind][1])
 		k.types[tn]++
-		if tcp {
+		switch {
+		case via != viaPlain: // DNS over TLS / HTTPS: its own counters only
+		case tcp:
 			k.tcp++
-		} else {
+		default:
 			k.udp++
 		}
-		k.proto[protoIdx(tcp, client)]++
+		k.proto[protoIdxVia(via, tcp, client)]++
 	}
 }
 
@@ -382,6 +405,7 @@ type qEvent struct {
 	rcode  int32
 	kind   uint8
 	tcp    bool
+	via    uint8 // viaPlain, viaDoT, viaDoH
 }
 
 type qsPending struct {
@@ -538,7 +562,7 @@ func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
 		Refused: make([]uint64, n), Other: make([]uint64, n), Updates: make([]uint64, n), ClientsN: make([]uint64, n),
 		Types: []NameCount{}, Protos: []NameCount{}, Clients: []NameCount{}, Domains: []NameCount{}}
 	types, clients, domains := map[string]uint64{}, map[string]uint64{}, map[string]uint64{}
-	var protos [4]uint64
+	var protos [8]uint64
 	var udp, tcp uint64
 	pairDomains, pairClients := map[string]uint64{}, map[string]uint64{}
 
@@ -634,6 +658,9 @@ func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
 	add(protoNames[2], protos[2])
 	add(protoNames[3], protos[3])
 	add("TCP", tcp-min(tcp, protos[2]+protos[3]))
+	for i := 4; i < len(protos); i++ {
+		add(protoNames[i], protos[i])
+	}
 	if f.Client != "" {
 		domains = withRest(pairDomains, sumSet(clients, cset))
 	}

@@ -105,7 +105,7 @@ func (s *QStats) persistTo(emit func(pRec) error) error {
 				}
 				used = true
 				rec.Top[ci] = pKind{Clients: copyU32(k.clients), Domains: copyU32(k.domains), Types: copyU32(k.types), UDP: k.udp, TCP: k.tcp}
-				if k.proto != ([4]uint32{}) {
+				if k.proto != ([8]uint32{}) {
 					rec.Top[ci].Split = append([]uint32(nil), k.proto[:]...)
 				}
 			}
@@ -311,9 +311,7 @@ func (s *QStats) restore(r pRec) int {
 			q := &tp.c[ci]
 			q.clients, q.domains, q.types = k.Clients, k.Domains, k.Types
 			q.udp, q.tcp = k.UDP, k.TCP
-			if len(k.Split) == len(q.proto) {
-				copy(q.proto[:], k.Split)
-			}
+			copy(q.proto[:], k.Split) // a file of an older version has four counters: the DoT and DoH ones start at 0
 			if q.domains == nil {
 				q.domains = map[string]uint32{}
 			}

@@ -32,7 +32,7 @@ func TestTransportSplitKeepsOldCounts(t *testing.T) {
 	k.tcp += 2
 	k.proto[3] = 2
 	// what the result shows: the split ones by name, the rest as plain UDP / TCP
-	var protos [4]uint64
+	var protos [8]uint64
 	for i, n := range k.proto {
 		protos[i] = uint64(n)
 	}
@@ -54,5 +54,32 @@ func TestTransportAfterClear(t *testing.T) {
 	r := s.Query(now.Add(-time.Hour), now.Add(time.Minute), QFilter{})
 	if len(r.Protos) != 2 || r.Protos[0].Name != "UDP · IPv4" || r.Protos[1].Name != "TCP · IPv6" || r.Protos[0].Count != 1 || r.Protos[1].Count != 1 {
 		t.Fatalf("protos after a clear: %+v", r.Protos)
+	}
+}
+
+// DNS over TLS and HTTPS queries are counted apart from plain TCP, by IP version, and not in the plain UDP/TCP totals.
+func TestTransportDoTAndDoHCountedSeparately(t *testing.T) {
+	s := NewQStats()
+	v4, v6 := netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("2001:db8::1")
+	s.RecordVia(v4, "a.example.com", 1, false, viaPlain, rcodeNoError) // UDP
+	s.RecordVia(v4, "a.example.com", 1, true, viaPlain, rcodeNoError)  // TCP
+	s.RecordVia(v4, "a.example.com", 1, true, viaDoT, rcodeNoError)
+	s.RecordVia(v6, "a.example.com", 1, true, viaDoT, rcodeNoError)
+	s.RecordVia(v6, "a.example.com", 1, true, viaDoH, rcodeNoError)
+	s.flush()
+	now := time.Now()
+	r := s.Query(now.Add(-time.Hour), now.Add(time.Minute), QFilter{})
+	got := map[string]uint64{}
+	for _, p := range r.Protos {
+		got[p.Name] = p.Count
+	}
+	want := map[string]uint64{"UDP · IPv4": 1, "TCP · IPv4": 1, "DoT · IPv4": 1, "DoT · IPv6": 1, "DoH · IPv6": 1}
+	if len(got) != len(want) {
+		t.Fatalf("transports %v, want %v", got, want)
+	}
+	for k, n := range want {
+		if got[k] != n {
+			t.Errorf("%s = %d, want %d (all: %v)", k, got[k], n, got)
+		}
 	}
 }

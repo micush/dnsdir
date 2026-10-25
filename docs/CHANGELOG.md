@@ -1,5 +1,10 @@
 # Changelog
 
+## [v569] - 2026-10-25 — Rate limit icon in Top Domains
+
+### Added
+- A domain with a per-domain limit now shows the blue rate limit gauge in Statistics ▸ Top Domains, as a limited client does in Top Clients (dimmed when a `*.name` or pattern line covers it rather than the exact name).
+
 ## [v568] - 2026-10-25 — Limit a domain from Statistics
 
 ### Added

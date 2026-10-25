@@ -4652,6 +4652,7 @@
     // the row Block writes: this client, any name, answered NODATA
     let blockRules = [];   // the Block rows of the policy table (any client cell but "*"), for the icon after a client's name
     let nameRules = [];   // the policy rows that apply to every client, in table order, for the icon after a domain
+    let domainLimitRules = [];   // domain_limits in order: the first line that matches a name is its own rate
     let limitRules = [];   // client_limits in order, the first line that matches a client is its own rate
     const KEYWORD_ROWS = ["null", "nxdomain", "nodata", "refused"];
     const isRewriteRow = (r, name) => (r.client || "*") === "*" && String(r.name || "").toLowerCase() === name.toLowerCase() && !!String(r.dest || "").trim() && String(r.dest).trim() !== "*" &&
@@ -4760,6 +4761,17 @@
       for (const r of limitRules) if (inNet(r.net, ip) && (!best || r.net.bits > best.net.bits)) best = r;
       return best && { ...best, host: best.net.bits === best.net.w };
     };
+    const domainLimitsOf = (cfg) => ((cfg.dns || {}).domain_limits || []).map((x) => x.trim().split(/\s+/)).filter((f) => f.length === 2 && Number(f[1]) > 0)
+      .map((f) => {
+        const t = f[0].toLowerCase().replace(/\.$/, "");
+        const esc = (x) => x.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+        let re;
+        if (t === "*") re = /^.*$/;
+        else if (/^\*\.[^*?]+$/.test(t)) re = new RegExp("^(?:.*\\.)?" + esc(t.slice(2)) + "$");
+        else re = new RegExp("^" + esc(t) + "$");
+        return { re, text: f[0], rate: Number(f[1]), exact: !/[*?]/.test(t) };
+      });
+    const domainLimitedBy = (name) => { const d = String(name).toLowerCase().replace(/\.$/, ""); return domainLimitRules.find((x) => x.re.test(d)) || null; };
     const blockedBy = (addr) => {
       const ip = ipNum(addr), hit = [];
       for (const r of blockRules) {
@@ -4956,7 +4968,9 @@
                   const b = h("button", { type: "button", class: "qlink mono", "data-name": e.name, "aria-pressed": inPick(o.picked, e.name) ? "true" : "false",
                     title: withHost ? head + tail : e.name + tail,   // a long domain is cut in the cell; the tooltip has all of it
                     onclick: (ev) => o.onPick(e.name, ev.ctrlKey || ev.metaKey) }, e.name);
-                  const nd = withHost ? null : nameDecision(e.name);
+                  const nd = withHost ? null : nameDecision(e.name), dl = withHost ? null : domainLimitedBy(e.name);
+                  const dmark = dl ? h("span", { class: "qblocked" + (dl.exact ? "" : " qdim"), role: "img", "aria-label": "rate limited",
+                    title: "Rate limited to " + dl.rate + " queries per second for all clients together" + (dl.exact ? ". Right-click ▸ Limit to change or remove it." : " (" + dl.text + "). Edit it on Configure ▸ DNS ▸ Clients ▸ Per-domain limits.") }, gaugeIcon()) : null;
                   const blk = withHost ? blockedBy(e.name) : null, lim = withHost ? limitedBy(e.name) : null;
                   const marks = withHost ? [
                     blk ? h("span", { class: "qblocked" + (blk.host ? "" : " qdim"), role: "img", "aria-label": "blocked",
@@ -4969,7 +4983,8 @@
                     ? h("div", { class: "qname" }, b, ...marks)
                     : nd ? h("div", { class: "qname" }, b, h("span", { class: "qblocked" + (nd.exact ? "" : " qdim"), role: "img", "aria-label": nd.kind === "block" ? "in the Policy-Based Resolution table" : "rewritten",
                       title: (nd.kind === "block" ? "Answered by the Policy-Based Resolution table: " + nd.dest.toUpperCase() + " for every client" : "Rewritten by the Policy-Based Resolution table: answered with " + nd.dest + " for every client") +
-                        (nd.exact ? ". " + (nd.kind === "block" ? "Edit it on Configure ▸ DNS ▸ Resolution." : "Right-click ▸ Remove rewrite to undo it.") : " (the row for " + nd.text + "). Edit it on Configure ▸ DNS ▸ Resolution.") }, nd.kind === "block" ? "🚫" : "✏️"))
+                        (nd.exact ? ". " + (nd.kind === "block" ? "Edit it on Configure ▸ DNS ▸ Resolution." : "Right-click ▸ Remove rewrite to undo it.") : " (the row for " + nd.text + "). Edit it on Configure ▸ DNS ▸ Resolution.") }, nd.kind === "block" ? "🚫" : "✏️"), dmark)
+                    : dmark ? h("div", { class: "qname" }, b, dmark)
                     : b;
                 })(),
                 e.host ? h("div", { class: "muted small" }, e.host) : null),
@@ -5045,7 +5060,7 @@
       try {
         const wantUpd = sel === "update"; // the card of recent updates belongs to the Updates tile
         const [d, u] = await Promise.all([fetchData(), wantUpd ? api("GET", "/api/dnsupdates").then((r) => r.data.updates, () => null) : null,
-          api("GET", "/api/config").then((r) => { blockRules = blockedOf(r.config); limitRules = limitedOf(r.config); nameRules = nameRulesOf(r.config); }, () => null)]);
+          api("GET", "/api/config").then((r) => { blockRules = blockedOf(r.config); limitRules = limitedOf(r.config); domainLimitRules = domainLimitsOf(r.config); nameRules = nameRulesOf(r.config); }, () => null)]);
         if (my !== seq) return;
         lastAt = Date.now();
         draw(d);

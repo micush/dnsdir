@@ -3965,7 +3965,7 @@
         info = h("div", {});
         csrBox = h("div", {});
         const cert = h("textarea", { rows: 7, spellcheck: "false", class: "pem", placeholder: "-----BEGIN CERTIFICATE-----  (your certificate first, then any intermediate ones)", "aria-label": "Certificate PEM" });
-        const key = h("textarea", { rows: 5, spellcheck: "false", class: "pem", placeholder: "-----BEGIN PRIVATE KEY-----  (leave empty if you created a request below)", "aria-label": "Private key PEM", autocomplete: "off" });
+        const key = h("textarea", { rows: 7, spellcheck: "false", class: "pem", placeholder: "-----BEGIN PRIVATE KEY-----  (leave empty if you created a request below)", "aria-label": "Private key PEM", autocomplete: "off" });
         const certFile = h("input", { type: "file", accept: ".pem,.crt,.cer,.txt", "aria-label": "Certificate file" });
         const keyFile = h("input", { type: "file", accept: ".pem,.key,.txt", "aria-label": "Key file" });
         readFileInto(certFile, cert); readFileInto(keyFile, key);

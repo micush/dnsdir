@@ -1,5 +1,10 @@
 # Changelog
 
+## [v557] - 2026-10-24 — Certificate and key boxes the same size
+
+### Fixed
+- On the certificate pages (Web GUI and DNS over TLS/HTTPS) the private key box was shorter than the certificate box beside it, which pushed its Browse button out of line. Both are now the same height.
+
 ## [v556] - 2026-10-24 — DNS over TLS and HTTPS in the statistics
 
 ### Added

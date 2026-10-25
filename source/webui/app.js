@@ -2322,6 +2322,7 @@
     { shared: true, k: "client_burst", l: "Burst (queries at once)", t: "int", min: 0, max: 100000000, hint: "0 = twice the rate, at least 10." },
     { shared: true, k: "client_action", l: "Over the limit", t: "select", options: ["drop", "truncate", "refused"] },
     { shared: true, k: "client_limits", l: "Per-client limits", t: "rows", rows: "limits", wide: true, hint: "An address or network, and the queries per second each client in it may send (192.168.1.5, 50)." },
+    { shared: true, k: "domain_limits", l: "Per-domain limits", t: "rows", rows: "domainlimits", wide: true },
     { shared: true, k: "client_exempt", l: "Never limited", t: "rows", rows: "exempt", wide: true, hint: "Networks exempt from the rate limit (not from the allowed list), same forms." },
     { section: "Client network (ECS)" },
     { shared: true, k: "ecs", l: "Pass the client's network to the servers", t: "bool" },
@@ -3040,6 +3041,14 @@
     limits: {
       key: "limits", empty: "No per-client limits.",
       cols: [{ name: "Client address or network", ph: "192.168.1.5" }, { name: "Queries per second", ph: "50" }],
+      parse: (line) => { const f = line.trim().split(/\s+/); return [f[0] || "", f[1] || ""]; },
+      format: (c) => [c[0] + " " + c[1]],
+      mark: (c) => !c[0] || !c[1],
+    },
+    // per-domain limits: "*.example.com 100"
+    domainlimits: {
+      key: "domainlimits", empty: "No per-domain limits.",
+      cols: [{ name: "Name or pattern", ph: "*.example.com" }, { name: "Queries per second", ph: "100" }],
       parse: (line) => { const f = line.trim().split(/\s+/); return [f[0] || "", f[1] || ""]; },
       format: (c) => [c[0] + " " + c[1]],
       mark: (c) => !c[0] || !c[1],

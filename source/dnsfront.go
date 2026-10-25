@@ -192,6 +192,9 @@ func (f *DNSFrontend) resolveVia(query []byte, tcp bool, via uint8, client netip
 	}
 	var qi qinfo // the question, read once for the cache key and for the statistics
 	parseQuestion(query, &qi)
+	if p := f.pool(); !probe && p != nil && p.dlim != nil && qi.ok && p.admitDomain(qi.name(), client) != admitOK {
+		return p.turnedAwayDomain(query, tcp)
+	}
 	resp := f.resolveRaw(query, tcp, client, &qi)
 	if p := f.pool(); p != nil && len(p.sorts) > 0 {
 		resp = p.sortAnswer(resp, client)

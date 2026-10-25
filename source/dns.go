@@ -335,12 +335,13 @@ type Pool struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	Queries  atomic.Uint64 // client queries handled
-	Answered atomic.Uint64 // answered from an upstream
-	Failed   atomic.Uint64 // answered with synthesized SERVFAIL
-	ECSSent  atomic.Uint64 // forwarded with a client subnet attached
-	Denied   atomic.Uint64 // refused: the client is not in allowed_clients
-	Limited  atomic.Uint64 // turned away: the client was over client_rate
+	Queries       atomic.Uint64 // client queries handled
+	Answered      atomic.Uint64 // answered from an upstream
+	Failed        atomic.Uint64 // answered with synthesized SERVFAIL
+	ECSSent       atomic.Uint64 // forwarded with a client subnet attached
+	Denied        atomic.Uint64 // refused: the client is not in allowed_clients
+	Limited       atomic.Uint64 // turned away: the client was over client_rate
+	DomainLimited atomic.Uint64 // turned away: the name was over a domain_limits line
 
 	avoid    nameAvoid    // servers that timed out on a name lately (slowname.go)
 	sorts    []sortRule   // the dns block's sortlist, parsed (sortlist.go)
@@ -353,11 +354,12 @@ type Pool struct {
 	allow    nameSet       // names no block list or blocking policy row refuses (blocklists.go)
 	blockRow sync.Map      // block list key -> *policyRule that answers for it
 	lim      *clientLimits // nil when no client list or rate is configured (clientlimit.go)
+	dlim     *domainLimits // nil when no domain_limits line is configured (domainlimit.go)
 	fwd      *fwdRouter    // nil when no server carries a zone list (fwdzones.go)
 }
 
 func NewPool(cfg DNSConfig) *Pool {
-	p := &Pool{cfg: cfg, lim: newClientLimits(cfg), sorts: nil}
+	p := &Pool{cfg: cfg, lim: newClientLimits(cfg), dlim: newDomainLimits(cfg), sorts: nil}
 	if cfg.SortListOn {
 		p.sorts = buildSortRules(cfg.SortList)
 	}

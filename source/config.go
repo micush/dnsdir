@@ -596,6 +596,9 @@ type DNSConfig struct {
 	// even when ClientRate is 0 and before ClientExempt; the most specific line that matches a client is its rate (see
 	// clientlimit.go).
 	ClientLimits []string `json:"client_limits,omitempty"`
+	// DomainLimits cap the queries per second that all clients together may ask for a name: "NAME RATE" ("*.example.com 100"),
+	// NAME written like a policy source name.  A query over the rate gets what ClientAction says (see domainlimit.go).
+	DomainLimits []string `json:"domain_limits,omitempty"`
 	// ClientNames are names given to clients by hand (Statistics ▸ Top clients ▸ right-click ▸ Name…): address -> name.  They are
 	// shown instead of the reverse-DNS name and can be filtered on.  Only the shared Settings' copy is used.
 	ClientNames map[string]string `json:"client_names,omitempty"`
@@ -1107,6 +1110,10 @@ func (c *DNSConfig) followSettings(shared DNSConfig) {
 	c.ClientExempt = append([]string(nil), shared.ClientExempt...)
 	if len(c.ClientExempt) == 0 {
 		c.ClientExempt = nil
+	}
+	c.DomainLimits = append([]string(nil), shared.DomainLimits...)
+	if len(c.DomainLimits) == 0 {
+		c.DomainLimits = nil
 	}
 	c.ClientLimits = append([]string(nil), shared.ClientLimits...)
 	if len(c.ClientLimits) == 0 {
@@ -1775,6 +1782,19 @@ func (d *DNSConfig) validateClients() error {
 			norm = append(norm, n+" "+strconv.Itoa(int(o.rate)))
 		}
 		d.ClientLimits = norm
+	}
+	if len(d.DomainLimits) == 0 {
+		d.DomainLimits = nil
+	} else {
+		rules, err := parseDomainLimits(d.DomainLimits)
+		if err != nil {
+			return fmt.Errorf("dns: domain_limits: %w", err)
+		}
+		norm := make([]string, 0, len(rules))
+		for _, r := range rules {
+			norm = append(norm, r.text+" "+strconv.Itoa(int(r.rate)))
+		}
+		d.DomainLimits = norm
 	}
 	if d.ClientRate < 0 || d.ClientRate > 10_000_000 {
 		return errors.New("dns: client_rate must be 0-10000000 queries per second")

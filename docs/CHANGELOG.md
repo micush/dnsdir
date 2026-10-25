@@ -1,5 +1,10 @@
 # Changelog
 
+## [v567] - 2026-10-25 — Per-domain rate limits
+
+### Added
+- `domain_limits` (Configure ▸ DNS ▸ Clients ▸ **Per-domain limits**): a rate in queries per second for a name, shared by all clients. A line is `NAME RATE`; `NAME` is an exact name, `*.name` (the name and everything below it) or a pattern with `*`/`?`. The first matching line counts; over the limit the answer follows `client_action`. The status shows `domain_limits` and `domain_limited`.
+
 ## [v566] - 2026-10-25 — IPv4 first for everything the daemon connects out to
 
 ### Fixed

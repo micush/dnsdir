@@ -1,5 +1,15 @@
 # Changelog
 
+## [v559] - 2026-10-24 — Help: Certificate file
+
+### Changed
+- The help for Configure ▸ DNS ▸ Listeners describes **Certificate file (optional)** in the words of the field's own hint.
+
+## [v558] - 2026-10-24 — Help: Failure cache
+
+### Changed
+- The help for Configure ▸ DNS ▸ Cache & ECS describes **Failure cache (s)** in the same words as the field's own hint (what is remembered, 0 = off, at most 300, RFC 9520).
+
 ## [v557] - 2026-10-24 — Certificate and key boxes the same size
 
 ### Fixed

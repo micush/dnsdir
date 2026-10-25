@@ -2409,15 +2409,15 @@
   }
 
   const WEB_FIELDS = [
-    { k: "listen", l: "Listen address", t: "port", hint: "the port, default 53853 (all addresses); to listen on one address only, write it with the port: 10.0.0.1:53853" },
-    { shared: true, k: "group", l: "Login groups", t: "text", hint: "one or more, separated by commas: a member of any may sign in. The first one that is a local group is the one the Users page manages; the others can be directory (Active Directory) groups" },
-    { shared: true, k: "read_group", l: "Read-only groups", t: "text", hint: "same form; a member of one of these (and of none of the login groups) can sign in and look at everything but change nothing. Empty = nobody. People are added on the Users page" },
+    { k: "listen", l: "Listen address", t: "port" },
+    { shared: true, k: "group", l: "Login groups", t: "text" },
+    { shared: true, k: "read_group", l: "Read-only groups", t: "text" },
     { k: "pam_service", l: "PAM service", t: "text" },
     { k: "session_idle_minutes", l: "Session idle timeout (min)", t: "int", min: 1 },
     { shared: true, k: "max_failed_logins", l: "Failed logins before lockout", t: "int", min: 1 },
     { shared: true, k: "failed_login_window_minutes", l: "…within this many minutes", t: "int", min: 1 },
     { shared: true, k: "lockout_minutes", l: "Lockout lasts (minutes)", t: "int", min: 1 },
-    { shared: true, k: "min_password_length", l: "Minimum password length", t: "int", min: 0, max: 128, hint: "0 = 8" },
+    { shared: true, k: "min_password_length", l: "Minimum password length", t: "int", min: 0, max: 128 },
   ];
   const SSO_FIELDS = [
     { shared: true, k: "sso_base_url", brk: true, l: "Address of this console", t: "text" },
@@ -2439,7 +2439,7 @@
     { shared: true, k: "snmp_contact", l: "Contact", t: "text" },
   ];
   const CLUSTER_FIELDS = [
-    { k: "listen", l: "Binding address", t: "port", hint: "the port, default 53854 (all addresses); or an address with the port: 10.0.0.1:53854" },
+    { k: "listen", l: "Binding address", t: "port" },
     { k: "self", l: "Advertised address", t: "text" },
     { k: "sync_interval_sec", l: "Sync interval (s)", t: "int", min: 1, max: 3600 },
   ];
@@ -2447,10 +2447,10 @@
   const SYSLOG_FIELDS = [
     { k: "enabled", l: "Send the log to a syslog server", t: "bool", hint: "" },
     { k: "protocol", l: "Protocol", t: "select", options: ["tcp", "udp", "tls"] },
-    { k: "server", l: "Server", t: "text", hint: "a host name or address, with the port if it is not the usual one: logs.example.com or 10.0.0.9:1514 (514, and 6514 for tls)" },
+    { k: "server", l: "Server", t: "text" },
     { k: "facility", l: "Facility", t: "select", options: ["daemon", "user", "auth", "authpriv", "local0", "local1", "local2", "local3", "local4", "local5", "local6", "local7"] },
     { k: "format", l: "Message format", t: "select", options: ["rfc5424", "rfc3164"] },
-    { k: "ca_file", l: "CA certificate file (tls)", t: "text", hint: "the PEM file of the authority that signed the server's certificate; empty trusts the system's authorities" },
+    { k: "ca_file", l: "CA certificate file (tls)", t: "text" },
     { k: "tls_insecure", l: "Do not check the server's certificate (tls)", t: "bool" },
   ];
   const LOG_FIELDS = [{ k: "log_level", l: "Log level", t: "select", options: ["debug", "info", "warning", "error"] }];

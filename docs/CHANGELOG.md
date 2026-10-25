@@ -1,5 +1,10 @@
 # Changelog
 
+## [v560] - 2026-10-24 — Field descriptions live in the help
+
+### Changed
+- The grey description lines under Web GUI (Listen address, Login groups, Read-only groups, Minimum password length), Cluster (Binding address) and Syslog (Server, CA certificate file) are gone from the forms; the help pane for each page already says all of it (and more).
+
 ## [v559] - 2026-10-24 — Help: Certificate file
 
 ### Changed

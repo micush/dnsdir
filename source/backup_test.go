@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -223,7 +224,7 @@ type fakeServer struct {
 	fail    error
 }
 
-func (f *fakeServer) run(_ context.Context, c *BackupConfig, _ string, script string) (string, error) {
+func (f *fakeServer) run(_ context.Context, c *BackupTarget, _ string, script, _ string) (string, error) {
 	f.scripts = append(f.scripts, script)
 	if f.fail != nil {
 		return "", f.fail
@@ -277,13 +278,13 @@ func newBackupRig(t *testing.T, cfg *BackupConfig) (*BackupEngine, *fakeServer, 
 }
 
 func TestBackupUploadsAndKeepsTheNewestFew(t *testing.T) {
-	cfg := &BackupConfig{Enabled: true, Host: "h", User: "u", Dir: "/srv/bk", Keep: 3, Password: "longenough"}
+	cfg := &BackupConfig{Enabled: true, Targets: []BackupTarget{{Host: "h", User: "u", Dir: "/srv/bk", Keep: 3}}, Password: "longenough"}
 	e, srv, clock := newBackupRig(t, cfg)
 	srv.files["ns2-20260101-000000"+backupExt] = true // another node's: never touched
 	srv.files["notes.txt"] = true
 	for i := 0; i < 5; i++ {
 		*clock = clock.Add(24 * time.Hour)
-		if err := e.backup(cfg); err != nil {
+		if err := e.backup(cfg, cfg.Targets); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -306,8 +307,8 @@ func TestBackupUploadsAndKeepsTheNewestFew(t *testing.T) {
 	if !strings.Contains(srv.scripts[0], "-mkdir \"/srv\"\n-mkdir \"/srv/bk\"") || !strings.Contains(srv.scripts[0], "rename") {
 		t.Fatalf("upload script:\n%s", srv.scripts[0])
 	}
-	if e.status.Pruned != 1 || len(e.status.Remote) != 3 || e.status.LastFile != mine[2] {
-		t.Fatalf("status %+v", e.status)
+	if st := e.status.Targets[cfg.Targets[0].key()]; st == nil || st.Pruned != 1 || len(st.Remote) != 3 || st.LastFile != mine[2] {
+		t.Fatalf("status %+v", e.status.Targets)
 	}
 	// the work file does not stay behind
 	if m, _ := filepath.Glob(filepath.Join(e.dir, "work", "*")); len(m) != 0 {
@@ -320,12 +321,12 @@ func TestBackupUploadsAndKeepsTheNewestFew(t *testing.T) {
 }
 
 func TestBackupFailureIsReportedAndRetried(t *testing.T) {
-	cfg := &BackupConfig{Enabled: true, Host: "h", User: "u", Keep: 3, Password: "longenough"}
+	cfg := &BackupConfig{Enabled: true, Targets: []BackupTarget{{Host: "h", User: "u", Keep: 3}}, Password: "longenough"}
 	e, srv, clock := newBackupRig(t, cfg)
 	srv.fail = os.ErrPermission
 	done := make(chan struct{}, 1)
 	e.onRunDone = func() { done <- struct{}{} }
-	if err := e.start(); err != nil {
+	if err := e.start(false); err != nil {
 		t.Fatal(err)
 	}
 	<-done
@@ -341,7 +342,7 @@ func TestBackupFailureIsReportedAndRetried(t *testing.T) {
 		t.Fatal("it did not retry after the pause")
 	}
 	srv.fail = nil
-	if err := e.start(); err != nil {
+	if err := e.start(false); err != nil {
 		t.Fatal(err)
 	}
 	<-done
@@ -350,14 +351,22 @@ func TestBackupFailureIsReportedAndRetried(t *testing.T) {
 	}
 }
 
+// ran notes that a backup to every server has just been made.
+func ran(e *BackupEngine, cfg *BackupConfig, clock *time.Time) {
+	e.status.LastStart, e.status.LastFull = clock.Unix(), clock.Unix()
+	for i := range cfg.Targets {
+		e.tstat(&cfg.Targets[i]).LastStart = clock.Unix()
+	}
+}
+
 func TestBackupSchedule(t *testing.T) {
-	cfg := &BackupConfig{Enabled: true, Host: "h", User: "u", Password: "longenough", At: "02:30"}
+	cfg := &BackupConfig{Enabled: true, Targets: []BackupTarget{{Host: "h", User: "u"}}, Password: "longenough", At: "02:30"}
 	e, _, clock := newBackupRig(t, cfg)
 	e.jitter = 0
 	if !e.due() {
 		t.Fatal("a backup that never ran is due")
 	}
-	e.status.LastStart = clock.Unix() // ran just now (12:00)
+	ran(e, cfg, clock) // ran just now (12:00)
 	if e.due() {
 		t.Fatal("due right after a run")
 	}
@@ -369,13 +378,13 @@ func TestBackupSchedule(t *testing.T) {
 	if !e.due() {
 		t.Fatal("not due after 02:30")
 	}
-	e.status.LastStart = clock.Unix()
+	ran(e, cfg, clock)
 	*clock = clock.Add(20 * time.Hour)
 	if e.due() {
 		t.Fatal("due twice in a day")
 	}
 	cfg.Hours = 6
-	e.status.LastStart = clock.Unix()
+	ran(e, cfg, clock)
 	*clock = clock.Add(5 * time.Hour)
 	if e.due() {
 		t.Fatal("due before 6 hours")
@@ -387,5 +396,141 @@ func TestBackupSchedule(t *testing.T) {
 	cfg.Enabled = false
 	if e.due() {
 		t.Fatal("due while switched off")
+	}
+}
+
+func TestBackupConfigMigratesTheSingleServer(t *testing.T) {
+	c := BackupConfig{Enabled: true, Host: "h1", User: "u", Dir: "d", Keep: 5, Password: "longenough",
+		Targets: []BackupTarget{{Host: "h2", User: "u2"}}}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Targets) != 2 || c.Targets[0].Host != "h1" || c.Targets[0].Keep != 5 || c.Targets[1].Host != "h2" || c.Host != "" || c.Keep != 0 {
+		t.Fatalf("%+v", c)
+	}
+	d := BackupConfig{Targets: []BackupTarget{{Host: "h", User: "u"}, {Host: "h", User: "u"}}}
+	if d.Validate() == nil {
+		t.Fatal("the same server twice was accepted")
+	}
+	many := BackupConfig{}
+	for i := 0; i < backupMaxTargets+1; i++ {
+		many.Targets = append(many.Targets, BackupTarget{Host: fmt.Sprintf("h%d", i), User: "u"})
+	}
+	if many.Validate() == nil {
+		t.Fatal("too many servers")
+	}
+}
+
+func TestBackupGoesToEveryServerAndOneFailureDoesNotStopTheRest(t *testing.T) {
+	cfg := &BackupConfig{Enabled: true, Password: "longenough", Targets: []BackupTarget{
+		{Name: "A", Host: "a", User: "u", Dir: "/x", Keep: 2}, {Name: "B", Host: "b", User: "u", Dir: "/y", Keep: 2}, {Name: "C", Host: "c", User: "u", Dir: "/z", Keep: 2}}}
+	e, _, clock := newBackupRig(t, cfg)
+	servers := map[string]*fakeServer{"a": {files: map[string]bool{}}, "b": {files: map[string]bool{}, fail: os.ErrPermission}, "c": {files: map[string]bool{}}}
+	backupSFTP = func(ctx context.Context, tg *BackupTarget, d, script, pw string) (string, error) {
+		return servers[tg.Host].run(ctx, tg, d, script, pw)
+	}
+	done := make(chan struct{}, 1)
+	e.onRunDone = func() { done <- struct{}{} }
+	if err := e.start(false); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	if len(servers["a"].files) != 1 || len(servers["c"].files) != 1 || len(servers["b"].files) != 0 {
+		t.Fatalf("a=%v b=%v c=%v", servers["a"].files, servers["b"].files, servers["c"].files)
+	}
+	failing, _, msg := e.Failing()
+	if !failing || !strings.Contains(msg, "B:") || strings.Contains(msg, "A:") || strings.Contains(msg, "C:") {
+		t.Fatalf("%v %q", failing, msg)
+	}
+	// after the pause only the one that failed is tried again
+	*clock = clock.Add(backupRetry + time.Second)
+	servers["b"].fail = nil
+	servers["a"].scripts, servers["c"].scripts = nil, nil
+	if err := e.start(false); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	if len(servers["b"].files) != 1 || len(servers["a"].scripts) != 0 || len(servers["c"].scripts) != 0 {
+		t.Fatalf("retry: b=%v a=%d c=%d", servers["b"].files, len(servers["a"].scripts), len(servers["c"].scripts))
+	}
+	if failing, _, _ := e.Failing(); failing {
+		t.Fatal("still failing")
+	}
+	// a server that is added later gets its first backup at once, without the others being touched
+	cfg.Targets = append(cfg.Targets, BackupTarget{Name: "D", Host: "d", User: "u", Dir: "/w"})
+	servers["d"] = &fakeServer{files: map[string]bool{}}
+	if !e.due() {
+		t.Fatal("a new server is not due")
+	}
+	if err := e.start(false); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	if len(servers["d"].files) != 1 || len(servers["a"].files) != 1 {
+		t.Fatalf("d=%v a=%v", servers["d"].files, servers["a"].files)
+	}
+}
+
+func TestAuthorizeKeys(t *testing.T) {
+	const k1 = "ssh-ed25519 AAAAC3Nza1 a@x"
+	out, n := authorizeKeys("ssh-rsa AAAB old@laptop", []string{k1, k1, "junk"})
+	if n != 1 || !strings.Contains(out, "old@laptop\nrestrict "+k1+"\n") {
+		t.Fatalf("%d %q", n, out)
+	}
+	if _, n := authorizeKeys(out, []string{k1}); n != 0 {
+		t.Fatal("added twice")
+	}
+}
+
+func TestPendingRestoreIsAppliedAtStart(t *testing.T) {
+	old := backupIter
+	backupIter = 1000
+	defer func() { backupIter = old }()
+	src := filepath.Join(t.TempDir(), "src")
+	writeTree(t, src, map[string]string{"dnsdir.conf": "FROM-BACKUP", "webcert/k": "KEY"})
+	var raw bytes.Buffer
+	if _, err := writeBackupArchive(&raw, "pw-12345678", src, filepath.Join(src, "dnsdir.conf"), "ns1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(t.TempDir(), "state")
+	writeTree(t, state, map[string]string{"dnsdir.conf": "CURRENT", "other": "O"})
+	conf := filepath.Join(state, "dnsdir.conf")
+	cfg := &BackupConfig{}
+	e := NewBackupEngine(state, conf, "ns1", func() *BackupConfig { return cfg })
+	file := filepath.Join(t.TempDir(), "b"+backupExt)
+	os.WriteFile(file, raw.Bytes(), 0o600)
+	if _, err := e.PrepareRestore(file, "wrong-password", "tester"); err == nil {
+		t.Fatal("a wrong password was accepted")
+	}
+	if readPending(state) != nil {
+		t.Fatal("a failed preparation left something")
+	}
+	sum, err := e.PrepareRestore(file, "pw-12345678", "tester")
+	if err != nil || sum["same_node"] != true {
+		t.Fatalf("%v %v", sum, err)
+	}
+	// not confirmed: nothing changes, and the preparation is dropped at the start
+	applyPendingRestore(state, conf)
+	if b, _ := os.ReadFile(conf); string(b) != "CURRENT" || readPending(state) != nil {
+		t.Fatalf("an unconfirmed restore was applied: %q", b)
+	}
+	if _, err := e.PrepareRestore(file, "pw-12345678", "tester"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.MarkReady(); err != nil {
+		t.Fatal(err)
+	}
+	applyPendingRestore(state, conf)
+	if b, _ := os.ReadFile(conf); string(b) != "FROM-BACKUP" {
+		t.Fatalf("conf %q", b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(state, "webcert/k")); string(b) != "KEY" {
+		t.Fatal("webcert not restored")
+	}
+	if readPending(state) != nil {
+		t.Fatal("pending left behind")
+	}
+	if m, _ := filepath.Glob(state + ".before-restore-*"); len(m) != 1 {
+		t.Fatalf("the old state is not kept: %v", m)
 	}
 }

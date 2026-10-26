@@ -984,6 +984,579 @@ States: open, recovering (good again, clear time not over), acknowledged (ends w
 
 ### Backup
 
+**Configure ▸ Backup** (`backup` in the shared `dns` block: `enabled`, `targets`, `hours`, `at`, `password`) makes every node copy its state to one or more servers of yours. `targets` is a list of up to eight servers, each with `name`, `host`, `port`, `user`, `dir` and `keep`; the single server of v582 (`host`, `port`, `user`, `dir`, `keep` directly in the block) is read as the first entry and rewritten that way on the next save. The nodes do it themselves; the settings are cluster-wide, the SSH key (`/var/lib/dnsdir/backup/id_ed25519`, ed25519, made on first use) is each node's own and one key serves all of its servers. The servers need an SFTP service; no shell is needed. dnsdir runs the system `sftp` (`StrictHostKeyChecking=accept-new`, its own `known_hosts` in the backup directory, key login only).
+
+**Installing the keys.** Instead of copying public keys by hand, **Install key…** on a server asks for the password of the account there, logs in once with it (through `SSH_ASKPASS`; the password is never written to disk or logged), asks every node of the cluster for its public key and adds them to `~/.ssh/authorized_keys` of the account, each as `restrict ssh-ed25519 …` (no shell, no forwarding), skipping keys that are already there and keeping all other lines. It then tests the key login and reports it.
+
+An archive is a gzip-compressed tar of the state directory, sealed in 64 KiB pieces with AES-256-GCM; the key comes from `password` with PBKDF2-HMAC-SHA256 (600000 rounds, random salt), and a cut-off or changed file is refused. The first entry is `MANIFEST.json`. What is in it: the configuration file, `versions/`, the web and DNS certificates and keys, `acme/`, the cluster identity, `scheduler.json`, `alerts.json`, the users, and `backup/` (the node's key and known hosts). What is not: the log, `update/`, `blocklists/`, `pairs/` and `stats.json.gz`, `sessions.json`. Files are named `NODE-YYYYMMDD-HHMMSS.dnsbak`, uploaded as `.part` and renamed, and after each upload this node's oldest files beyond that server's `keep` (default 14) are removed; files of other names are never touched. One archive is made per run and sent to every server; a server that fails does not stop the others, and only the failed ones are tried again (after 15 minutes). A server added later gets its first backup at once. A daily backup (the default) starts at `at` (default 02:30, the node's clock, plus 0 to 5 minutes taken from the node's name so the nodes do not connect together); `hours` N makes it every N hours instead. A node that missed its time backs up as soon as it can. The alert rule **Backup failed** opens when it keeps failing and names the servers that failed.
+
+**Restore from the GUI.** On the Backup page, **Restore a backup on this node** (the node picked in the top bar) takes the backup from one of the configured servers, from another server (host, user, directory and the account's password, so a brand-new node needs nothing set up) or from a file uploaded from the browser (32 MB at most, 5 MB through another node). **Check backup** with the backup password opens the archive, verifies it, unpacks it next to the state directory (`/var/lib/dnsdir.restore-pending`) and shows its node, date, version and file count, with a warning when it is another node's or made by a newer version. Nothing is replaced until **Restore and restart**: the node then restarts, and before it reads its configuration the start-up swaps the files in, keeping the old state in `/var/lib/dnsdir.before-restore-TIME`. A preparation that is not confirmed is dropped at the next start. The backup password comes from you, never from the node's own settings.
+
+**Restore from the command line.** Install dnsdir on the new machine without starting it (or stop it), fetch the file (`scp user@server:dir/NODE-...dnsbak .`) and run `dnsdir --restore FILE` (password from a prompt, `--restore-password-file FILE` or `DNSDIR_BACKUP_PASSWORD`), then start the service. The archive is read completely and checked before anything is replaced; each top-level entry it holds replaces the one in the state directory, and the old ones are kept in `/var/lib/dnsdir.before-restore-TIME`. Entries with paths that leave the directory, and links, are refused. Restoring a node's backup while the original node is still running gives two nodes the same identity: use it to replace a lost node. Other commands: `dnsdir --backup-status`, `dnsdir --backup-now`. API: `GET /api/backup`, `POST /api/backup/run`, `/test`, `/install`, `/files`, `/upload`, `/restore/prepare`, `/restore/apply`, `/restore/cancel` (any node can be picked in the top bar).
+
+### Statistics from the drawing
+
+Right-click a square, a trapezoid or the circle ▸ *Statistics* for graphs over the last hour, day or week (per minute for the hour, per 5 minutes for a day, per 30 minutes for a week). CLI: `dnsdir --server-stats ADDR [--stats-range 1h|1d|7d]`, `dnsdir --server-stats ADDR --name DOMAIN [--type T]`, `dnsdir --gateway-stats GROUP`.
+
+![Statistics for a gateway: answer time, errors, availability and queries per second](snaps/gateway-stats.png)
+
+- A **server** (square) shows **latency** (the average and worst of the answers), **failed probes** (the share of the server's own test queries that failed, which is what decides whether it is up) and **failed queries** (the share of client queries sent to it that failed: no answer in time, or SERVFAIL or REFUSED; a healthy server can show these for names it cannot resolve).
+- A **domain** (trapezoid) shows the latency and the failed share of the health probes of that domain on that server. These are probes only, about 12 a minute, so the failure curve is coarser.
+- The **gateway** (circle) shows what clients get: **answer time** (one answer in eight is timed, cache hits included), **errors** (SERVFAIL and REFUSED answers, not clients turned away by the client list or rate limit), **availability** (the share of the 2-second checks, the same ones that drive the circle's uptime, that found the gateway working; paused or not-yet-started time is not counted) and **queries per second**, with the part answered from the cache.
+
+A server's and a domain's graphs are the picked node's own view. A gateway's graphs add up every reachable node of the cluster, since which node answers a client is up to the clients; the dialog says "All 3 nodes counted together", or how many were counted and how many did not answer (a single node shows just this node). A gap means nothing happened in that time: paused, the node was down, or, for a server or domain, nothing was asked of it. The history is kept per node for 7 days, one slot per minute, and saved with the other statistics (`stats.json.gz`, every 5 minutes and when AnyName stops), so a restart keeps it; the time AnyName was down is a gap. A server address listed by two gateways is one series, and a gateway's series covers all its addresses (IPv4, IPv6, anycast) on this node.
+
+### Pools, families and the cluster
+
+- Each gateway has its **own pool**, and two gateways may use different servers. A server can be an IP (`8.8.8.8`, `8.8.8.8:5353`, `[2001:db8::53]`) or a host name (resolved each time it is probed).
+- A gateway may have an IPv4 and an IPv6 address (one engine per family). DNS servers can be IPv4, IPv6 (`2001:db8::53`, `[2001:db8::53]:5353`) or names.
+- A gateway may hold **more than one address per family**, all in the subnet of its VIP: Edit gateway ▸ *More IPv4 addresses* / *More IPv6 addresses* (comma separated, no prefix length; `more_vip4` and `more_vip6` in the file, up to 32 each). They fail over with the VIP, are answered in ARP / neighbor discovery the same way, and answer DNS, DoT and DoH through the same pool, cache and statistics. The VIP stays the one the nodes find each other by. An address of another subnet is an anycast address instead.
+- In a cluster the whole drawing (address, servers, domains) is shared and edited anywhere. The network interface stays per node.
+- Two gateways cannot use the same shared address. An anycast address may be on several gateways (see [Anycast addresses and BGP](#anycast-addresses-and-bgp)); it is held while any of them can answer.
+
+### The same thing on the command line
+
+`dnsdir --canvas` prints the same tree and the same colours, and the other commands change it:
+
+```
+dnsdir --canvas                                  # tree with status
+dnsdir --canvas-add gateway --vip 10.0.0.53/24 --interface eth0 \
+     --server 8.8.8.8 --name google.com        # circle + first square + first trapezoid
+dnsdir --canvas-add domain --group 1 --server 8.8.8.8 --name microsoft.com
+dnsdir --canvas-add server --group 1 --server 8.8.4.4 --name apple.com
+dnsdir --canvas-del domain --group 1 --server 8.8.4.4 --name apple.com
+dnsdir --canvas-add fallback --group 1 --server 1.1.1.1   # used only while every server is down
+dnsdir --canvas-set gateway --group 1 --vip6 2001:db8::53/64 --ecs on   # add IPv6, turn on ECS
+dnsdir --test-vmac --group 1                                  # do virtual MACs reach this node? (changes nothing)
+dnsdir --canvas-set gateway --group 1 --real-macs on          # no virtual MACs, on every node (off undoes it)
+dnsdir --canvas-set gateway --group 1 --label "Office DNS"   # a name instead of the address (--label - clears)
+dnsdir --canvas-set gateway --group 1 --spread-band 200      # this gateway's own load balancing (also --spread on|off, --down-percent,
+                                                           #   --fail-threshold, --max-attempts, --latency-alpha); --lb settings goes back
+dnsdir --canvas-set server --group 1 --server 10.0.0.53 --label dns-a   # a server's name (also on --canvas-add server; - clears)
+dnsdir --canvas-set server --group 1 --server 10.0.0.53 --label dns-a.example.com   # a full name is also registered in DNS for 10.0.0.53 (RFC 2136); the previous full name's record is removed
+dnsdir --canvas-set server --group 1 --server 10.0.0.53 --server-type internal --lists corp,dev   # conditional forwarding: public | internal | both (--lists - clears)
+dnsdir --fwd-route host.corp.example --group 1   # where a name would go: its zone, lists and servers
+dnsdir --block-status                  # block lists in use on this node: domains, last update, queries blocked (also --block-update ID|all, --block-test NAME)
+dnsdir --canvas-add anycast --group 1 --address 203.0.113.53   # an anycast address (--canvas-del anycast removes one)
+dnsdir --canvas-set gateway --group 1 --anycast A,B             # or replace the whole list (--anycast - clears)
+dnsdir --canvas-del gateway --group 1 --yes
+```
+
+Each CLI step is saved at once, so a new server is added together with its first domain. In the file it is a `dns` block inside the group:
+
+```
+"dns": { "servers": ["8.8.8.8", "8.8.4.4"],
+         "server_queries": { "8.8.8.8": ["google.com", "microsoft.com"],
+                             "8.8.4.4": ["apple.com", "amazon.com"] } }
+```
+
+Groups without their own `dns` block use the top-level one, and `server_queries` entries override the global `queries` for that server.
+
+## Anycast addresses and BGP
+
+### Anycast addresses
+
+A gateway can carry extra addresses of **any subnet** next to its shared address (`extra_vips`). In the GUI, right-click the gateway circle ▸ *Add anycast address*; each address becomes a pill beside the circle with its own menu. On the command line, use `--canvas-add anycast --group 1 --address 203.0.113.53`, `--canvas-del anycast …`, or `--canvas-set gateway --group 1 --anycast A,B` to replace the whole list.
+
+Anycast addresses are not checked against the interface and do not take part in the election. **Every** node running the gateway puts them on `lo` and answers DNS on them, with the same servers, domains and failover as the shared address, on `listen_port`. They are shared across the cluster and need DNS servers on the gateway.
+
+An address is held only while this node can answer on it: the gateway is running and not paused, the listener is up, and at least one DNS server is healthy. Otherwise it is taken off `lo`, so the route disappears from your routing daemon. It is added with a 10-second lifetime that AnyName renews every 3 seconds, so if AnyName crashes or hangs, the kernel removes the address by itself within about 10 seconds instead of leaving a route that nothing answers.
+
+The drawing and `--canvas` show whether each address is announced from the node you are looking at. When the node manages BGP, the pill is **green** when every neighbor of its family has an established session (IPv4 address → IPv4 neighbors, IPv6 → IPv6), **amber** when some do and some do not, and **red** when none does, when it has no neighbor of that family, or when BGP is disabled on the node (Operate ▸ Anycast). A neighbor that is disabled or still connecting counts as not established. With OSPF (below) the same colours count the enabled interfaces that have a neighbor in state Full, and with both protocols the better picture is shown.
+
+### BGP through FRR
+
+AnyName can drive FRR on a node so the anycast addresses are announced without any hand-written routing config. In the GUI that is **Configure ▸ Anycast**; the command line is below. It is **per node**: the AS, router ID and neighbors are never replicated, because a node usually peers with its own upstream router. Only the anycast addresses are shared.
+
+![Configure ▸ Anycast: the local AS, router ID, timers and the neighbor table](snaps/anycast.png)
+
+**Turning BGP on.** BGP runs on a node while a local AS number is set. That makes AnyName the owner of the node's `/etc/frr/frr.conf`: it renders the whole file, sets `bgpd=yes` and `bfdd=yes` in `/etc/frr/daemons`, and reloads FRR (`systemctl reload frr`; a restart when a daemon is switched on or off). FRR must be installed (the installer does it; on Debian and Ubuntu together with the `frr-pythontools` package, on the RHEL family and Fedora `frr-reload.py` is part of the `frr` package). Without `frr-reload.py` a reload cannot work, so AnyName restarts FRR for every change and the sessions drop briefly. An `frr.conf` that AnyName did not write is saved once as `frr.conf.pre-dnsdir` before it is replaced. Do not run this on a host whose FRR is managed by something else; they would overwrite each other.
+
+**Turning it off.** The **Enabled** box on a neighbor's row in **Configure ▸ Anycast** shuts that session down and back up (the same as right-click ▸ Disable in Operate ▸ Anycast). Clearing the AS number removes the BGP section and leaves FRR running (the router ID can only be set while an AS is set, and clearing the AS clears it). **Operate ▸ Anycast** does the same without forgetting any setting (*Disable BGP*), and can shut down a single neighbor (`neighbor … shutdown`; the neighbor stays configured). A node that never set an AS never has its FRR files touched.
+
+**Settings.**
+
+- BFD is on for every neighbor.
+- BGP keepalive and hold time are settings next to the router ID (default 3 s and 9 s; `--keepalive S --hold S`, `-` for the default). The session uses the lower hold time of the two ends.
+- **AS prepend** (Configure ▸ Anycast, a tick box; `--as-prepend on|off`; `as_prepend` in the `bgp` block) adds the local AS three more times to every anycast route the node announces (`set as-path prepend ASN ASN ASN` in the outbound route-maps), so routers prefer the nodes that do not have it. Tick it on the nodes that should be the backup.
+- A neighbor can have a **multihop** limit (2–255, eBGP only) for a peer that is not on a connected subnet. FRR then runs BFD to it in multihop mode, so the peer must be set up the same way.
+
+```
+dnsdir --bgp                                                    # settings, neighbor and BFD state, announced addresses
+dnsdir --asn 64512 --router-id 192.0.2.10        # --router-id needs an AS, set now or earlier
+dnsdir --keepalive 3 --hold 9
+dnsdir --as-prepend on                  # the local AS three more times on every announcement (off undoes it)
+dnsdir --bgp-neighbor-add 192.0.2.1 --remote-as 64500 --description core
+dnsdir --bgp-neighbor-add 2001:db8::1 --remote-as 64500
+dnsdir --bgp-neighbor-add 10.0.1.5 --remote-as 64512 --multihop 2   # peer not on a connected subnet (e.g. AWS VPC Route Server)
+dnsdir --bgp-neighbor-del 192.0.2.1
+dnsdir --asn off                                 # also clears the router id
+dnsdir --bgp-disable                             # stop BGP on this node, settings kept (--bgp-enable)
+dnsdir --bgp-neighbor-disable 192.0.2.1          # shut one neighbor down, kept (--bgp-neighbor-enable)
+```
+
+**What the node does, and no more.**
+
+- **It announces only its anycast addresses.** Each is a `network` statement, and an outbound route-map permits only those prefixes (`/32` and `/128`).
+- **It accepts nothing.** An inbound route-map denies every route, so a peer cannot change the host's routing table.
+- **An IPv4 address goes to the IPv4 neighbors, and an IPv6 address to the IPv6 ones.** Add a neighbor of each family to announce both.
+- **A prefix is in FRR's table only while AnyName holds the address on `lo`**, so it is withdrawn when no DNS server answers, the gateway is paused or AnyName stops, and within about 10 seconds if AnyName is killed (the address lifetime, above). Lower the router's timers to shorten the time your peers need to notice.
+- **The neighbor password** is an MD5 TCP session password. It is stored in the config file and its history (root-only), and `--password` on the command line is visible to other users of the host, so the Anycast page is the safer place to set it.
+
+**Where to look.** **Monitor ▸ Anycast** shows each neighbor's session and BFD state, read from FRR every few seconds (`vtysh -c "show bgp summary json"`, `show bfd peers json`), and which anycast addresses are announced. **Configure ▸ Anycast** (tab *BGP*, the first one) has the AS, router ID and the neighbor table (**+** adds a row, **−** removes the highlighted one).
+
+The generated config looks like this:
+
+```
+ip prefix-list DNSDIR-ANYCAST-V4 seq 10 permit 203.0.113.53/32
+route-map DNSDIR-OUT-V4 permit 10
+ match ip address prefix-list DNSDIR-ANYCAST-V4
+route-map DNSDIR-IN deny 10
+router bgp 64512
+ no bgp default ipv4-unicast
+ neighbor 192.0.2.1 remote-as 64500
+ address-family ipv4 unicast
+  network 203.0.113.53/32
+  neighbor 192.0.2.1 activate
+  neighbor 192.0.2.1 route-map DNSDIR-IN in
+  neighbor 192.0.2.1 route-map DNSDIR-OUT-V4 out
+ exit-address-family
+```
+
+### OSPF through FRR
+
+Instead of BGP, or together with it, AnyName can announce the anycast addresses with **OSPF**: OSPFv2 (`ospfd`) carries the IPv4 addresses and OSPFv3 (`ospf6d`) the IPv6 ones. In the GUI it is the **OSPF** tab of **Configure ▸ Anycast** (the **BGP** tab is the first one); the command line is below. Like BGP it is **per node** and never replicated.
+
+**Turning OSPF on.** OSPF runs on a node while it has at least one interface listed. The settings are the **router ID** (an IPv4 address, unique among your routers; it is required once there is an interface and is saved with the first one), the **hello** and **dead** interval (FRR's 10 and 40 seconds when empty), the **metric** the announced addresses carry (FRR's 20 when empty; give a node a higher one to make it the backup), and per interface the **area** (empty is 0), the **link type** (default, point-to-point or broadcast) and an optional OSPFv2 MD5 **key** (up to 16 characters; OSPFv3 does not use it). AnyName then renders the OSPF part of `/etc/frr/frr.conf` next to any BGP part, sets `ospfd=yes`, `ospf6d=yes` and `bfdd=yes` in `/etc/frr/daemons` and reloads FRR (a restart when a daemon is switched on or off).
+
+**The OSPF daemons run only while OSPF is set up.** `ospfd` and `ospf6d` are `no` in `/etc/frr/daemons` until the first interface is added, and are switched back to `no` (and FRR restarted) when the last interface is removed or **Disable OSPF** is pressed in Operate ▸ Anycast. `bgpd` follows BGP in the same way, and `bfdd` stays on while either protocol is in use. A node that uses neither never has its FRR files touched.
+
+**Posture.** As with BGP, the node announces its anycast addresses and nothing else: connected routes are redistributed into OSPF through a route-map that permits only those addresses (`redistribute connected metric-type 1 route-map DNSDIR-OSPF-V4`, and `-V6` for OSPFv3), so an address exists in OSPF only while AnyName holds it on `lo`. Nothing is taken in: a route-map on zebra's OSPF routes (`ip protocol ospf route-map DNSDIR-OSPF-IN`, `ipv6 protocol ospf6 …`) denies every route, so a neighbor cannot change this host's routing table. The networks of the OSPF interfaces themselves are part of OSPF and are advertised as usual. **BFD** is on for every interface.
+
+**Both protocols.** An address is held on `lo` while **BGP or OSPF** can carry it: for OSPF, when an enabled interface has a neighbor in state **Full** (OSPFv2 for an IPv4 address, OSPFv3 for IPv6). The Topology pill shows the better of the two pictures: green when every enabled interface has a Full neighbor, amber when some do, red when none does or OSPF is disabled.
+
+**Turning it off.** Remove all the interfaces: the OSPF part leaves `frr.conf`, `ospfd` and `ospf6d` go back to `no`, and the router ID is cleared with them. **Operate ▸ Anycast** (*Disable OSPF*) does the same without forgetting any setting, and the **Enabled** box of an interface (or right-click ▸ Disable) makes just that interface passive: no hellos, no neighbors, still configured.
+
+```
+dnsdir --ospf                                                    # settings, neighbor state, announced addresses
+dnsdir --ospf-router-id 192.0.2.10 --ospf-interface-add eth0     # the router id is saved with the first interface
+dnsdir --ospf-interface-add eth1 --ospf-area 0.0.0.1 --ospf-network point-to-point --ospf-key SECRET
+dnsdir --ospf-hello 10 --ospf-dead 40 --ospf-metric 100          # - goes back to the default
+dnsdir --ospf-interface-del eth1                                 # the last one turns OSPF off
+dnsdir --ospf-disable                                            # stop OSPF on this node, settings kept (--ospf-enable)
+dnsdir --ospf-interface-disable eth0                             # make one interface passive, kept (--ospf-interface-enable)
+```
+
+**Where to look.** **Monitor ▸ Anycast** shows the OSPF neighbors per interface (`show ip ospf neighbor json`, `show ipv6 ospf6 neighbor json`) with their state and BFD, on its own **OSPF** tab (the BGP neighbors are on the **BGP** tab). **Operate ▸ Anycast** has the same two tabs. The generated OSPF part of `frr.conf` looks like this:
+
+```
+route-map DNSDIR-OSPF-V4 permit 10
+ match ip address prefix-list DNSDIR-ANYCAST-V4
+route-map DNSDIR-OSPF-V6 permit 10
+ match ipv6 address prefix-list DNSDIR-ANYCAST-V6
+route-map DNSDIR-OSPF-IN deny 10
+!
+interface eth0
+ ip ospf area 0.0.0.0
+ ipv6 ospf6 area 0.0.0.0
+ ip ospf network point-to-point
+ ipv6 ospf6 network point-to-point
+ ip ospf bfd
+ ipv6 ospf6 bfd
+!
+router ospf
+ ospf router-id 192.0.2.10
+ redistribute connected metric-type 1 route-map DNSDIR-OSPF-V4
+!
+router ospf6
+ ospf6 router-id 192.0.2.10
+ redistribute connected metric-type 1 route-map DNSDIR-OSPF-V6
+!
+ip protocol ospf route-map DNSDIR-OSPF-IN
+ipv6 protocol ospf6 route-map DNSDIR-OSPF-IN
+```
+
+### Cloud use (untested)
+
+Clouds block multicast and ignore virtual MACs, so the gateway VIP cannot be reached there (real-MAC mode lessens the second problem, not the first). The anycast addresses can: they are plain `/32` routes announced over BGP. A possible setup follows, **not tried in any cloud**:
+
+1. Give a gateway a VIP that is an **unused address in the node's own subnet** (a gateway only starts when the node has an address in the VIP's subnet), and list **every node's address** under *Neighbors (unicast mode)* so the nodes find each other without multicast. The list is shared, so you fill it in once. The VIP forms but nobody uses it.
+2. Add the anycast addresses to that gateway and announce them with BGP (Configure ▸ Anycast). For a peer that is not on a connected subnet, such as an AWS VPC Route Server endpoint, set the neighbor's **Multihop** (usually 2); the peer must use multihop BFD as well.
+3. The gateway joins the election only after its DNS servers answer, and an anycast address is announced only while a server answers.
+4. In AWS, also turn off source/dest check on the instances, and allow BGP (TCP 179) and BFD (UDP 3784 and 4784) in the security groups.
+
+## Gateway roles, virtual MACs and real-MAC mode
+
+This section is the detail behind [How it works](#how-it-works), for when you need to know exactly what the nodes do on the wire.
+
+### The gateway key, clocks and replay
+
+Every packet of the election protocol is signed with the gateway's **HMAC shared key** (Configure ▸ Gateways), so a machine without the key cannot take part. Anyone who has the key can take over the gateway, so use a long random one: a new gateway starts with a random 32-character key, and a gateway whose key is well known (`dnsdir`, `dgw`, `change-me`) or shorter than 12 characters is named in the log, by `--canvas` and in red beside the field in Settings. Changing the key there is pushed to every node by the cluster and restarts the gateway on each; for a moment the nodes do not hear each other, so do it at a quiet time.
+
+Since protocol version 3 every packet also carries the sender's clock (Unix milliseconds) under the signature. A node drops a packet whose clock is more than 30 seconds from its own, and a packet that is not newer than the last one it took from the same sender, so a recorded packet cannot be played back. Keep the nodes' clocks in step with NTP; a node whose clock is off is named in the log once a minute ("is N s off this node's clock"). **Version 3 nodes and version 2 nodes (dnsdir v429 and earlier) do not hear each other**, so while a cluster is being updated a gateway can have more than one controller until all its nodes have the new version; update them close together.
+
+### The VIP on controllers and forwarders
+
+The AGC owns the VIP on its macvlan. An AFN is reached through its vMAC, but the kernel only accepts traffic for addresses it owns. So an AFN adds the VIP to `lo` as a /32 (/128) and sets `arp_ignore=1` and `arp_announce=2` on the parent interface and its macvlan, so it never answers or advertises ARP for the VIP. The AGC stays the only ARP and neighbour-solicitation authority.
+
+### Who is controller
+
+The node that is controller stays controller. A node that joins or restarts becomes a forwarder even when its priority is higher or its address sorts higher. It takes the role only if it has **preemption** enabled (the Settings switch) and outranks the controller, or if two controllers meet and one must give way. So after a node is restarted, the roles stay as they fell, instead of moving twice.
+
+The controller marks its hellos with a flag (bit 3). A node that took over keeps its old slot number, so slot 1 alone no longer tells a joiner who the controller is. A leaving node sets bit 2.
+
+### Slots and virtual MACs
+
+A slot is one MAC (`00:1a:7c:<group>:<slot>:00`) on the wire, whichever address family uses it. A node takes the same slot in IPv4 and IPv6 when it can, and never one that a node it hears (in either family) already has.
+
+A controller that gives way to a better one moves to a free forwarder slot. Two forwarders that picked the same slot settle it by rank (the lower one moves). The IPv4 and IPv6 sides of a node share the interface of a slot, which is removed only when neither uses it any more. The two families elect their controllers separately and may pick different nodes; the IPv6 controller then moves off slot 1 to a free slot, so no MAC is ever on two nodes.
+
+### Real-MAC mode (no virtual MACs)
+
+Virtual MACs need the network to deliver frames addressed to a MAC that is not the NIC's own. A VMware port group with promiscuous mode off drops them, and so do clouds that allow one MAC per interface. For those networks, a gateway has a setting, **Use real MAC addresses** (Configure ▸ Gateways; `real_macs` in the file; `--configure`). It is shared by the cluster, and changing it restarts the gateway.
+
+It is **on for a gateway you create** (first start, Add gateway, `--canvas-add gateway`, `--configure`), because most networks need it. A gateway that already existed keeps the setting it had (a file that does not say `real_macs` means off), so an upgrade changes nothing. Off is the older way: a virtual MAC per node, which fails over without depending on the neighbors (see the last point below).
+
+In real-MAC mode, everything above is replaced as follows:
+
+- **No macvlan, no slot MAC.** Every node, the controller too, holds the VIP on `lo` and has `arp_ignore=1` and `arp_announce=2` set on the real interface (put back when the gateway stops).
+- **The controller still answers** ARP and IPv6 neighbor solicitations for the VIP, and still picks a node by the load-balancing method. The answer names the **real MAC** of the node it picked: its own MAC for its own slot, and also for any node whose MAC it does not know yet (it holds the VIP too, so that is always right). It is sent from the controller's own MAC.
+- **The controller learns the real MACs** without any change to the gateway protocol: from an ARP a node sends, from any IPv6 frame from a node's link-local address, and by asking (an ARP request or a neighbor solicitation of its own) for the ones it has not heard, again every minute. Nodes of any version take part.
+- **A real MAC cannot be taken over.** When a node dies or leaves, the controller announces the VIP at its own MAC with an unsolicited ARP (or neighbor advertisement), now and twice more within a second. Neighbors that honor one repoint at once; the others keep sending to the dead node until their ARP entry ages out (a Palo Alto's default is 30 minutes). Check how your firewalls treat it, and turn the setting off for a gateway whose neighbors do not honor one. A planned stop gives the announcement a head start, because the leaving node stays up for a moment after the controller has been told.
+- **The vMAC column** of Monitor ▸ Gateways shows real MAC addresses (the controller knows all of them; a forwarder only its own).
+
+![Monitor ▸ Gateways: roles, slots and MACs of every node, and the state of each gateway's DNS listener](snaps/gateways.png)
+
+## The web GUI
+
+Everything the command line does is also in a browser, over HTTPS on port **53853** (`web.listen`). The page follows the system light or dark theme automatically. The **?** at the top right of every page opens a slide-out help panel for the screen you are on. Every screen has a panel of its own, and so does every tab and sub-tab (for example Configure ▸ DNS ▸ Resolution ▸ Block Lists, and the Google, Microsoft and OpenID Connect tabs of Users ▸ SSO); the panel changes when you change tab. Each panel says what the screen is for, what you can do on it, the steps for the usual jobs, every field, and the command-line equivalents.
+
+Saving applies immediately, with the same hot reload as editing the file.
+
+![The sign-in page](snaps/login.png)
+
+### Signing in
+
+**Login** is backed by PAM: a user may log in if PAM accepts their password *and* they are a member of the `dnsdir` group.
+
+```
+groupadd dnsdir
+usermod -aG dnsdir alice
+cp contrib/pam.d/dnsdir.debian /etc/pam.d/dnsdir     # or dnsdir.rhel
+```
+
+Without `/etc/pam.d/dnsdir`, PAM falls back to its `other` policy, which usually denies everything. The help panel has a **Find** box at its top: every match in the page's help is marked, Enter goes to the next one (Shift+Enter the one before) and Esc empties the box. `root` is not special: add it to the group if you want it to log in. Removing a user from the group ends their session within a minute.
+
+For Active Directory (or any directory that sssd serves), see [Signing in with Active Directory](#signing-in-with-active-directory) below.
+
+The PAM binding uses cgo, so build natively with `libpam0g-dev` (Debian and Ubuntu) or `pam-devel` (RHEL) installed. A build without cgo, including any cross-compile, has no PAM, so it **refuses to start the GUI** rather than serve it unauthenticated. The daemon and the command line work normally.
+
+### Signing in with Active Directory
+
+Accounts do not have to be local. A node that is joined to an Active Directory domain (Samba AD or Windows AD) with sssd sees the domain's users and groups through the operating system, and dnsdir signs them in through the same PAM service as a local user: it has no LDAP code of its own and stores no directory password. Tested with a Samba AD domain controller and `realm join`. Do the steps on **every** node: the login groups are a per-node setting, and each node must be joined.
+
+**1. Join the node to the domain.** The node needs DNS that can find the domain controller, and a clock within five minutes of it.
+
+```
+# Debian / Ubuntu
+apt install realmd sssd sssd-ad adcli sssd-tools krb5-user libpam-sss libnss-sss pamtester
+# RHEL / Rocky / Alma
+dnf install realmd sssd adcli oddjob-mkhomedir krb5-workstation samba-common-tools pamtester
+
+realm discover example.com
+realm join -U Administrator example.com
+```
+
+**2. Settings in `/etc/sssd/sssd.conf`**, in the `[domain/example.com]` section that `realm join` made, then `systemctl restart sssd`:
+
+```
+use_fully_qualified_names = False      # sign in as  alice,  not  alice@example.com
+fallback_homedir = /nonexistent        # these accounts only sign in here
+default_shell = /sbin/nologin
+```
+
+**3. Make a group in the directory.** Create a group called `dnsdir-users` in Active Directory and put the people who may sign in in it. Give it a different name from the local `dnsdir` group the installer creates: the local group is looked up first, so a directory group with the same name would be hidden by it and its members could not sign in.
+
+The **Login groups** setting (Configure ▸ Web, or `web.group` in `dnsdir.conf`) takes several groups separated by commas; a member of any of them may sign in, and a group that does not exist on a node is skipped. A new installation has `dnsdir,dnsdir-users`: the local group, which the Users page manages, and the directory group, which is managed in the directory. An existing configuration is not changed by an update. In a cluster the setting is shared: set it on any node (after every node is updated) and the others follow. The setting is live; people who are not in a listed group are signed out within a minute.
+
+**Read-only access.** The **Read-only groups** setting (Configure ▸ Web, or `web.read_group` in `dnsdir.conf`) takes groups in the same form as the login groups; the default is `dnsdir-ro`, the local group the installer creates (`--add-ro-user NAME` adds someone to it; an empty setting turns read-only access off). A member of one of them who is in none of the login groups can sign in and look at every page, but cannot change anything: every save, button and action is refused (HTTP 403, with a message), and Sign out still works. Keys and passwords in the configuration are shown as `(hidden)` and the saved configuration versions cannot be opened or downloaded. **Users page:** choose *Read-only* under Access when adding a user or adding an existing account, or change an existing user's Access and Save; it moves the account between the login group and the first local read-only group, on every node of the cluster. A directory group (for example `dnsdir-ro-users` in Active Directory, added to the setting after a comma) is managed in the directory. A member of a login group keeps full access. The setting is shared by the cluster and is live (a signed-in person moves to or from read-only within a minute). The command line and the local socket are not affected: they are for the administrator of the machine.
+
+**4. Group policy.** sssd applies the domain's group policy (GPO) at the account step of PAM and refuses every PAM service that has no logon right, and `dnsdir` is not one it knows: the password is accepted and the sign-in still fails with `pam account check (password accepted): Permission denied`, even though ssh works. When the daemon starts it looks for this, and if it finds an AD domain in `sssd.conf` that enforces group policy without a mapping for its PAM service it adds the line below to that domain's section, keeps the old file as `sssd.conf.dnsdir.bak` (once) and restarts sssd:
+
+```
+ad_gpo_map_interactive = +dnsdir
+```
+
+dnsdir and ntpdir on the same host each add their own item to the same line. A domain that is defined only in a `conf.d` snippet is not edited; the log says what to add. A domain with `ad_gpo_access_control` set to `permissive` or `disabled`, or one that is not Active Directory, needs nothing.
+
+**In a container (LXC, Proxmox).** An unprivileged container has only the user IDs of its `uid_map` (usually 0–65535; see `/proc/self/uid_map`), and sssd makes the IDs of AD users from 200000 up, which do not exist there: the password is accepted and the sign-in fails anyway. When the daemon starts in such a container, and an AD domain in `sssd.conf` has no `ldap_idmap_range_*` of its own, it adds these lines to the domain's section, stops sssd, deletes its cache (`/var/lib/sss/db`, `/var/lib/sss/mc`, which hold the IDs it made), and starts it again:
+
+```
+ldap_idmap_range_min = 10000
+ldap_idmap_range_max = 60000
+ldap_idmap_range_size = 50000
+```
+
+Use the same range on every node, so a user has the same ID everywhere; a node that is not in a container keeps sssd's default unless you set these lines on it too. A range you set yourself is never changed, and a container whose map is smaller than 60000 only gets a warning in the log. Changing the range changes the IDs of every directory user and group on the node. 50000 IDs cover directory objects with a relative ID (the last part of the SID) up to 50000.
+
+**5. Check from the shell** before the GUI:
+
+```
+sss_cache -E
+id alice                                   # lists dnsdir-users
+getent group dnsdir-users                    # lists its members
+pamtester dnsdir alice authenticate acct_mgmt  # both steps must succeed
+```
+
+Then sign in with the name `id` prints (`alice` with the setting above). When it does not work, the reason is in the log (`journalctl -u dnsdir | grep 'login failed'`); the login page gives one message for every cause:
+
+| The log says | Meaning |
+|---|---|
+| `authentication failed: pam: Authentication failure` | wrong password, or the PAM service file `/etc/pam.d/dnsdir` does not use sssd |
+| `authentication failed: pam account check (password accepted): Permission denied` | sssd refused the service: group policy (step 4), `simple_allow_groups`, or an `ldap_access_filter` |
+| `group lookup failed` / `not a member of group` | the user or the group is not visible to the operating system: look at `id` and `getent group`, and remember that sssd caches (`sss_cache -E`) |
+
+A directory account keeps its password and expiry date in the directory. **Add an existing account…** on the Users page can still add one by name to the local group (instead of using a directory group); the password and expiry buttons then refuse it, and Disable removes it from the group as for any account. Changes to a person's groups in the directory take effect when sssd's cache refreshes; a session that is open is re-checked about once a minute.
+
+### Which page does what
+
+| CLI | Web GUI |
+| --- | --- |
+| `--canvas`, `--canvas-add`, `--canvas-del` | Topology page (draw gateways, servers, domains; live colours) |
+| `--canvas-add node` / `--canvas-del node` `--group N` `--node NODE` | Topology page: right-click the gateway ▸ **Add node** / right-click a node ▸ **Remove from this gateway** |
+| `--server-stats ADDR` `[--stats-range 1h\|1d\|7d]` | Topology page: right-click a server ▸ **Statistics** (latency and loss graphs) |
+| `--canvas-move server\|domain\|anycast` `--group N` `--server ADDR` `[--name DOMAIN \| --address ADDR]` `--to N` | Topology page: drag a server left/right, a domain or an anycast address up/down |
+| `--dns-lookup IP\|NAME` | Add DNS server form: the Name is filled in from the address (reverse DNS), or the address from a name |
+| `--server-stats ADDR --name DOMAIN` `[--type T]` | Topology page: right-click a domain ▸ **Statistics** |
+| `--gateway-stats GROUP` `[--stats-range 1h\|1d\|7d]` | Topology page: right-click the gateway circle ▸ **Statistics** (answer time, errors, availability, queries) |
+| `--show-gateways`, `--show-neighbors` | Gateways page (roles, slots, vMACs, DNS listener state) |
+| `--schedule`, `--schedule-history`, `--schedule-set JSON`, `--schedule-del ID`, `--schedule-run ID` | Operate ▸ **Scheduler** (the tasks, their history on this node; New / right-click ▸ Edit, Copy, Paste, Run now, Disable, Delete) |
+| `--assert-agc` | Operate ▸ Node ▸ **Gateway controller**: "Make this node the gateway controller" (asks to confirm) |
+| `--cluster-status` | Monitor ▸ Cluster (the members) |
+| `--show-dns` | DNS tab (ranking, health, latency bars, counters) |
+| `--show-config`, `--configure` | Configure pages (form; every edit saves and applies at once) |
+| `--versions`, `--version-show/-diff/-snapshot/-restore/-export`, `--config-import` | History tab |
+| `--users`, `--user-add`, `--user-grant`, `--user-revoke`, `--user-passwd`, `--user-expiry`, `--user-del` | Configure ▸ Users |
+| `--tls-status/-install/-csr/-revert/-regenerate` | Configure ▸ Web GUI (certificate) |
+| `--dns-tls-status/-install/-csr/-revert` | Configure ▸ DNS ▸ Listeners (certificate for DNS over TLS and HTTPS) |
+| `--acme-status/-set/-register/-check/-request` | Configure ▸ DNS ▸ Listeners ▸ Get the certificate automatically |
+| `--cluster-status/-token/-join/-promote/-remove/-unremove/-leave/-sync` | Cluster tab |
+| `--cluster-failover auto\|on\|off` | none: the GUI always uses Auto (on from three members); the command forces it on or off |
+| `--update-status/-history/-upload/-apply/-push` | Upgrade tab (stats at the top, upload, a paged History of every update event (`--update-history` prints them all; `--update-status` the newest 50), Nodes card: tick members, **Update this node now** / **Update N selected**) |
+| `--update-auto` | Configure ▸ Settings ▸ **Upgrades** tab |
+| `--update-repo` | Configure ▸ Settings ▸ **Upgrades** tab (Online repository) |
+| `--update-cancel` | command line only (the Upgrade tab shows what is queued) |
+| `--stats-clear` `[--all-nodes]`, `--scan ADDR`, `--ping ADDR\|NAME`, `--traceroute ADDR\|NAME`, `--lookup ADDR\|NAME`, `--cache-flush NAME`, `--cache-clear` | Statistics page: **Clear**; right-click a client ▸ **Scan** (prints the report); right-click a client or domain ▸ **Ping**, **Traceroute**, **Lookup** (the popup's output, printed when done); right-click a domain ▸ **Flush** (every node); `--cache-clear` is the **Clear** button of the **Cache** box on the DNS page (every node); a client's **Limit** is the `client_limits` setting, **Copy** has no command |
+| `--stats` `[--stats-range now\|1h\|1d\|7d\|30d] [--stats-rcode KIND] [--stats-client ADDR \| --stats-domain NAME] [--all-nodes]`, `--whois NAME`, `--dns-updates` | Statistics page (Monitor); `--whois` is right-click ▸ **Whois**; the last is its **Recent dynamic updates** card |
+| `--host` `[--host-range 1h\|1d\|7d\|30d] [--all-nodes]` | Host page (Monitor); `--all-nodes` is the Node menu's **Cluster** entry (also on Statistics) |
+| `--capture IFACE` `[--capture-seconds N] [--capture-filter EXPR] [--capture-file FILE] [--all-nodes]`, `--capture-interfaces` | Capture page (Monitor); `--all-nodes` is the Node menu's **Cluster** entry there |
+| `--tshoot` `[--all-nodes] [--tshoot-file F]` | Log page ▸ tshoot |
+| `--log` `[--log-min LEVEL] [--log-grep WORDS] [--log-since 6h] [--log-lines N]` | Log page (Monitor) |
+| `--power restart\|shutdown\|cancel\|status` `[--in MIN \| --at HH:MM]` | Operate ▸ Node ▸ **Host** |
+| `--node-pause`, `--node-resume`, `--node-status` | Operate ▸ Node ▸ **Maintenance** (Pause / Resume this node) |
+| `--hostname NAME` | Topology ▸ right-click a node ▸ **Rename** |
+| `--bgp-disable`, `--bgp-enable`, `--bgp-neighbor-disable ADDR`, `--bgp-neighbor-enable ADDR` | Operate ▸ Anycast (Disable / Enable BGP, and per neighbor) |
+| `--ospf`, `--ospf-router-id`, `--ospf-interface-add NAME` `[--ospf-area A] [--ospf-network T] [--ospf-key K]`, `--ospf-interface-del NAME`, `--ospf-hello`, `--ospf-dead`, `--ospf-metric` | Configure ▸ Anycast ▸ OSPF |
+| `--ospf-disable`, `--ospf-enable`, `--ospf-interface-disable NAME`, `--ospf-interface-enable NAME` | Operate ▸ Anycast (Disable / Enable OSPF, and per interface) |
+| `--syslog`, `--syslog-server`, `--syslog-protocol`, `--syslog-facility`, `--syslog-format`, `--syslog-ca`, `--syslog-tls-insecure`, `--syslog-disable`, `--syslog-enable`, `--syslog-test` | Configure ▸ Settings ▸ Logs (Syslog card) |
+| `--version`, `--help` | version in the header; the **?** at the top right of every page opens a slide-out help panel for that page or tab (what it is for, the steps for the usual jobs, every field, and the command-line equivalents) |
+
+### TLS and security notes
+
+**TLS.** With no certificate configured, a self-signed one is generated next to the config file (`dnsdir-web.crt` and `.key`, key mode 0600) and renewed at start-up when it is within 30 days of expiry. Your browser will warn until you install a real certificate; see [The GUI certificate](#the-gui-certificate).
+
+**Exposure.** The GUI can reconfigure a daemon that runs as root and listens on all interfaces by default. Bind it to a management address (`"listen": "10.0.0.5:53853"`) or firewall the port.
+
+**Sessions and cookies.** Sessions are kept in memory and saved to `sessions.json` in the state directory (mode 0600, only a SHA-256 of each cookie), so an upgrade or a restart of the daemon does not sign anyone out; the idle timeout and the 12 hour limit still apply. Changing the GUI listen address does sign everyone out. A user's sessions also end when that user's password changes, the account is deleted or it expires. Cookies are HttpOnly, Secure and SameSite=Strict, named with the `__Host-` prefix. Every change carries a CSRF token, and a strict CSP (no inline script) is in force.
+
+**Failed logins** are limited. By default, 3 wrong passwords within 1 minute lock that address, and that address together with that user name (never the user name alone), out for 15 minutes. All three numbers are on Configure ▸ Web GUI (`web.max_failed_logins`, `web.failed_login_window_minutes`, `web.lockout_minutes`). A failed login gets one message that does not say what was wrong, which group is needed, or how many tries are left, because that would give a guesser a target. Only once an address is locked out does the login page say "Too many failed attempts." and disable its form until the lockout ends.
+
+**LDAP sign-in (Samba 4 / Active Directory).** Configure ▸ Users ▸ LDAP lets people sign in on the ordinary login form with a directory account. The host's accounts are tried first, then the directory. Keys in the `web` block: `ldap_servers` (list of `ldaps://host:636` or `ldap://host:389` addresses, up to 8, tried in order; `ldap://` requires StartTLS and a password is never sent unencrypted), `ldap_skip_verify` (accept any server certificate: encrypted but not authenticated; off by default and logged), `ldap_bind_dn` and `ldap_bind_password` (a read-only service account), `ldap_base_dn`, `ldap_rw_group` and `ldap_ro_group` (a group name or DN; nested groups count; both means full access). The user is found by `sAMAccountName` or `userPrincipalName`, must be enabled, and the password is checked last by binding as that user. Sessions are rechecked each minute; an unreachable directory leaves them in place. Filters are built from escaped values, empty passwords are never sent, computer accounts and ambiguous names are refused. The Test box tries a lookup and lists the steps. The bind account is optional: with `ldap_bind_dn` and `ldap_bind_password` both empty each person binds as themselves (`alice` becomes `alice@` plus the domain of `ldap_base_dn`; `alice@example.lan` and `EXAMPLE\alice` are used as typed) and their own groups are read, but sessions are then not rechecked. The OpenID Connect provider has a matching `sso_oidc_skip_verify`.
+
+**Single sign-on (Google, Microsoft Entra ID, any OpenID Connect provider).** Besides the system password, the login page can offer **Sign in with Google** and **Sign in with Microsoft** (OpenID Connect, authorization code flow with PKCE, nothing outside the standard library). Set it up under Configure ▸ Users ▸ SSO, or in the `web` block: `sso_google_client_id` and `sso_google_client_secret`; `sso_entra_tenant` (the Directory/tenant GUID), `sso_entra_client_id` and `sso_entra_client_secret`; `sso_oidc_name`, `sso_oidc_issuer`, `sso_oidc_client_id` and `sso_oidc_client_secret` for your own OpenID Connect provider (Authentik, Keycloak, Authelia, Zitadel; the issuer is its https address, tokens must be signed RS256 and the address verified, and a private certificate authority must be in the host's trust store); `sso_users`, one `alice@example.com rw`, `bob@example.com ro` or `carol@example.com rw google` per entry (no level means `ro`; a provider, `google`, `microsoft` or `oidc`, admits the address through that provider only, none means any); and optionally `sso_base_url` (`https://name:port`) when the provider should always send the browser back to one address. Register the console with the provider as a web application and give it the redirect URI `https://THIS-NODE:53853/api/sso/callback` (Google Cloud Console ▸ APIs & Services ▸ Credentials ▸ OAuth client ID; Entra ▸ App registrations ▸ Web, with a client secret's Value). A provider appears on the login page only when all its values are filled in. Only the addresses on the `sso_users` list get in, whatever account they use; the ID token's signature, issuer, audience, expiry and nonce are checked, Microsoft accounts must belong to the configured tenant, and Google addresses must be verified. SSO sessions are checked against the list every minute, so removing an address ends them and `rw` to `ro` makes them read-only. The settings are shared by the cluster and the secrets are hidden from read-only accounts. Each node needs HTTPS access to `accounts.google.com` or `login.microsoftonline.com`. The password login stays available either way. The settings are edited in the GUI or with `--config-import`; there is no separate command line for them.
+
+**Passwords** set on the Users page must have at least 8 characters (`web.min_password_length`, 1–128; absent or 0 means 8).
+
+**Management commands** (everything under `--versions`, `--tls-*`, `--cluster-*`, `--update-*`, and `--assert-agc`) go over the local status socket, which only root may use (file mode plus `SO_PEERCRED`).
+
+## Users
+
+Configure ▸ Users (or `dnsdir --users`) manages the accounts that may sign in to the GUI: the members of the GUI group (`dnsdir`, or `web.group`). They are ordinary operating-system accounts on the node, managed with `useradd`, `usermod`, `userdel` and `chpasswd`, so PAM stays the single place passwords are checked. A new account has no shell and no home directory and exists only to sign in. Each account can have an expiry date, and the operating system refuses it from that day.
+
+The accounts are listed on the left. Pick one to change it on the right: type a new password and/or change the expiry date and press **Save** (leave the date blank and the account never expires). **Disable** takes the account out of the group while keeping it, and **Delete** removes it. **+ New** and **Add an existing account…** open their forms in the same place.
+
+![Configure ▸ Users: the accounts on the left, the chosen account on the right](snaps/users.png)
+
+```
+dnsdir --users
+dnsdir --user-add alice --expires 2027-06-30     # asks for the password
+dnsdir --user-passwd alice
+dnsdir --user-expiry alice --expires never
+dnsdir --user-grant bob                          # an account that already exists joins the group
+dnsdir --user-revoke bob                         # leaves the group; the account is kept
+dnsdir --user-del alice
+```
+
+**The rules.**
+
+- Names are 1–32 lower-case letters, digits, `_` or `-`.
+- Passwords go to `chpasswd` on its standard input, never on a command line.
+- *Add user* never touches an account that already exists. **Add an existing account…** (`--user-grant`) puts one in the group with `usermod -aG` and, on the other nodes, adds it where it exists and creates it with the same password hash where it does not.
+- **Disable** (`--user-revoke`) takes any member out with `gpasswd -d` and keeps the account. It is refused for yourself, for the last account, and for one that is a member only as its primary group.
+- Only members of the group can be changed. `root` is never listed or changeable, and neither the signed-in user nor the last account that can sign in can be deleted.
+- Any member can manage the others, which is the same power they already have over the daemon. Every change is logged with who made it. The installer adds the user who ran it to the group.
+
+**In a cluster, every change applies to every node.** Add, delete, password and expiry are made on the node you are on and sent to the others over the cluster channel as the password *hash*; the password itself never leaves the node that received it. The reply says on how many nodes the change was applied and names any that were not (a node that was down misses the change, and the CLI exits with 2). To bring such a node in line, set the password again (that re-sends the whole account and creates it where it is missing), or repeat `--user-del` (a node where the account is already gone accepts it). A node never takes over an account that already exists there outside the GUI group.
+
+**A node that joins a cluster gets the cluster's accounts.** Right after joining, it copies the GUI-group accounts (name, password hash, expiry) from the node it joined through. An account that already exists on the new node is left exactly as it is, and accounts with no password are not copied. If that fails, the join still succeeds and the log says so; set a password again to send it.
+
+## Config history
+
+Every change to the configuration, whether from the GUI, the CLI, a cluster sync or a hand edit of the file, is stored as a version in `/var/lib/dnsdir/versions` (one JSON file each; the newest 200 are kept). A version records when it happened, who made it (`alice`, `cli:root`, `file edit`, `cluster sync` and so on) and a one-line summary such as `DNS settings: probe_interval_ms 5000 → 7777`. Secrets (keys) never appear in summaries, and identical saves are not recorded again.
+
+![Configure ▸ History: every saved version, with who made it and what changed](snaps/history.png)
+
+```
+dnsdir --versions                         # list
+dnsdir --version-diff 1790827200558       # that version → live config
+dnsdir --version-diff A..B                # two versions
+dnsdir --version-snapshot --note "before the VIP change"
+dnsdir --version-restore 1790827179815    # applies it; the live config is saved first
+dnsdir --version-export [ID] > dnsdir.conf  # download
+dnsdir --config-import dnsdir.conf          # validate and apply a file
+```
+
+In the GUI, the History tab lets you view a version, diff it against the live config, the previous version or two selected ones, restore, download, upload and snapshot. A snapshot note can only be given on the command line. In a cluster, restoring changes the shared part through the primary, like any other edit.
+
+## The GUI certificate
+
+`web.cert_file` and `web.key_file` take precedence, and are re-read when the files change, so a renewal needs no restart. Without them you can manage the certificate at runtime, under Configure ▸ Web GUI or with the commands below.
+
+![Configure ▸ Web GUI: the certificate card, the listen address and the login limits](snaps/web-certificate.png)
+
+```
+dnsdir --tls-status
+dnsdir --tls-csr --cn gw.example.com --san gw.example.com,10.0.0.5   # key stays on the node
+dnsdir --tls-install --cert-file gw.pem --key-file gw.key             # key optional after a CSR
+dnsdir --tls-revert                                                   # back to self-signed
+dnsdir --tls-regenerate                                               # new self-signed
+```
+
+An installed certificate is checked (chain order, key match, validity, server auth, names) and served from the next connection on, with no restart and no logout. The order of precedence is: files named in the config, then the installed certificate (or the one replicated from the cluster), then self-signed. The GUI warns when the certificate expires within 30 days. The primary's certificate is copied to every member, and reverting it on the primary reverts them all.
+
+## The DNS over TLS and HTTPS certificate
+
+DoT and DoH present a certificate of their own, so the name clients connect to does not have to be the name of the console. It works like the GUI's, under Configure ▸ DNS ▸ Listeners (a **Certificate for DNS over TLS and HTTPS** card below the ports) or with the commands below:
+
+```
+dnsdir --dns-tls-status
+dnsdir --dns-tls-csr --cn dns.example.com --san dns.example.com,10.0.0.53   # key stays on the node
+dnsdir --dns-tls-install --cert-file dns.pem --key-file dns.key              # key optional after a CSR
+dnsdir --dns-tls-revert                                                      # back to the GUI's certificate
+```
+
+The order of precedence is: `dns.tls_cert_file` and `dns.tls_key_file` (shared settings in the top-level `dns` block, both or neither, re-read when the files change so a renewal needs no restart), then the installed certificate (or the one replicated from the cluster), then the GUI's certificate, which is what you get until you set one. Installing is checked like the GUI's (chain order, key match, validity, server auth, names), takes effect from the next connection with no restart, and is copied to every cluster member. Installing or reverting it never touches the GUI's certificate. The log warns daily when it expires within 30 days. There is no self-signed certificate of its own, so `--dns-tls-revert` only ever goes back to the GUI's.
+
+## Automatic certificates (ACME)
+
+AnyName can order a certificate from Let's Encrypt (or any ACME CA, RFC 8555) and renew it by itself, for the DoT/DoH certificate, the GUI's, or both. It is written with the standard library only. Nothing needs to reach your hosts from outside and none of your DNS servers needs to accept updates: the names are proved with the **dns-01** challenge through an [acme-dns](https://github.com/joohoi/acme-dns) server.
+
+How it works, once:
+
+1. Configure ▸ DNS ▸ Listeners ▸ **Get the certificate automatically**: give the names (public names; `*.example.com` works), an email address and what the certificate is for, and press **Save and get the certificate**. (To try the whole path first with a certificate browsers do not trust, put `https://acme-staging-v02.api.letsencrypt.org/directory` under **Advanced** ▸ *Another ACME CA*; the command line has `--acme-directory staging`.) This saves, gets a name for each domain from the acme-dns server (default `https://auth.acme-dns.io`; put your own instance in **Advanced**), adds a daily task to the Scheduler (action `certificate_renew`), and shows the CNAMEs to add, such as `_acme-challenge.dns.example.com  CNAME  <id>.auth.acme-dns.io`. A name and its wildcard (`example.com`, `*.example.com`) share one record.
+2. Add those CNAMEs at whoever hosts your DNS, once. The primary looks for them every 30 seconds (for a day) and orders the certificate as soon as they are all in place; there is nothing more to press. The progress shows on the page, and the certificate is installed like an uploaded one and reaches every node.
+
+From then on, the Scheduler task **Renew the automatic certificate** runs daily on every node. It does something only on the primary and only when the certificate is within 30 days of expiring (Let's Encrypt certificates last 90 days, so about every 60), so it can stay on every node and a change of primary needs nothing. Before it publishes a proof it checks the CNAME and says plainly if it is missing or points elsewhere. After a failure it waits 6 hours before trying again; the Scheduler history and the page show the reason, and the installed certificate keeps serving until it expires.
+
+```
+dnsdir --acme-go --acme-names dns.example.com,*.example.com --acme-email me@example.com   # the button: save, register, order when the CNAMEs are in
+dnsdir --acme-status            # the CNAMEs to add, and where it stands
+dnsdir --acme-set ...           # change settings only (also --acme-enable off)
+dnsdir --acme-register  --acme-check  --acme-request    # the single steps
+```
+
+Things to know:
+
+- The settings, the ACME account key, the acme-dns credentials and what was issued are one small file (`acme/state.json` in the state directory, mode 0600) that the primary copies to the other nodes, the way it copies the certificates. A new primary carries on from where the old one was. The key and the acme-dns password are never shown in the GUI, the API or the CLI.
+- A change made on a replica goes through the primary.
+- If a certificate is installed by hand afterwards, automatic renewal pauses until **Get certificate now** is pressed (the page says so). Certificate files named in the configuration file take precedence and make an order refuse.
+- Several clusters can use the same names. The CNAME can point at one place only, so register on the first cluster, then on each other cluster open **Another cluster uses the same names?**, press **Show the credentials** on the first and paste the text under **Use these credentials** on the others. All clusters then write to the same acme-dns name. An automatic run waits a random moment (up to 30 s) before publishing its proof, since acme-dns keeps the two newest values of a name, so two clusters renewing together both succeed.
+- Some CAs (Google Trust Services, ZeroSSL) need an External Account Binding key id and key: the card has fields for them. The account is made with an ES256 (P-256) key, and each certificate gets a fresh P-256 key.
+- Only `dns-01` through acme-dns is built in. The newer `dns-persist-01` (one standing record) is not yet offered by Let's Encrypt; it can be added when a CA you use supports it.
+
+## Clustering
+
+Clustering is for **management only**. It keeps the settings of several AnyName nodes in step and lets you update them together, and it is independent of the AGC/AFN election. It is always on: every node is the primary of a cluster of one until it joins another. The only settings are:
+
+```
+"cluster": {"listen": ":53854", "self": "10.0.0.5:53854"}
+```
+
+`self` is the address the other nodes use to reach this node. Open TCP **53854** between the nodes.
+
+![Monitor ▸ Cluster: the members, their role, address, version and whether they have caught up](snaps/cluster.png)
+
+### How nodes reach each other
+
+Nodes are reached by **every address they have**, not by one name. `self`, the host name, and all the node's IPv4 and IPv6 addresses (link-local and loopback excluded) go into the join code and are shared between members. The joining node tries them in order until one answers, and every later request tries the IP address that last worked first, then the rest.
+
+IP addresses are tried before names, and a name is looked up for at most 2 seconds. Each node saves the addresses its peers report about themselves with the member list, so cluster traffic keeps working while DNS is down (the DNS gateway being paused on every node, say), and also right after a restart. Addresses are re-read at every sync, so a changed IP is picked up on its own.
+
+### Joining and roles
+
+One node is the **primary** and the rest are **replicas**. A new node is the primary of a cluster of one. To join:
+
+1. On any member, run `dnsdir --cluster-token`. It prints a join code (single use, valid for one hour).
+2. On the new node, run `dnsdir --cluster-join 'ddgw-join-v1:…'`. In the GUI, use Cluster tab ▸ Create join code / Join.
+
+Joining replaces the new node's *shared* settings with the cluster's, after saving a snapshot of what it had.
+
+### What is shared and what is per node
+
+**Shared** settings are the DNS block and, per group, `group_id`, `name`, `vip4`, `vip6`, `more_vip4`, `more_vip6`, `key`, `lb_method`, `hello_ms`, `hold_ms`, `max_afns` and `neighbors` (the unicast list: every node's address; each node skips its own). **Per node** are the interface, priority, weight, preempt, the log level, and the web and cluster blocks, except the web **Login groups** (`web.group`), the sign-in lockout (`max_failed_logins`, `failed_login_window_minutes`, `lockout_minutes`) and the minimum password length, which are shared too: the same people may sign in on every node, under the same rules. A cluster whose login group is still the single group `dnsdir` and whose lockout and password length are the defaults shares nothing; any other value is replicated, so update every node before changing them (a node on an older version does not know these settings). Putting a setting back to its default on the primary does not reach nodes that kept another value; set it on them, or give it any other value and then the default again from a node that has the change.
+
+You can edit anywhere. A change to shared settings made on a replica is forwarded to the primary, validated there, and replicated to everyone within the sync interval (5 seconds). A group added on the primary appears on replicas with the primary's interface and priority as a starting point.
+
+### The node picker
+
+In a cluster, the GUI has a drop-down at the top right to configure and monitor any member from the node you are logged in to. Requests are relayed over the cluster channel and recorded as `user via node`. Every page follows the picked node, including Cluster (leave, promote, join code, sync), Upgrade (upload, update now) and Configure ▸ General ▸ Upgrade (auto-update); only the sign-in is always on the node you logged in to. Uploads through another node are limited to 5 MB.
+
+### Security between nodes
+
+Nodes authenticate each other with a pinned per-node identity certificate (SHA-256 from the join code) and an HMAC over every request using the cluster secret, with timestamps and a replay cache. The cluster port is not the GUI port and is not affected by GUI certificates.
+
+### Promotion, removal and the epoch
+
+**Promotion is explicit.** If the primary is gone for good, run `dnsdir --cluster-promote` on the replica you want; the others follow. Nothing promotes itself after a failure, so a network split cannot silently create two primaries, and a primary that sees a higher epoch becomes a replica.
+
+The **epoch** (shown on the Cluster page) is the counter that says which node is the primary. It starts at 1 and goes up by one on every `--cluster-promote` and on every planned hand-over, and at no other time. **Planned hand-over:** when the primary is restarted or shut down from the GUI or `--power now`, or restarts to install an update, it first gives the role to the reachable replica with the newest shared settings (one that is not itself updating); that node is the primary from then on, and the old one comes back as a replica. If no replica can take it, nothing changes. A primary that goes offline unexpectedly keeps the role until you promote another node or **automatic failover** does: when the primary has not answered for 5 minutes and a strict majority of the members (this one included) say so, the replica with the newest shared settings (then the newest version, then the lowest address) promotes itself and the others follow. `--cluster-failover auto|on|off` (command line only) sets it for the whole cluster; auto is on from three members and off with two, where each side would see the other as down. A replica cut off from the others never has a majority, so it never promotes. The old primary comes back as a replica and shared-settings edits it took while cut off are overwritten. A restart or shut down scheduled with `--power ... in`/`at` (or with `shutdown` directly) hands the role over in the last minute before it fires; cancelling it before then leaves the role alone. Members follow the primary with the highest epoch; a returning old primary at a lower epoch is ignored, and two different claims at the same epoch are refused.
+
+To manage members: `--cluster-delete ADDR` deletes a member for good (nothing is kept about it, so its address is free to use again; right-click ▸ **Delete** on the Cluster page), `--cluster-remove ADDR` drops a member but blocks its address and identity (it resets itself to a cluster of one when it next hears from the cluster), `--cluster-unremove` allows it back, `--cluster-leave` leaves from the node itself, and `--cluster-sync` syncs now.
+
+### Members on different subnets
+
+Members may sit in different subnets; the cluster only needs them to reach each other's cluster port. A gateway, however, runs on a node only if that node's interface has an address inside the gateway's VIP subnet for every family the gateway has, because the election runs on that network. IPv4 is always checked. IPv6 is checked when the interface has a global (non link-local) address, so globally addressed v6 gateways are protected too, while a node with only link-local v6 is let through.
+
+A node without such an address does not start that gateway. It shows grey ("not running here — no address in the gateway's subnet"), is not counted as serving it by the update check, and starts it by itself within seconds of getting an address there. It stays a full cluster member and still takes shared settings and updates. A node that is already running a gateway when its address changes is not stopped. If the VIP prefix differs from the prefix the node has on the same link, the node is held back: give the node an address in the VIP prefix.
+
+### How many members?
+
+There is no member limit. Measured on one 2-core host with real daemons on loopback: 40 members joined in about 40 ms each. A settings change made on any member, primary or replica, reached all 40 within about one sync interval (5 seconds by default). The Cluster page answered in under 15 ms. Five members frozen (not refusing, just silent) were marked unreachable within seconds, did not slow the others, and caught up when resumed. Real networks add latency this loopback test cannot show.
+
+A hand edit of the config file on a *replica* is not a shared edit and is overwritten by the primary's next sync; use the GUI or CLI there.
+
+## Monitoring
+
+The Monitor section of the GUI has pages for statistics, the host, packet capture and the log. Each has a command-line equivalent, and in a cluster each follows the node picked in the Node menu at the top right.
+
+### Alerts
+
+**Monitor ▸ Alerts** shows the alerts of the node picked in the top bar; **Configure ▸ Alerts** (`alerts` in the shared `dns` block: `webhook`, `repeat_hours`, `rules`) holds the rules. The engine looks at the node every 15 seconds. A rule opens an alert when its condition has held long enough: *N failed checks in a row*, *N minutes*, or *M of the last N checks* for up/down rules (upstream server down, fallback in use, listener down, no active gateway), and *past a threshold for N minutes* for value rules (SERVFAIL share, certificate days left, CPU, memory, disk; "no queries" is off by default). It closes by itself after *N good checks in a row* or *N minutes* good (**Clear**). Only rules that are changed are written to the configuration; the others follow the defaults. An alert has a severity (info, warning, critical).
+
+States: open, recovering (good again, clear time not over), acknowledged (ends with the alert), silenced (a silence covers a rule and subject for 15 minutes to 7 days and outlives the alert) and closed (cleared, marked resolved, or rule switched off). An alert that closes and reopens within an hour is the same alert with its count raised. Right-click: Acknowledge, Silence…, Mark resolved, Copy, and More (Fix actions that are safe for the rule - check upstream servers now, empty the cache, restart the DNS listeners, renew the certificate -, Go to, Edit rule…). Opened and resolved alerts are posted to the webhook as JSON and written to the log; with a repeat time the webhook is told again while the alert stays unacknowledged. Alerts and silences are kept per node in `alerts.json` in the state directory (30 days, 1000 alerts) and are not replicated. `/metrics` carries only counts: `dnsdir_alerts_active{severity}`, `dnsdir_alerts_acknowledged{severity}`, `dnsdir_alerts_opened_total`. API: `GET /api/alerts`, `POST /api/alerts/{ack,silence,resolve,fix,test}`.
+
+### Backup
+
 **Configure ▸ Backup** (`backup` in the shared `dns` block: `enabled`, `host`, `port`, `user`, `dir`, `keep`, `hours`, `at`, `password`) makes every node copy its state to a server of yours. The nodes do it themselves; the settings are cluster-wide, the SSH key (`/var/lib/dnsdir/backup/id_ed25519`, ed25519, made on first use) is each node's own and its public half is shown on the page for `authorized_keys` on the server. The server needs an SFTP service; no shell is needed. dnsdir runs the system `sftp` (`StrictHostKeyChecking=accept-new`, its own `known_hosts` in the backup directory, no password login).
 
 An archive is a gzip-compressed tar of the state directory, sealed in 64 KiB pieces with AES-256-GCM; the key comes from `password` with PBKDF2-HMAC-SHA256 (600000 rounds, random salt), and a cut-off or changed file is refused. The first entry is `MANIFEST.json`. What is in it: the configuration file, `versions/`, the web and DNS certificates and keys, `acme/`, the cluster identity, `scheduler.json`, `alerts.json`, the users, and `backup/` (the node's key and known hosts). What is not: the log, `update/`, `blocklists/`, `pairs/` and `stats.json.gz`, `sessions.json`. Files are named `NODE-YYYYMMDD-HHMMSS.dnsbak`, uploaded as `.part` and renamed, and after each upload this node's oldest files beyond `keep` (default 14) are removed; files of other names are never touched. A daily backup (the default) starts at `at` (default 02:30, the node's clock, plus 0 to 5 minutes taken from the node's name so the nodes do not connect together); `hours` N makes it every N hours instead. A node that missed its time backs up as soon as it can. A failed run is retried after 15 minutes, and the alert rule **Backup failed** opens when it keeps failing.

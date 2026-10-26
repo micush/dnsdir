@@ -1,5 +1,16 @@
 # Changelog
 
+## [v583] - 2026-10-26 — Backups to several servers, Install key, restore in the GUI
+
+### Added
+- **Several backup servers.** Configure ▸ Backup has a table of up to eight servers (name, server, port, user, directory, keep). One archive is made per run and uploaded to every server; each server keeps its own number of backups of each node. A server that cannot be reached does not stop the others, and only the failed ones are tried again after 15 minutes; a server added later gets its first backup at once. Every server has its own status, test and list of files. The alert **Backup failed** names the servers that failed. The single server of v582 becomes the first row.
+- **Install key.** On each server, **Install key…** logs in once with the account's password (not stored or logged), adds the public keys of all the nodes of the cluster to its `authorized_keys` as `restrict` keys without touching the other lines, and tests the login. No more copying keys by hand.
+- **Restore in the GUI.** Configure ▸ Backup ▸ Restore a backup on this node: pick a backup on a configured server, on another server (with the account's password; works on a node with nothing set up) or upload a file; type the backup password; **Check backup** opens and verifies it and shows whose it is, when it was made and a warning if it is another node's or from a newer version; **Restore and restart** swaps the files in at the next start and keeps the old state next to it.
+- Help and README updated.
+
+### Notes
+- Upload of a backup file through the page is limited to 32 MB (5 MB when the node picked in the top bar is not the one you are logged in to).
+
 ## [v582] - 2026-10-26 — Automatic backups
 
 ### Added

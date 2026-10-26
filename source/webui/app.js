@@ -3496,20 +3496,51 @@
 
 
   // Configure ▸ Backup: the settings are shared (the dns.backup block); the SSH key and what happened are this node's, shown
-  // for the node picked in the top bar.
+  // for the node picked in the top bar.  The restore works on that node too.
   const BACKUP_FIELDS = [
     { shared: true, k: "enabled", l: "Back up every node automatically", t: "bool" },
-    { shared: true, k: "host", l: "Backup server", t: "text", hint: "A host name or address that takes SFTP." },
-    { shared: true, k: "port", l: "SSH port", t: "int", min: 0, max: 65535, hint: "Empty or 0 is 22." },
-    { shared: true, k: "user", l: "User on the server", t: "text" },
-    { shared: true, k: "dir", l: "Directory on the server", t: "text", hint: "Made if it is not there. Empty is the user's home directory." },
-    { shared: true, k: "keep", l: "Backups to keep per node", t: "int", min: 0, max: 365, hint: "The oldest are removed first. Empty is 14." },
     { shared: true, k: "hours", l: "Every (hours)", t: "int", min: 0, max: 168, hint: "0 is once a day at the time below." },
     { shared: true, k: "at", l: "Time of day", t: "text", hint: "HH:MM on each node's clock; empty is 02:30. A node waits a few minutes more than the others, so they do not all connect at once." },
     { shared: true, k: "password", l: "Password for the archives", t: "secret", hint: "At least 8 characters. The archives are encrypted with it. It is in the backup too: keep a copy somewhere else, a restore cannot do without it." },
   ];
+  // the columns of the table of backup servers (the server entries are part of the same shared block)
+  const BACKUP_COLS = [
+    ["name", "Name", "text", "Backup 1"], ["host", "Server", "text", "backup.example.com"], ["port", "Port", "int", "22"],
+    ["user", "User", "text", "dnsdir"], ["dir", "Directory", "text", "backups/dns"], ["keep", "Keep", "int", "14"],
+  ];
   const backupForm = (bcfg) => {
-    const fs = fieldset(BACKUP_FIELDS, bcfg || {});
+    bcfg = bcfg || {};
+    const fs = fieldset(BACKUP_FIELDS, bcfg);
+    const initial = (bcfg.targets || []).slice();
+    if (bcfg.host || bcfg.user || bcfg.dir) initial.unshift({ host: bcfg.host, port: bcfg.port, user: bcfg.user, dir: bcfg.dir, keep: bcfg.keep });   // the single server of older versions
+    const tbody = h("tbody", {});
+    const addRow = (t) => {
+      t = t || {};
+      const ins = {};
+      const tr = h("tr", {});
+      for (const [k, l, ty, ph] of BACKUP_COLS) {
+        ins[k] = h("input", { type: ty === "int" ? "number" : "text", min: ty === "int" ? "0" : undefined, max: k === "port" ? "65535" : k === "keep" ? "365" : undefined,
+          placeholder: ph, spellcheck: "false", autocomplete: "off", "aria-label": l, class: k === "port" || k === "keep" ? "arule-n" : "" });
+        ins[k].value = t[k] == null || t[k] === 0 ? "" : t[k];
+        tr.append(h("td", {}, ins[k]));
+      }
+      tr.append(h("td", {}, h("button", { type: "button", class: "btn", "aria-label": "Remove this server", onclick: () => tr.remove() }, "Remove")));
+      tr._get = () => {
+        const o = {};
+        for (const [k, , ty] of BACKUP_COLS) {
+          const v = ins[k].value.trim();
+          if (v === "" || (ty === "int" && Number(v) === 0)) continue;
+          o[k] = ty === "int" ? Number(v) : v;
+        }
+        return o;
+      };
+      tbody.append(tr);
+    };
+    initial.forEach(addRow);
+    if (!initial.length) addRow();
+    const table = h("div", { class: "scroll" }, h("table", { class: "tight" }, h("thead", {}, h("tr", {}, [...BACKUP_COLS.map((c) => c[1]), ""].map((x) => h("th", {}, x)))), tbody));
+    const addBtn = h("button", { type: "button", class: "btn", onclick: () => { if (tbody.children.length < 8) addRow(); } }, "Add a server");
+
     const box = h("div", {});
     const out = h("div", { class: "hint", "aria-live": "polite" });
     const tell = (kind, t) => { out.textContent = ""; out.append(h("span", { class: kind === "bad" ? "bad-text" : "" }, t)); };
@@ -3528,31 +3559,149 @@
       const run = h("button", { type: "button", class: "btn", disabled: v.running, onclick: async () => {
         try { await api("POST", "/api/backup/run", {}); tell("ok", "The backup has started."); start(); show(false); } catch (e) { tell("bad", e.message); }
       } }, v.running ? "Backing up…" : "Back up now");
-      const test = h("button", { type: "button", class: "btn", onclick: async () => {
-        tell("ok", "Connecting…");
-        try { const r = (await api("POST", "/api/backup/test", {})).data; tell("ok", "Connected. " + (r.remote || []).length + " backup(s) of this node are on the server."); show(false); } catch (e) { tell("bad", "Not connected: " + e.message + " (save the settings first, and add the key below to the server)"); }
-      } }, "Test connection");
       const lines = [];
       if (v.running) lines.push("A backup is running now.");
-      lines.push("Last started: " + at(st.last_start) + (st.last_ok ? ". Last successful: " + at(st.last_ok) + (st.last_file ? " (" + st.last_file + ", " + (st.last_files || 0) + " files, " + bytes(st.last_size || 0) + ")" : "") : ". No backup has succeeded yet."));
+      lines.push("Last started: " + at(st.last_start) + (st.last_ok ? ". Last successful: " + at(st.last_ok) + "." : ". No backup has succeeded yet."));
       if (v.enabled && v.next && !v.running) lines.push("Next: " + at(v.next) + ".");
-      const rem = st.remote || [];
+      const tl = v.targets || [];
+      const trows = tl.map((t, i) => {
+        const s = t.status || {};
+        const msg = h("div", { class: "hint", "aria-live": "polite" });
+        const say = (bad, x) => { msg.textContent = x; msg.classList.toggle("bad-text", !!bad); };
+        const pw = h("input", { type: "password", autocomplete: "new-password", placeholder: "Password of " + t.user + "@" + t.host, "aria-label": "Password of the account on " + t.label });
+        const form = h("div", { class: "toolbar tight", hidden: true }, pw,
+          h("button", { type: "button", class: "btn", onclick: async (ev) => {
+            ev.target.disabled = true; say(false, "Installing…");
+            try {
+              const r = (await api("POST", "/api/backup/install", { index: i, password: pw.value })).data;
+              pw.value = ""; form.hidden = true;
+              say(!r.connected, (r.added ? "Installed the key of " + r.added + " node(s) (" + r.nodes + " in the cluster)." : "The keys were there already.") + (r.connected ? " The node can log in." : " Still no login: " + r.test_error) + ((r.missing || []).length ? " No key from: " + r.missing.join("; ") : ""));
+              show(false);
+            } catch (e) { say(true, e.message); } finally { ev.target.disabled = false; }
+          } }, "Install"),
+          h("span", { class: "hint" }, "Used once to log in; it is not kept."));
+        return h("div", { class: "card tight" },
+          h("div", { class: "toolbar tight" }, h("strong", {}, t.label), h("span", { class: "muted" }, t.user + "@" + t.host),
+            h("button", { type: "button", class: "btn", onclick: async () => {
+              say(false, "Connecting…");
+              try { const r = (await api("POST", "/api/backup/test", { index: i })).data; say(false, "Connected. " + (r.remote || []).length + " backup(s) of this node are on the server."); show(false); } catch (e) { say(true, "Not connected: " + e.message + " (save the settings first, then use Install key)"); }
+            } }, "Test connection"),
+            h("button", { type: "button", class: "btn", onclick: () => { form.hidden = !form.hidden; if (!form.hidden) pw.focus(); } }, "Install key…")),
+          form, msg,
+          h("div", {}, s.last_ok ? "Last successful: " + at(s.last_ok) + (s.last_file ? " (" + s.last_file + ", " + bytes(s.last_size || 0) + ")" : "") : "No backup has gone to this server yet."),
+          s.last_error ? h("div", { class: "bad-text" }, "The last attempt failed: " + s.last_error) : null,
+          (s.remote || []).length ? h("details", {}, h("summary", {}, s.remote.length + " backup(s) of this node on the server"), h("ul", { class: "mono small" }, s.remote.slice().reverse().map((n) => h("li", {}, n)))) : null);
+      });
       box.replaceChildren(
         h("h3", {}, "This node (" + v.node + ")"),
-        h("p", { class: "hint" }, "The node uses its own SSH key to log in. Add this line to ~/.ssh/authorized_keys of the user on the backup server (every node has its own key):"),
+        h("p", { class: "hint" }, "Each node uses its own SSH key. To have it accepted, use Install key on a server (the account's password is used once, for the keys of all the nodes), or add this line to ~/.ssh/authorized_keys of the user on the server yourself:"),
         key,
-        h("div", { class: "toolbar" }, run, test),
+        h("div", { class: "toolbar" }, run),
         out,
         h("p", {}, lines.join(" ")),
-        st.last_error ? h("p", { class: "bad-text" }, "The last attempt failed: " + st.last_error) : null,
-        rem.length ? h("details", {}, h("summary", {}, rem.length + " backup(s) of this node on the server"), h("ul", { class: "mono small" }, rem.slice().reverse().map((n) => h("li", {}, n)))) : null);
+        tl.length ? trows : h("p", { class: "hint" }, "Add a server above and save; its status shows here."));
       if (!v.running) stop();
     }
     function start() { if (!timer) timer = setInterval(() => show(true), 3000); }
     show();
+
+    // ── restore ──
+    const rbox = h("div", {});
+    const rout = h("div", { class: "hint", "aria-live": "polite" });
+    const rtell = (bad, t) => { rout.textContent = t; rout.classList.toggle("bad-text", !!bad); };
+    async function restoreUI() {
+      let v = {};
+      try { v = (await api("GET", "/api/backup")).data; } catch (_) { /* shown by the other box */ }
+      const tl = v.targets || [];
+      const src = h("select", { "aria-label": "Where the backup is" }, tl.map((t, i) => h("option", { value: "s" + i }, "Server " + t.label)),
+        h("option", { value: "other" }, "Another server…"), h("option", { value: "upload" }, "A file from this computer"));
+      const o = { host: h("input", { type: "text", placeholder: "Server", spellcheck: "false", "aria-label": "Server" }), port: h("input", { type: "number", placeholder: "22", class: "arule-n", "aria-label": "SSH port" }),
+        user: h("input", { type: "text", placeholder: "User", spellcheck: "false", "aria-label": "User" }), dir: h("input", { type: "text", placeholder: "Directory", spellcheck: "false", "aria-label": "Directory" }),
+        pw: h("input", { type: "password", autocomplete: "new-password", placeholder: "Password of that account", "aria-label": "Password of the account on that server" }) };
+      const otherBox = h("div", { class: "toolbar tight", hidden: true }, o.host, o.port, o.user, o.dir, o.pw);
+      const fileIn = h("input", { type: "file", accept: ".dnsbak", hidden: true, "aria-label": "Backup file" });
+      const list = h("select", { "aria-label": "Backup to restore", hidden: true });
+      const listBtn = h("button", { type: "button", class: "btn", onclick: async () => {
+        rtell(false, "Reading the server…");
+        try {
+          const r = (await api("POST", "/api/backup/files", serverArg())).data.files || [];
+          clear(list).append(...r.map((f) => h("option", { value: f.name }, f.node + " — " + new Date(f.time).toLocaleString())));
+          list.hidden = !r.length; rtell(!r.length, r.length ? r.length + " backup(s) found." : "No backups on that server (in that directory).");
+        } catch (e) { rtell(true, e.message); }
+      } }, "List backups");
+      const bpw = h("input", { type: "password", autocomplete: "new-password", placeholder: "Password the backup was made with", "aria-label": "Backup password" });
+      const check = h("button", { type: "button", class: "btn", onclick: async (ev) => {
+        ev.target.disabled = true; rtell(false, "Opening the backup…");
+        try {
+          let body;
+          if (src.value === "upload") {
+            if (!fileIn.files[0]) throw new Error("Choose the backup file first.");
+            await apiUpload("/api/backup/upload", fileIn.files[0]);
+            body = { source: "upload", password: bpw.value };
+          } else {
+            if (list.hidden || !list.value) throw new Error("List the backups on the server and pick one.");
+            body = { source: "server", file: list.value, password: bpw.value, ...serverArg() };
+          }
+          const r = (await api("POST", "/api/backup/restore/prepare", body)).data;
+          bpw.value = ""; o.pw.value = "";
+          rtell(false, ""); confirmBox(r);
+        } catch (e) { rtell(true, e.message); } finally { ev.target.disabled = false; }
+      } }, "Check backup");
+      function serverArg() {
+        if (src.value.startsWith("s")) return { index: Number(src.value.slice(1)) };
+        return { host: o.host.value.trim(), port: Number(o.port.value) || 0, user: o.user.value.trim(), dir: o.dir.value.trim(), server_password: o.pw.value };
+      }
+      const sync = () => {
+        const up = src.value === "upload";
+        otherBox.hidden = src.value !== "other"; fileIn.hidden = !up; listBtn.hidden = up; list.hidden = true;
+      };
+      src.addEventListener("change", sync); sync();
+      const conf = h("div", {});
+      function confirmBox(r) {
+        const warn = [];
+        if (!r.same_node) warn.push("This backup is from another node (" + r.node + "). Restoring it makes this node " + r.node + " in the cluster: do this to replace a lost node, never while the original is still running.");
+        if (r.newer) warn.push("It was made by a newer version (" + r.version + ") than this node runs.");
+        clear(conf).append(h("div", { class: "notice " + (warn.length ? "warn" : "") },
+          h("p", {}, "Backup of " + r.node + ", made " + r.created + ", version " + r.version + ", " + r.files + " files. Password correct."),
+          ...warn.map((w) => h("p", { class: "bad-text" }, w)),
+          h("p", {}, "Restoring replaces everything in this node's state directory (the old copy is kept next to it as …before-restore-…) and restarts the service."),
+          h("div", { class: "toolbar" },
+            h("button", { type: "button", class: "btn danger", onclick: async (ev) => {
+              ev.target.disabled = true;
+              try {
+                await api("POST", "/api/backup/restore/apply", {});
+                clear(conf).append(h("p", {}, "Restoring and restarting… this page comes back when the node is up."));
+                const wait = async () => { try { const r2 = await fetch("/api/session", { credentials: "same-origin" }); if (r2.status < 500) { location.reload(); return; } } catch (_) { /* still down */ } setTimeout(wait, 3000); };
+                setTimeout(wait, 6000);
+              } catch (e) { ev.target.disabled = false; rtell(true, e.message); }
+            } }, "Restore and restart"),
+            h("button", { type: "button", class: "btn", onclick: async () => { try { await api("POST", "/api/backup/restore/cancel", {}); } catch (_) { /* nothing prepared */ } clear(conf); } }, "Cancel"))));
+      }
+      if (v.pending_restore) confirmBox(v.pending_restore);
+      rbox.replaceChildren(
+        h("h3", {}, "Restore a backup on this node (" + (v.node || "") + ")"),
+        h("p", { class: "hint" }, "Pick the backup, type the password it was made with, and check it. Nothing changes until you confirm. On a new node with nothing set up, choose Another server (or a file) and type the account's password there."),
+        h("div", { class: "toolbar tight" }, src, listBtn, list, fileIn),
+        otherBox,
+        h("div", { class: "toolbar tight" }, bpw, check),
+        rout, conf);
+    }
+    restoreUI();
+
     return {
-      el: h("div", {}, fs.el, h("p", { class: "hint" }, "A backup holds the configuration and its history, the certificates and their private keys, the cluster identity, the users, the alerts and the schedule. It leaves out the log, the statistics, the block lists (they are fetched again) and staged upgrades. Restore with: dnsdir --restore FILE (see the help)."), box),
-      get() { const o = fs.get(); const keep = Object.entries(o).filter(([, x]) => x !== "" && x !== 0 && x !== false); return keep.length ? Object.fromEntries(keep) : undefined; },
+      el: h("div", {}, fs.el,
+        h("h3", {}, "Backup servers"),
+        h("p", { class: "hint" }, "Every backup goes to each of these; one that cannot be reached does not hold up the others (it is tried again every 15 minutes). Keep is the number of backups of each node to keep on that server; the oldest are removed first."),
+        table, h("div", { class: "toolbar" }, addBtn),
+        h("p", { class: "hint" }, "A backup holds the configuration and its history, the certificates and their private keys, the cluster identity, the users, the alerts and the schedule. It leaves out the log, the statistics, the block lists (they are fetched again) and staged upgrades."),
+        box, rbox),
+      get() {
+        const o = fs.get();
+        const b = Object.fromEntries(Object.entries(o).filter(([, x]) => x !== "" && x !== 0 && x !== false));
+        const ts = [...tbody.children].map((tr) => tr._get()).filter((t) => Object.keys(t).length);
+        if (ts.length) b.targets = ts;
+        return Object.keys(b).length ? b : undefined;
+      },
     };
   };
 

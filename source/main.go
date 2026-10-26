@@ -438,6 +438,7 @@ func main() {
 		return
 	}
 
+	applyPendingRestore(*stateDir, *conf) // a restore that the GUI prepared and confirmed
 	_, statErr := os.Stat(*conf)
 	configExists := statErr == nil
 	created := false

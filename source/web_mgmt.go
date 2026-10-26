@@ -19,6 +19,12 @@ func (w *WebServer) mgmtRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/backup", w.authed(w.op("backup.status", nil)))
 	mux.HandleFunc("POST /api/backup/run", w.authed(w.op("backup.run", nil)))
 	mux.HandleFunc("POST /api/backup/test", w.authed(w.op("backup.test", nil)))
+	mux.HandleFunc("POST /api/backup/install", w.authed(w.op("backup.install", nil)))
+	mux.HandleFunc("POST /api/backup/files", w.authed(w.op("backup.files", nil)))
+	mux.HandleFunc("POST /api/backup/upload", w.authedCT(w.handleBackupUpload, false))
+	mux.HandleFunc("POST /api/backup/restore/prepare", w.authed(w.op("backup.restore.prepare", nil)))
+	mux.HandleFunc("POST /api/backup/restore/apply", w.authed(w.op("backup.restore.apply", nil)))
+	mux.HandleFunc("POST /api/backup/restore/cancel", w.authed(w.op("backup.restore.cancel", nil)))
 	mux.HandleFunc("GET /api/alerts", w.authed(w.op("alerts.list", nil)))
 	mux.HandleFunc("POST /api/alerts/ack", w.authed(w.op("alerts.ack", nil)))
 	mux.HandleFunc("POST /api/alerts/silence", w.authed(w.op("alerts.silence", nil)))
@@ -230,4 +236,23 @@ func (w *WebServer) handleUpdateUpload(rw http.ResponseWriter, r *http.Request, 
 		return
 	}
 	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": map[string]any{"version": ver}})
+}
+
+// handleBackupUpload keeps a backup file the operator picked in the browser until the restore is prepared from it.
+func (w *WebServer) handleBackupUpload(rw http.ResponseWriter, r *http.Request, s *session) {
+	body, err := io.ReadAll(http.MaxBytesReader(rw, r.Body, maxUploadBytes))
+	if err != nil {
+		jsonError(rw, http.StatusRequestEntityTooLarge, "upload too large (limit "+strconv.Itoa(maxUploadBytes>>20)+" MB)")
+		return
+	}
+	if w.mg.backup == nil {
+		jsonError(rw, http.StatusUnprocessableEntity, "backups are not available on this node")
+		return
+	}
+	warnf("web: %q uploaded a backup file (%d bytes, from %s)", s.user, len(body), clientIP(r))
+	if err := w.mg.backup.SaveUpload(body); err != nil {
+		jsonError(rw, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": map[string]any{"bytes": len(body)}})
 }

@@ -2442,10 +2442,10 @@
     { shared: true, k: "sso_users", l: "Users", t: "rows", rows: "ssousers", wide: true },
   ];
   const SNMP_FIELDS = [
-    { shared: true, k: "snmp_communities", l: "Community strings", t: "rows", rows: "community", wide: true },
-    { shared: true, k: "snmp_acl", l: "Allowed sources", t: "rows", rows: "snmpacl", wide: true },
     { k: "location", l: "Location", t: "text" },
     { shared: true, k: "snmp_contact", l: "Contact", t: "text" },
+    { shared: true, k: "snmp_communities", l: "Community strings", t: "rows", rows: "community", wide: true },
+    { shared: true, k: "snmp_acl", l: "Allowed sources", t: "rows", rows: "snmpacl", wide: true },
   ];
   const PROM_FIELDS = [
     { shared: true, k: "metrics_acl", l: "Allowed sources", t: "rows", rows: "metricsacl", wide: true },
@@ -2841,7 +2841,7 @@
   // not complete (outlined and not saved), empty: text for no rows}.
   const rowClips = {};
   // the short lists (a handful of rows) have no filter box and no paging; the long ones (clients, domains, users) do
-  const SMALL_TABLES = new Set(["ldapservers", "servers", "fallback", "neighbors", "morevip4", "morevip6", "community", "queries", "exempt"]);
+  const SMALL_TABLES = new Set(["ldapservers", "servers", "fallback", "neighbors", "morevip4", "morevip6", "community", "snmpacl", "metricsacl", "queries", "exempt"]);
   function rowTable(spec, lines) {
     const N = spec.cols.length;
     const small = SMALL_TABLES.has(spec.key);

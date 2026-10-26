@@ -1,5 +1,11 @@
 # Changelog
 
+## [v573] - 2026-10-25 — SNMP fields in a better order, short lists without filter and paging
+
+### Changed
+- Configure ▸ Monitoring ▸ SNMP: **Location** and **Contact** come first, above **Community strings** and **Allowed sources**.
+- The SNMP and Metrics lists no longer have the filter box and the page controls (they are short lists).
+
 ## [v572] - 2026-10-25 — Empty access lists allow nobody; the Prometheus tab is now Metrics
 
 ### Changed

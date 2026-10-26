@@ -59,6 +59,13 @@ groups:
           severity: info
         annotations:
           summary: "{{ $labels.instance }} is turning queries away because of a domain rate limit"
+      - alert: DnsdirCriticalAlertOpen
+        expr: dnsdir_alerts_active{severity="critical"} > 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }}: a critical alert has been open for 10 minutes (see Monitor ▸ Alerts)"
       - alert: DnsdirCertificateExpiresSoon
         expr: dnsdir_certificate_expires_in_seconds < 14 * 86400
         for: 1h

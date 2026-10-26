@@ -1,5 +1,15 @@
 # Changelog
 
+## [v581] - 2026-10-25 — Alerts of other nodes
+
+### Fixed
+- Monitor ▸ Alerts and Configure ▸ Alerts answered "this part of the GUI always acts on the node you are logged in to" when another node was picked in the top bar. Alerts can now be seen, acknowledged, silenced, resolved, fixed and tested on any node from any node.
+
+## [v580] - 2026-10-25 — Alerts in the example dashboard and rules
+
+### Added
+- The example Grafana dashboard has an open-alerts panel (a number and a graph by severity), and the example Prometheus rules have **DnsdirCriticalAlertOpen**: a critical alert open for 10 minutes.
+
 ## [v579] - 2026-10-25 — Alert mark in the menu
 
 ### Added

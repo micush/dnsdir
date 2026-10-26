@@ -1,5 +1,10 @@
 # Changelog
 
+## [v570] - 2026-10-25 — Gentler trackpad zoom in the topology
+
+### Fixed
+- Zooming the topology with two fingers on a trackpad kept zooming after the fingers were lifted (the trackpad's inertia). Small trackpad steps now zoom more gently, the fading tail is ignored, and a pinch zooms as it happens. A mouse wheel behaves as before.
+
 ## [v569] - 2026-10-25 — Rate limit icon in Top Domains
 
 ### Added

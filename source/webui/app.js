@@ -1142,7 +1142,12 @@
         const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1;
         const r0 = svg.getBoundingClientRect();
         const s0 = r0.width / W || 1;
-        const s1 = Math.max(CV_ZOOM_MIN, Math.min(CV_ZOOM_MAX, s0 * Math.exp((-e.deltaY * unit) * 0.0015)));
+        // a wheel click is a big step; a trackpad sends many small ones, and keeps sending a fading tail after the fingers lift (inertia),
+        // which made the drawing zoom on by itself. So: a pinch (ctrl) is read as it comes, a two-finger scroll is gentler, and the tail is ignored.
+        const small = e.deltaMode === 0 && Math.abs(e.deltaY) < 40;
+        if (small && !e.ctrlKey && Math.abs(e.deltaY) < 3) return;
+        const gain = e.ctrlKey ? 0.01 : small ? 0.0006 : 0.0015;
+        const s1 = Math.max(CV_ZOOM_MIN, Math.min(CV_ZOOM_MAX, s0 * Math.exp((-Math.max(-60, Math.min(60, e.deltaY * unit))) * gain)));
         if (Math.abs(s1 - s0) < 0.001) return;
         const ux = (e.clientX - r0.left) / s0, uy = (e.clientY - r0.top) / s0;   // the point under the pointer, in drawing units
         cv.zoom = s1; fit();

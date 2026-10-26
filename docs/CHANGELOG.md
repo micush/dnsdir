@@ -1,5 +1,10 @@
 # Changelog
 
+## [v589] - 2026-10-26 — Server form: erasing the name looks the address up again
+
+### Fixed
+- In the Add/Edit server dialog, erasing the name after the address had been changed did not look the name up for the new address, and erasing the address did not look it up from the name. Erasing either field now fills it from the other one that is there.
+
 ## [v588] - 2026-10-26 — Saved shared settings no longer flick back on a replica
 
 ### Fixed

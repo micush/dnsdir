@@ -1890,11 +1890,12 @@
       const auto = { addr: "", label: "" };
       const ask = async (q) => (await api("GET", "/api/dnslookup?lookup=" + encodeURIComponent(q))).data;
       const canFill = (el, k) => !el.value.trim() || el.value.trim() === auto[k];
-      return {
+      const hooks = {
         auto,
         addr: async (els, note) => {
           const q = els.addr.value.trim();
-          if (!q || !IPISH.test(q) || !canFill(els.label, "label")) { note("label", ""); return; }
+          if (!q) { note("label", ""); if (els.label.value.trim()) await hooks.label(els, note); return; }   // the address was erased: a name that is there gives it back
+          if (!IPISH.test(q) || !canFill(els.label, "label")) { note("label", ""); return; }
           note("label", "Looking up the name…");
           try {
             const r = await ask(q);
@@ -1909,7 +1910,8 @@
         label: async (els, note) => {
           const n = els.label.value.trim();
           if (n === auto.label) return;                       // our own fill, not something typed
-          if (!n || !/^[A-Za-z0-9_\-]+(\.[A-Za-z0-9_\-]+)*$/.test(n) || IPISH.test(n) || !canFill(els.addr, "addr")) { note("addr", ""); return; }
+          if (!n) { note("addr", ""); if (els.addr.value.trim()) await hooks.addr(els, note); return; }   // the name was erased: the address that is there gives it back
+          if (!/^[A-Za-z0-9_\-]+(\.[A-Za-z0-9_\-]+)*$/.test(n) || IPISH.test(n) || !canFill(els.addr, "addr")) { note("addr", ""); return; }
           note("addr", "Looking up the address…");
           try {
             const r = await ask(n);
@@ -1919,6 +1921,7 @@
           } catch (e) { note("addr", "Lookup failed: " + (e.message || e)); }
         },
       };
+      return hooks;
     }
     function serverForm(g, edit, pre) {   // pre: a server pasted on a gateway that has its address already (forward, queries): all but the address is filled in
       const lk = lookupHooks();

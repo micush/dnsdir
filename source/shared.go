@@ -265,6 +265,7 @@ func cloneDNS(d DNSConfig) DNSConfig {
 	if len(d.SNMPACL) == 0 {
 		d.SNMPACL = nil
 	}
+	d.Alerts = d.Alerts.clone()
 	d.MetricsACL = append([]string(nil), d.MetricsACL...)
 	if len(d.MetricsACL) == 0 {
 		d.MetricsACL = nil

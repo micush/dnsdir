@@ -49,6 +49,8 @@ func expectedHelpTopics(sidebar []string) []string {
 			want = append(want, "config_groups")
 		case "cfg_monitoring":
 			want = append(want, "config_snmp", "config_metrics")
+		case "cfg_alerts":
+			want = append(want, "config_alerts")
 		case "cfg_dns":
 			want = append(want, "config_dns0", "config_dns1", "config_dns2", "config_dns3_0", "config_dns3_1", "config_dns3_2", "config_dns3_3", "config_dns4", "config_dns5")
 		case "cfg_web":

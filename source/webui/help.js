@@ -466,6 +466,38 @@ const DNSDIR_HELP = {
       ["ul", ["The metrics are counts and states only: queries, answers, SERVFAILs, refused and rate-limited queries, cache hits and misses, each upstream server's health, answer time and use, whether this node is the active gateway, when the certificates run out, and the host: CPU, load, memory, swap, disk I/O, each filesystem and each network interface. No client addresses or domain names are in them, so Top Clients and Top Domains stay on Statistics.", "The source is the address of the connection. If Prometheus reaches AnyName through a proxy or NAT, allow the address AnyName sees.", "`/metrics` is on the same port and certificate as the web GUI and needs no new port."]],
     ],
   },
+  config_alerts: {
+    title: "Configure: Alerts",
+    body: [
+      "Decides when AnyName raises an alert, how long a problem has to last first, and where the alert is sent. The alerts themselves are on Monitor ▸ Alerts.",
+      ["h", "What you can do here"],
+      ["ul", ["Switch each rule on or off, and give it a severity (Info, Warning or Critical).", "Say how long a problem has to last before an alert opens: after some failed checks in a row, after some minutes, or when some of the last checks failed (for example 3 of the last 5). Rules about a value (CPU, memory, disk, SERVFAILs, certificate days) open when the value stays past the threshold for the minutes you give.", "Say how long things have to be good before the alert closes by itself: some good checks in a row, or some minutes.", "Send each opened and resolved alert to a webhook, and always to the log (the alerts appear there as lines of the Alerts type)."]],
+      ["h", "Step by step: get alerts into a chat or ticket system"],
+      ["ol", ["Open **Configure ▸ Alerts**.", "Paste the address your chat or ticket system gave you into **Webhook address**.", "Press **Send test**. A test message should arrive there.", "Press **Save**."]],
+      ["h", "Step by step: change a rule"],
+      ["ol", ["Find the rule in the table and change its numbers. Only the rules you touch are saved, the others keep following the defaults.", "Press **Save**."]],
+      ["h", "Fields"],
+      "Each setting below says **Shared** or **This node only**. A *shared* setting is the same on every node: change it on any node and the cluster copies it everywhere. A setting marked *this node only* belongs to the node you are working on.",
+      ["fields", [["Webhook address", "Where a JSON message is posted when an alert opens and when it is resolved. The message carries `text` and `content` fields, so chat systems that take either show it, and the details (`node`, `severity`, `rule`, `title`, `subject`, `message`, `opened`, `count`, and for a resolved alert `closed`, `duration_seconds` and `resolution`). Empty means no webhook."]]],
+      ["fields", [["Repeat every (hours)", "Tell the webhook again this often while an alert is still open and nobody has acknowledged or silenced it. 0 means tell once."]]],
+      ["h", "Good to know"],
+      ["ul", ["Alerts, acknowledgements and silences belong to the node that raised them. Monitor ▸ Alerts shows the node chosen in the top bar. The rules and the webhook are shared by the cluster.", "The engine looks at the node every 15 seconds; a \"check\" is one of those looks.", "An alert that closes and comes back within an hour is the same alert, with its count going up, so a flapping server does not fill the list.", "A resolved message is sent once, and not for an alert that is silenced.", "A rule that is switched off closes its open alerts.", "Closed alerts are kept for 30 days (at most 1000)."]],
+    ],
+  },
+  alerts: {
+    title: "Alerts",
+    body: [
+      "The problems AnyName has found on this node and not yet seen go away. An alert opens when a rule on Configure ▸ Alerts is met, and closes by itself once things have been good for the clear time you set there.",
+      ["h", "What you can do here"],
+      ["ul", ["See what is wrong, how serious it is, since when, and what has been done about it.", "Acknowledge an alert to say you are on it. This stops the repeat messages; it ends when the alert closes.", "Silence an alert for 15 minutes up to 7 days, so a known problem does not keep telling anyone. A silence covers that rule and that subject (for example that one upstream server) and stays until it runs out, even if the alert closes and comes back.", "Mark an alert resolved by hand.", "Run a safe fix, jump to the page that deals with the problem, or open the rule to change it."]],
+      ["h", "Step by step: deal with an alert"],
+      ["ol", ["Right-click the alert.", "Choose **Acknowledge** to say you have seen it, or **Silence…** and a time if it is expected.", "Choose **More** for the actions that fit this alert: a fix (for example check the upstream servers now, empty the cache, restart the DNS listeners, renew the certificate), **Go to** the page that shows the cause, or **Edit rule…**.", "If you fixed it yourself, choose **Mark resolved**. If the problem is still there, the alert opens again."]],
+      ["h", "Reading the list"],
+      ["ul", ["**Open**: the condition is bad and nobody has dealt with it. **Recovering**: the condition is good again, but the clear time has not passed. **Acknowledged**, **Silenced** and **Closed** are what they say; a closed alert shows whether it cleared by itself, was marked resolved, or its rule was switched off.", "**×3** means the alert has opened three times within an hour of closing, so it is flapping.", "Tick **Show closed** to see the last 30 days."]],
+      ["h", "Good to know"],
+      ["ul", ["The list shows the node chosen in the top bar. Alerts and silences are not shared between nodes.", "Prometheus sees only counts: `dnsdir_alerts_active` (open, not acknowledged, not silenced), `dnsdir_alerts_acknowledged` and `dnsdir_alerts_opened_total`."]],
+    ],
+  },
   config_snmp: {
     title: "Configure: SNMP",
     body: [

@@ -1,5 +1,17 @@
 # Changelog
 
+## [v575] - 2026-10-25 — Alerts
+
+### Added
+- **Monitor ▸ Alerts** lists what is wrong on the node picked in the top bar: severity, alert, message, since/for how long, state (open, recovering, acknowledged, silenced, closed) and a count when it keeps coming back. Right-click an alert for **Acknowledge** / **Unacknowledge**, **Silence…** (15 minutes to 7 days) / **Unsilence**, **Mark resolved**, **Copy** and **More** (a safe **Fix** for that rule, **Go to** the page that shows the cause, **Edit rule…**). **Show closed** shows the last 30 days.
+- **Configure ▸ Alerts** (`alerts` in the shared `dns` block): webhook address, repeat hours, **Send test**, and the rules: upstream server down, fallback in use, listener down, no active gateway, SERVFAILs high, no queries (off by default), certificate expiring, CPU, memory and disk. Each rule has an on/off, a severity, how long a problem must last (failed checks in a row, minutes, or M of the last N checks; for values a threshold and minutes) and when it clears (good checks in a row or minutes).
+- Opened and resolved alerts go to the webhook (JSON with `text`, `content`, `node`, `severity`, `rule`, `subject`, `message`, ...) and to the log. A resolved message is sent once and not for a silenced alert. An alert that comes back within an hour is the same alert, with its count up.
+- `/metrics` has counts only: `dnsdir_alerts_active{severity}`, `dnsdir_alerts_acknowledged{severity}` and `dnsdir_alerts_opened_total`.
+- Help pages for both.
+
+### Notes
+- Alerts, acknowledgements and silences belong to each node (`alerts.json` in the state directory); the rules and the webhook are shared by the cluster. Checks run every 15 seconds. History: 30 days or 1000 alerts.
+
 ## [v574] - 2026-10-25 — Example Grafana dashboard and Prometheus alert rules
 
 ### Added

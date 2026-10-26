@@ -27,12 +27,13 @@ import (
 // only from root (SO_PEERCRED); the read-only snapshot/dns views stay open to
 // local users as before.
 type StatusServer struct {
-	path string
-	sup  *Supervisor
-	mg   *Mgmt
-	l    net.Listener
-	up   *upTracker
-	stop chan struct{}
+	path   string
+	sup    *Supervisor
+	mg     *Mgmt
+	alerts *AlertEngine // /metrics counts the open alerts
+	l      net.Listener
+	up     *upTracker
+	stop   chan struct{}
 }
 
 func NewStatusServer(path string, sup *Supervisor) *StatusServer {

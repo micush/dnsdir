@@ -976,6 +976,12 @@ A hand edit of the config file on a *replica* is not a shared edit and is overwr
 
 The Monitor section of the GUI has pages for statistics, the host, packet capture and the log. Each has a command-line equivalent, and in a cluster each follows the node picked in the Node menu at the top right.
 
+### Alerts
+
+**Monitor ▸ Alerts** shows the alerts of the node picked in the top bar; **Configure ▸ Alerts** (`alerts` in the shared `dns` block: `webhook`, `repeat_hours`, `rules`) holds the rules. The engine looks at the node every 15 seconds. A rule opens an alert when its condition has held long enough: *N failed checks in a row*, *N minutes*, or *M of the last N checks* for up/down rules (upstream server down, fallback in use, listener down, no active gateway), and *past a threshold for N minutes* for value rules (SERVFAIL share, certificate days left, CPU, memory, disk; "no queries" is off by default). It closes by itself after *N good checks in a row* or *N minutes* good (**Clear**). Only rules that are changed are written to the configuration; the others follow the defaults. An alert has a severity (info, warning, critical).
+
+States: open, recovering (good again, clear time not over), acknowledged (ends with the alert), silenced (a silence covers a rule and subject for 15 minutes to 7 days and outlives the alert) and closed (cleared, marked resolved, or rule switched off). An alert that closes and reopens within an hour is the same alert with its count raised. Right-click: Acknowledge, Silence…, Mark resolved, Copy, and More (Fix actions that are safe for the rule - check upstream servers now, empty the cache, restart the DNS listeners, renew the certificate -, Go to, Edit rule…). Opened and resolved alerts are posted to the webhook as JSON and written to the log; with a repeat time the webhook is told again while the alert stays unacknowledged. Alerts and silences are kept per node in `alerts.json` in the state directory (30 days, 1000 alerts) and are not replicated. `/metrics` carries only counts: `dnsdir_alerts_active{severity}`, `dnsdir_alerts_acknowledged{severity}`, `dnsdir_alerts_opened_total`. API: `GET /api/alerts`, `POST /api/alerts/{ack,silence,resolve,fix,test}`.
+
 ### Statistics
 
 Monitor ▸ Statistics (or `dnsdir --stats`) shows what the DNS proxy has answered:

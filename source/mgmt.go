@@ -33,6 +33,7 @@ type Mgmt struct {
 	versions *VersionStore
 	certs    *CertManager
 	dnscerts *CertManager // what DoT and DoH present; the GUI's certificate when none is set
+	alerts   *AlertEngine // this node's alerts (alerts.go)
 	acme     *ACMEManager // orders and renews the certificates by itself (acmemgr.go)
 	upd      *Updater
 	cl       *Cluster

@@ -161,6 +161,15 @@ func (s *StatusServer) metricsText() string {
 			}
 		}
 	}
+	if s.alerts != nil {
+		active, acked, opened := s.alerts.counts()
+		for _, sev := range alertSeverities {
+			l := promLabel("severity", sev)
+			m.add("dnsdir_alerts_active", "gauge", "Open alerts that nobody has acknowledged or silenced.", l, float64(active[sev]))
+			m.add("dnsdir_alerts_acknowledged", "gauge", "Open alerts that someone has acknowledged (not silenced).", l, float64(acked[sev]))
+		}
+		m.add("dnsdir_alerts_opened_total", "counter", "Alerts opened since the history began (an alert that comes back is counted again).", "", float64(opened))
+	}
 	for _, r := range s.snapshot() {
 		if !r.Local {
 			continue

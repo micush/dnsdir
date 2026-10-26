@@ -712,3 +712,9 @@ table.policy.rows th:nth-child(n+2) { width: auto; }
 .acme-rec-state { flex: 0 0 auto; }
 .acme-log { margin: 1rem 0 0; padding: .8rem 1rem; max-height: 12em; overflow: auto; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; font-size: .8rem; line-height: 1.55; white-space: pre-wrap; }
 .card .fold { margin-top: 1.4rem; }
+
+/* Configure ▸ Alerts */
+table.arules td { vertical-align: middle; }
+.arule-n { width: 5.5em; }
+.arule-when select, .arules td select { width: auto; }
+.arules tr.flash { outline: 2px solid var(--accent, #1e88e5); outline-offset: -2px; }

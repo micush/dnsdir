@@ -16,6 +16,9 @@ import (
 // everything in the management layer.  The web GUI calls the same Mgmt
 // methods directly, so both front ends behave identically.
 func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
+	if strings.HasPrefix(cmd, "alerts.") {
+		return m.alertsOp(cmd, raw, actor)
+	}
 	var a struct {
 		ID       string                `json:"id"`
 		A        string                `json:"a"`

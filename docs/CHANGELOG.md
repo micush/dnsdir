@@ -1,5 +1,9 @@
 # Changelog
 
+## [v588] - 2026-10-26 — Saved shared settings no longer flick back on a replica
+
+### Fixed
+- On a replica, a change to the shared settings was accepted by the primary and written to the replica's own file at once, but an older state of the primary that was still on its way could be applied first and put the old values back (a ticked box showed unticked) until the new revision arrived a few seconds later, applying the settings twice. The replica now waits for the primary's state at the revision its own change made (at most a minute) before it takes shared settings from the primary. This covers every shared setting.
 ## [v587] - 2026-10-26 — Prefetch field name
 
 ### Changed

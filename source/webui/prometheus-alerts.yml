@@ -1,0 +1,96 @@
+# Example Prometheus alert rules for dnsdir.  Copy this file next to prometheus.yml, list it under rule_files:, and adjust the
+# thresholds.  The first rule expects the scrape job to be called "dnsdir"; change that name to match yours.
+groups:
+  - name: dnsdir
+    rules:
+      - alert: DnsdirNodeDown
+        expr: up{job="dnsdir"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} cannot be scraped"
+      - alert: DnsdirNoActiveGateway
+        expr: sum by (group, af) (dnsdir_gateway_active) == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No node is the active gateway of group {{ $labels.group }} ({{ $labels.af }})"
+      - alert: DnsdirGatewayNotListening
+        expr: dnsdir_gateway_dns_listening == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: the DNS listener of group {{ $labels.group }} is down"
+      - alert: DnsdirNoQueries
+        expr: sum by (instance) (rate(dnsdir_dns_queries_total[5m])) == 0
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "{{ $labels.instance }} has received no queries for 15 minutes"
+      - alert: DnsdirHighServfail
+        expr: sum by (instance) (rate(dnsdir_dns_servfail_total[5m])) / clamp_min(sum by (instance) (rate(dnsdir_dns_queries_total[5m])), 0.1) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: more than 5% of the queries fail"
+      - alert: DnsdirUpstreamDown
+        expr: dnsdir_upstream_healthy == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: upstream server {{ $labels.server }} is down"
+      - alert: DnsdirUsingFallback
+        expr: dnsdir_dns_using_fallback == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: only fallback servers are in use ({{ $labels.pool }})"
+      - alert: DnsdirDomainLimited
+        expr: sum by (instance) (rate(dnsdir_dns_domain_limited_total[5m])) > 0
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "{{ $labels.instance }} is turning queries away because of a domain rate limit"
+      - alert: DnsdirCertificateExpiresSoon
+        expr: dnsdir_certificate_expires_in_seconds < 14 * 86400
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: the {{ $labels.certificate }} certificate expires in less than 14 days"
+      - alert: DnsdirCertificateExpiresVerySoon
+        expr: dnsdir_certificate_expires_in_seconds < 3 * 86400
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }}: the {{ $labels.certificate }} certificate expires in less than 3 days"
+      - alert: DnsdirHostCPU
+        expr: dnsdir_host_cpu_percent > 90
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: CPU above 90% for 15 minutes"
+      - alert: DnsdirHostMemory
+        expr: dnsdir_host_memory_used_bytes / dnsdir_host_memory_total_bytes > 0.9
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: more than 90% of the memory is in use"
+      - alert: DnsdirFilesystemFull
+        expr: dnsdir_host_filesystem_used_percent > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: {{ $labels.mount }} is more than 90% full"

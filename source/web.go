@@ -325,6 +325,8 @@ func (w *WebServer) Handler() http.Handler {
 	mux.HandleFunc("GET /app.js", serveAppJS)
 	mux.Handle("GET /help.js", static)
 	mux.HandleFunc("GET /metrics", w.handleMetrics)
+	mux.HandleFunc("GET /api/metrics/dashboard.json", w.authed(w.handleMetricsFile("grafana-dashboard.json", "application/json", "dnsdir-grafana-dashboard.json")))
+	mux.HandleFunc("GET /api/metrics/alerts.yml", w.authed(w.handleMetricsFile("prometheus-alerts.yml", "application/yaml", "dnsdir-prometheus-alerts.yml")))
 	mux.Handle("GET /style.css", static)
 
 	mux.HandleFunc("POST /api/login", w.handleLogin)

@@ -1,5 +1,11 @@
 # Changelog
 
+## [v574] - 2026-10-25 — Example Grafana dashboard and Prometheus alert rules
+
+### Added
+- Under the **Allowed sources** list of Configure ▸ Monitoring ▸ Metrics: two links, **Grafana dashboard example** and **Prometheus alert rules example**. The dashboard (import it in Grafana) shows queries, answers, SERVFAIL share, cache, upstream servers, gateways and the host; the rules file (list it under `rule_files:` in `prometheus.yml`; the job is expected to be called `dnsdir`) alerts on a node that cannot be scraped, no active gateway, a listener down, SERVFAILs, upstream servers down, rate limits, CPU, memory and full filesystems.
+- When the certificates run out is a metric: `dnsdir_certificate_expires_in_seconds` and `dnsdir_certificate_not_after_timestamp_seconds`, for the web certificate (`certificate="web"`) and the DoT/DoH one (`"dns"`). The dashboard shows the days left and the rules warn at 14 days and 3 days.
+
 ## [v573] - 2026-10-25 — SNMP fields in a better order, short lists without filter and paging
 
 ### Changed

@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -129,5 +133,47 @@ func TestACLTakesAddressesNetworksAndNames(t *testing.T) {
 	body = snmpdConfBody(SNMPConfig{Communities: []string{"c"}, ACL: []string{"prom.example.com"}})
 	if !strings.Contains(body, "rocommunity c 192.0.2.9\n") || !strings.Contains(body, "rocommunity6 c 2001:db8::9\n") {
 		t.Fatalf("name not written as addresses:\n%s", body)
+	}
+}
+
+func TestMetricsExampleFilesUseOnlyExportedMetrics(t *testing.T) {
+	src, err := os.ReadFile("metrics.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dash, err := webFS.ReadFile("webui/grafana-dashboard.json")
+	if err != nil || !json.Valid(dash) {
+		t.Fatalf("the dashboard is missing or not JSON: %v", err)
+	}
+	rules, err := webFS.ReadFile("webui/prometheus-alerts.yml")
+	if err != nil || len(rules) == 0 {
+		t.Fatalf("the alert rules are missing: %v", err)
+	}
+	re := regexp.MustCompile(`dnsdir_[a-z_]+`)
+	for _, f := range [][]byte{dash, rules} {
+		for _, n := range re.FindAll(f, -1) {
+			if !strings.Contains(string(src), `"`+string(n)+`"`) {
+				t.Errorf("%s is used in an example file but metrics.go does not write it", n)
+			}
+		}
+	}
+}
+
+func TestMetricsCertificateExpiry(t *testing.T) {
+	cm, _ := newTestCertMgr(t)
+	m := &metricsOut{seen: map[string]bool{}}
+	m.cert("x_not_after", "x_left", "web", cm)
+	m.cert("x_not_after", "x_left", "none", nil) // no manager: nothing written
+	out := m.b.String()
+	if !strings.Contains(out, `x_not_after{certificate="web"} `) || !strings.Contains(out, `x_left{certificate="web"} `) || strings.Contains(out, "none") {
+		t.Fatalf("unexpected output:\n%s", out)
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, `x_left{`) {
+			var v float64
+			if _, err := fmt.Sscanf(l[strings.LastIndex(l, " ")+1:], "%g", &v); err != nil || v < 86400 {
+				t.Fatalf("a new certificate should have days left: %q", l)
+			}
+		}
 	}
 }

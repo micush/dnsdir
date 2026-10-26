@@ -67,6 +67,20 @@ func (m *metricsOut) add(name, kind, help string, labels string, v float64) {
 	fmt.Fprintf(&m.b, "%s%s %g\n", name, labels, v)
 }
 
+// cert writes when a certificate runs out: as a time (for dashboards) and as seconds left (for alerts; negative once it has).
+func (m *metricsOut) cert(notAfterName, leftName, which string, cm *CertManager) {
+	if cm == nil {
+		return
+	}
+	lc, err := cm.current(false)
+	if err != nil || lc == nil || lc.info.NotAfter.IsZero() {
+		return
+	}
+	l := promLabel("certificate", which)
+	m.add(notAfterName, "gauge", "When the certificate runs out (unix time).", l, float64(lc.info.NotAfter.Unix()))
+	m.add(leftName, "gauge", "Seconds until the certificate runs out (negative once it has).", l, time.Until(lc.info.NotAfter).Seconds())
+}
+
 func promLabel(k, v string) string {
 	v = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(v)
 	return k + `="` + v + `"`
@@ -116,6 +130,10 @@ func (s *StatusServer) metricsText() string {
 			m.add("dnsdir_upstream_failures_total", "counter", "Failed probes of the upstream server.", l, float64(sv.Failures))
 		}
 	}
+	if s.mg != nil {
+		m.cert("dnsdir_certificate_not_after_timestamp_seconds", "dnsdir_certificate_expires_in_seconds", "web", s.mg.certs)
+		m.cert("dnsdir_certificate_not_after_timestamp_seconds", "dnsdir_certificate_expires_in_seconds", "dns", s.mg.dnscerts)
+	}
 	if h := hoststats.lastNow(); h.At != 0 {
 		m.add("dnsdir_host_cpu_percent", "gauge", "CPU in use, all cores.", "", h.CPU)
 		m.add("dnsdir_host_cpu_cores", "gauge", "CPU cores.", "", float64(h.Cores))
@@ -152,4 +170,20 @@ func (s *StatusServer) metricsText() string {
 		m.add("dnsdir_gateway_dns_listening", "gauge", "1 when the DNS listener of the gateway is up.", l, b2f(r.DNSUp))
 	}
 	return m.b.String()
+}
+
+// The example Grafana dashboard and Prometheus alert rules (webui/), as downloads for a signed-in user (the links under the
+// Allowed sources list of Configure ▸ Monitoring ▸ Metrics).  They are behind the sign-in, not the metrics access list:
+// that list names the Prometheus server, not the browser.
+func (w *WebServer) handleMetricsFile(file, ctype, download string) func(http.ResponseWriter, *http.Request, *session) {
+	return func(rw http.ResponseWriter, r *http.Request, s *session) {
+		b, err := webFS.ReadFile("webui/" + file)
+		if err != nil {
+			http.NotFound(rw, r)
+			return
+		}
+		rw.Header().Set("Content-Type", ctype)
+		rw.Header().Set("Content-Disposition", `attachment; filename="`+download+`"`)
+		_, _ = rw.Write(b)
+	}
 }

@@ -1,5 +1,10 @@
 # Changelog
 
+## [v576] - 2026-10-25 — Alerts rule table layout
+
+### Fixed
+- Configure ▸ Alerts: the number boxes and drop-downs in the rules table were stretched to the full cell width and overlapped the next column. They now keep their natural size.
+
 ## [v575] - 2026-10-25 — Alerts
 
 ### Added

@@ -3431,7 +3431,7 @@
           when = h("span", { class: "arule-when" }, r.below ? "When below " : "When above ", c.thr, " " + r.unit + ", for ", c.forMin, " minutes");
         }
         const tr = h("tr", { "data-rule": r.id }, h("td", {}, c.en), h("td", {}, h("div", {}, r.title), h("div", { class: "muted small" }, r.subject ? "One alert per " + r.subject : "")),
-          h("td", {}, c.sev), h("td", {}, when), h("td", {}, "Clear after ", c.clear, " ", c.clearMode));
+          h("td", {}, c.sev), h("td", {}, when), h("td", {}, h("span", { class: "arule-when" }, "Clear after ", c.clear, c.clearMode)));
         tr.addEventListener("change", () => dirty.add(r.id));
         rows[r.id] = { r, c };
         tbody.append(tr);

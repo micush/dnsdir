@@ -1,5 +1,10 @@
 # Changelog
 
+## [v584] - 2026-10-26 — Repack of v583
+
+### Fixed
+- The v583 archive had a stray compiled binary in `source/`, which the updater rejects ("file in archive is too large"). v584 is the same code without it.
+
 ## [v583] - 2026-10-26 — Backups to several servers, Install key, restore in the GUI
 
 ### Added

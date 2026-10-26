@@ -720,3 +720,6 @@ table.arules td input[type=checkbox] { width: auto; }
 table.arules td select { width: auto; min-width: 0; }
 table.arules .arule-when { display: flex; flex-wrap: nowrap; align-items: center; gap: .4rem; white-space: nowrap; }
 table.arules tr.flash { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.alert-mark { display: inline-flex; vertical-align: middle; margin-left: .5rem; }
+.alert-mark svg { display: block; }

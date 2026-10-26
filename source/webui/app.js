@@ -287,6 +287,27 @@
     if (!state.topo.list.some((g) => g.id === state.topo.gid)) state.topo.gid = state.topo.list.length ? state.topo.list[0].id : null;
     renderTopoNav();
   }
+  // A red warning triangle on Monitor ▸ Alerts (and on the Monitor heading, which may be folded) while the node picked in the top bar has an alert
+  // that is open, not acknowledged and not silenced.
+  const alertMark = () => {
+    const m = h("span", { class: "alert-mark", role: "img", title: "There is an alert that needs attention", "aria-label": "alert" });
+    m.innerHTML = '<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 1.4 15 14H1z" fill="#fff" stroke="#d32f2f" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 5.9v3.9M8 11.3v1" stroke="#d32f2f" stroke-width="1.7" stroke-linecap="round"/></svg>';
+    return m;
+  };
+  async function refreshAlertMark() {
+    let on = false;
+    try {
+      const v = (await api("GET", "/api/alerts")).data;
+      on = (v.alerts || []).some((a) => !a.closed && !a.acked && !a.silenced_until);
+    } catch (_) { return; }
+    const marks = [root.querySelector('.nav-item[data-tab="alerts"]'), root.querySelector('.nav-group[data-group="Monitor"] .nav-group-label')];
+    for (const el of marks) {
+      if (!el) continue;
+      const old = el.querySelector(".alert-mark");
+      if (on && !old) el.append(alertMark());
+      else if (!on && old) old.remove();
+    }
+  }
   function renderTopoNav() {
     const box = root.querySelector('.nav-group[data-group="' + TOPO + '"] .nav-items');
     if (!box) return;
@@ -341,6 +362,8 @@
     refreshNodes();
     state.topoTimer = setInterval(() => { if (!document.hidden) refreshTopoNav(); }, 4000);
     state.nodesTimer = setInterval(() => { if (!document.hidden) refreshNodes(); }, 6000);
+    refreshAlertMark();
+    state.alertTimer = setInterval(() => { if (!document.hidden) refreshAlertMark(); }, 5000);
     let wanted = location.hash.slice(1);
     if (wanted === "canvas") wanted = "topology"; // the page's old name: keep old bookmarks working
     if (wanted === "neighbors") wanted = "nodes"; // likewise
@@ -594,7 +617,8 @@
     stopPolling();
     if (state.topoTimer) clearInterval(state.topoTimer);
     if (state.nodesTimer) clearInterval(state.nodesTimer);
-    state.topoTimer = state.nodesTimer = null;
+    if (state.alertTimer) clearInterval(state.alertTimer);
+    state.topoTimer = state.nodesTimer = state.alertTimer = null;
   }
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && state.timer && VIEWS[state.tab].poll) VIEWS[state.tab].poll().catch(() => {});
@@ -6127,7 +6151,7 @@
       return d ? d + "d " + hh + "h" : hh ? hh + "h " + m + "m" : m ? m + "m" : s + "s"; };
     const say2 = (t) => { note.textContent = t; setTimeout(() => { if (note.textContent === t) note.textContent = ""; }, 6000); };
     async function call(path, body, done) {
-      try { const r = await api("POST", "/api/alerts/" + path, body); if (r.data && r.data.message) say2(r.data.message); clear(status); await VIEWS.alerts.poll(true); if (done) done(); } catch (e) { fail(status)(e); }
+      try { const r = await api("POST", "/api/alerts/" + path, body); if (r.data && r.data.message) say2(r.data.message); clear(status); await VIEWS.alerts.poll(true); refreshAlertMark(); if (done) done(); } catch (e) { fail(status)(e); }
     }
     const copy = async (text) => { try { await navigator.clipboard.writeText(text); } catch (_) { /* no permission */ } };
     function draw(v) {

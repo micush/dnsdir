@@ -1,5 +1,10 @@
 # Changelog
 
+## [v579] - 2026-10-25 — Alert mark in the menu
+
+### Added
+- A warning triangle (white, red outline, red !) on Monitor ▸ Alerts, and on the Monitor heading when that group is folded, while the node picked in the top bar has an alert that is open, not acknowledged and not silenced. It checks every 5 seconds and goes away when the alert is acknowledged, silenced or closed.
+
 ## [v576] - 2026-10-25 — Alerts rule table layout
 
 ### Fixed

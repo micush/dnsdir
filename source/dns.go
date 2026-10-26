@@ -248,11 +248,13 @@ type Server struct {
 	lists     []string // the zone lists it serves
 	zq        []string // the zone each probe query is for ("" = a general probe), parallel to queries (fwdzones.go)
 
-	zoneProbed map[string]bool // the zones some probe is for
-	zoneUp     map[string]bool // ... and which of them answer now (under mu)
-	zoneFails  map[string]int  // consecutive failed probe rounds of each zone (under mu)
-	noECS      atomic.Bool     // refused or rejected a query carrying a client subnet but answers it without: not sent ECS
-	queries    []DNSQuery      // what this server is probed with
+	zoneProbed   map[string]bool // the zones some probe is for
+	zoneUp       map[string]bool // ... and which of them answer now (under mu)
+	zoneFails    map[string]int  // consecutive failed probe rounds of each zone (under mu)
+	case0x20Miss atomic.Int32    // answers in a row that came back in another case than the query's (dns0x20.go)
+	case0x20Off  atomic.Int64    // until when (unix nanoseconds) the server is asked without randomising the case; 0 = not paused
+	noECS        atomic.Bool     // refused or rejected a query carrying a client subnet but answers it without: not sent ECS
+	queries      []DNSQuery      // what this server is probed with
 
 	tests []TestStat // result of each query in the last probe round
 
@@ -369,6 +371,7 @@ func NewPool(cfg DNSConfig) *Pool {
 	p.allow = newNameSet(cfg.AllowDomains)
 	if cfg.Cache {
 		p.cache = newRespCache(cfg.CacheEntries, cfg.CacheMaxTTL)
+		p.cache.setPrefetch(cfg)
 	}
 	for _, a := range cfg.Servers {
 		qs := cfg.queriesFor(a)
@@ -878,12 +881,12 @@ func (p *Pool) forward(ctx context.Context, query []byte, tcp bool, client netip
 		if !withECS {
 			q = query
 		}
-		resp, rtt, err := exchangeOpt(ctx, s.Addr, q, tcp, p.cfg.queryTimeout(), p.cfg.TLSInsecure)
+		resp, rtt, err := p.exchangeQ(ctx, s, q, tcp)
 		if err == nil && withECS {
 			// a server that dislikes the option (FORMERR) or refuses a query that carries one (public resolvers do
 			// for a private client network) is asked again without it, and from then on is not sent it
 			if h, _ := parseHeader(resp); h.rcode == rcodeFormErr || h.rcode == rcodeRefused {
-				r2, rtt2, err2 := exchangeOpt(ctx, s.Addr, query, tcp, p.cfg.queryTimeout(), p.cfg.TLSInsecure)
+				r2, rtt2, err2 := p.exchangeQ(ctx, s, query, tcp)
 				if err2 == nil {
 					if h2, _ := parseHeader(r2); h2.rcode != rcodeFormErr && h2.rcode != rcodeRefused && !s.noECS.Swap(true) {
 						warnf("dns: server %s answers %s to queries with a client subnet (ECS) and fine without: not sending it ECS any more", s.Addr, rcodeName(h.rcode))

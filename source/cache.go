@@ -66,6 +66,11 @@ type cacheEntry struct {
 	// fail marks the entry that remembers a failure (SERVFAIL or REFUSED): it is dropped when a server comes back up, is
 	// never handed to another node and never replaces an answer.
 	fail bool
+	// prefetch (cache.go, prefetch below): hits is how many times clients got this entry, pf is set while a refresh of it is
+	// running or has been decided on, pfAfter (c.now() in nanoseconds) keeps a failed refresh from being tried at every hit.
+	hits    atomic.Uint32
+	pf      atomic.Bool
+	pfAfter atomic.Int64
 }
 
 // cacheShard is one slice of the cache with its own lock and its own LRU order.  At 100k queries a second one
@@ -110,6 +115,59 @@ type respCache struct {
 	Bypassed atomic.Uint64 // queries that are never cached
 	Evicted  atomic.Uint64 // entries pushed out because the cache was full
 	FailHits atomic.Uint64 // queries answered from a remembered failure (not counted in Hits)
+
+	// prefetch: refresh a popular answer before it expires.  pfPct is the percent of an entry's life that must be left or
+	// less (0: off), pfHits the hits it needs; pfSem limits the refreshes running at once.
+	pfPct          atomic.Int32
+	pfHits         atomic.Int32
+	pfSem          chan struct{}
+	Prefetched     atomic.Uint64 // answers refreshed in the background
+	PrefetchFailed atomic.Uint64 // refreshes that got no usable answer
+}
+
+const (
+	cachePrefetchDefaultPercent = 10
+	cachePrefetchDefaultHits    = 2
+	cachePrefetchMinLife        = 10 * time.Second // an answer that lives less is not worth refreshing
+	cachePrefetchRetry          = 10 * time.Second // a failed refresh is tried again at a hit after this long
+	cachePrefetchParallel       = 64
+)
+
+// setPrefetch applies the prefetch settings of a pool's configuration to the cache (a cache that a rebuilt pool inherits
+// follows the new settings too).
+func (c *respCache) setPrefetch(d DNSConfig) {
+	if c == nil {
+		return
+	}
+	if !d.CachePrefetch {
+		c.pfPct.Store(0)
+		return
+	}
+	pct, hits := d.CachePrefetchPercent, d.CachePrefetchHits
+	if pct <= 0 {
+		pct = cachePrefetchDefaultPercent
+	}
+	if hits <= 0 {
+		hits = cachePrefetchDefaultHits
+	}
+	c.pfHits.Store(int32(hits))
+	c.pfPct.Store(int32(pct))
+}
+
+// endPrefetch says how a refresh ended.  On a failure the entry may be tried again, at a hit after a pause.
+func (c *respCache) endPrefetch(key string, ok bool) {
+	if ok {
+		c.Prefetched.Add(1)
+		return // the entry was replaced by the new one
+	}
+	c.PrefetchFailed.Add(1)
+	sh := c.shardFor(key)
+	sh.mu.RLock()
+	if e := sh.m[key]; e != nil {
+		e.pfAfter.Store(c.now().Add(cachePrefetchRetry).UnixNano())
+		e.pf.Store(false)
+	}
+	sh.mu.RUnlock()
 }
 
 func newRespCache(max, maxTTL int) *respCache {
@@ -123,7 +181,7 @@ func newRespCache(max, maxTTL int) *respCache {
 	if max >= cacheShardMin {
 		n = cacheShards
 	}
-	c := &respCache{max: max, maxTTL: uint32(maxTTL), seed: maphash.MakeSeed(), now: time.Now}
+	c := &respCache{max: max, maxTTL: uint32(maxTTL), seed: maphash.MakeSeed(), now: time.Now, pfSem: make(chan struct{}, cachePrefetchParallel)}
 	for i := 0; i < n; i++ {
 		per := (max + n - 1) / n
 		budget := math.MaxInt // a very large cache on a 32-bit machine must not overflow the byte budget
@@ -330,18 +388,27 @@ func optionsOnly(rdata []byte, codes ...uint16) bool {
 
 // get returns the cached answer for the query, with its ID, question and TTLs made right, or nil.
 func (c *respCache) get(key string, q []byte) []byte {
-	return c.lookup(c.shardFor(key), key, nil, q, -1)
+	out, _ := c.lookup(c.shardFor(key), key, nil, q, -1, false)
+	return out
 }
 
 // getBytes is get for a key held as bytes, so that a hit allocates no key.  qEnd is the offset just after the
 // question in q, when the caller has it already (-1 to work it out).
 func (c *respCache) getBytes(key, q []byte, qEnd int) []byte {
-	return c.lookup(c.shardForBytes(key), "", key, q, qEnd)
+	out, _ := c.lookup(c.shardForBytes(key), "", key, q, qEnd, false)
+	return out
+}
+
+// getBytesPF is getBytes that also says whether the answer is one to refresh in the background now (prefetch is on, the
+// answer is popular and about to expire, and no refresh of it is on its way).  The caller then must call endPrefetch.
+// canPF is false for a query whose answer cannot be refreshed from the pool alone.
+func (c *respCache) getBytesPF(key, q []byte, qEnd int, canPF bool) (out []byte, pf bool) {
+	return c.lookup(c.shardForBytes(key), "", key, q, qEnd, canPF)
 }
 
 // lookup finds the key (kb when it is held as bytes, else key) in sh under the read lock; only an expired entry or
 // an LRU bump takes the write lock.
-func (c *respCache) lookup(sh *cacheShard, key string, kb, q []byte, qEnd int) []byte {
+func (c *respCache) lookup(sh *cacheShard, key string, kb, q []byte, qEnd int, canPF bool) ([]byte, bool) {
 	now := c.now()
 	sh.mu.RLock()
 	var e *cacheEntry
@@ -352,7 +419,7 @@ func (c *respCache) lookup(sh *cacheShard, key string, kb, q []byte, qEnd int) [
 	}
 	if e == nil {
 		sh.mu.RUnlock()
-		return nil
+		return nil, false
 	}
 	age := now.Sub(e.at)
 	if age >= e.life || age < 0 {
@@ -362,7 +429,15 @@ func (c *respCache) lookup(sh *cacheShard, key string, kb, q []byte, qEnd int) [
 			sh.drop(e)
 		}
 		sh.mu.Unlock()
-		return nil
+		return nil, false
+	}
+	pf := false
+	if pct := c.pfPct.Load(); canPF && pct > 0 && !e.fail {
+		n := e.hits.Add(1)
+		if int32(n) >= c.pfHits.Load() && e.life >= cachePrefetchMinLife && (e.life-age)*100 <= e.life*time.Duration(pct) &&
+			now.UnixNano() >= e.pfAfter.Load() && e.pf.CompareAndSwap(false, true) {
+			pf = true
+		}
 	}
 	if len(c.shards) == 1 || now.UnixNano()-e.bumped.Load() >= cacheBumpEvery {
 		sh.mu.RUnlock()
@@ -375,7 +450,12 @@ func (c *respCache) lookup(sh *cacheShard, key string, kb, q []byte, qEnd int) [
 	} else {
 		sh.mu.RUnlock()
 	}
-	return c.finish(e, age, q, qEnd)
+	out := c.finish(e, age, q, qEnd)
+	if out == nil && pf {
+		e.pf.Store(false)
+		pf = false
+	}
+	return out, pf
 }
 
 // finish builds the answer for a client from the stored entry.  An entry's message is never changed after it is
@@ -598,11 +678,14 @@ type cacheStats struct {
 	Bypassed uint64 `json:"bypassed"`
 	Evicted  uint64 `json:"evicted"`
 	FailHits uint64 `json:"fail_hits"`
+
+	Prefetched     uint64 `json:"prefetched"`
+	PrefetchFailed uint64 `json:"prefetch_failed"`
 }
 
 func (c *respCache) stats() cacheStats {
 	if c == nil {
 		return cacheStats{}
 	}
-	return cacheStats{On: true, Entries: c.Len(), Max: c.max, MaxTTL: int(c.maxTTL), Bytes: c.Bytes(), Hits: c.Hits.Load(), Misses: c.Misses.Load(), Bypassed: c.Bypassed.Load(), Evicted: c.Evicted.Load(), FailHits: c.FailHits.Load()}
+	return cacheStats{On: true, Entries: c.Len(), Max: c.max, MaxTTL: int(c.maxTTL), Bytes: c.Bytes(), Hits: c.Hits.Load(), Misses: c.Misses.Load(), Bypassed: c.Bypassed.Load(), Evicted: c.Evicted.Load(), FailHits: c.FailHits.Load(), Prefetched: c.Prefetched.Load(), PrefetchFailed: c.PrefetchFailed.Load()}
 }

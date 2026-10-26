@@ -1,5 +1,12 @@
 # Changelog
 
+## [v585] - 2026-10-26 — Cache prefetch and 0x20 name randomization
+
+### Added
+- **Cache prefetch** (Configure ▸ DNS ▸ Cache & ECS; `cache_prefetch`, `cache_prefetch_percent`, `cache_prefetch_hits`; off by default). A popular answer that is about to expire is refreshed in the background, so clients keep being answered from the cache. It starts at a hit when 10 % (changeable) or less of the answer's life is left and it has had 2 (changeable) hits. Nothing is counted as a client query; a failed refresh is tried again after 10 seconds; 64 at the most run at once. Metrics `dnsdir_cache_prefetched_total` and `dnsdir_cache_prefetch_failed_total`.
+- **Randomize the case of names** (`randomize_case`, under Query hardening; off by default). Names in queries to plain UDP servers are spelled in random case (0x20) and the answer must come back spelled the same, which makes forged answers much harder to get accepted. The client's own spelling is put back. A server that does not keep the case is asked the usual way, and after five in a row it is left alone for 30 minutes. Metrics `dnsdir_case_randomized_queries_total` and `dnsdir_case_mismatch_total`.
+- Help and README updated.
+
 ## [v584] - 2026-10-26 — Repack of v583
 
 ### Fixed

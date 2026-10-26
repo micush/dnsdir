@@ -97,6 +97,8 @@ func b2f(b bool) float64 {
 func (s *StatusServer) metricsText() string {
 	m := &metricsOut{seen: map[string]bool{}}
 	m.add("dnsdir_info", "gauge", "The version this node runs.", promLabel("version", version()), 1)
+	m.add("dnsdir_case_randomized_queries_total", "counter", "Queries sent to upstream servers with the case of the name randomised (0x20).", "", float64(case0x20Sent.Load()))
+	m.add("dnsdir_case_mismatch_total", "counter", "Answers that came back with the name in another case than it was sent in (not accepted).", "", float64(case0x20Mismatch.Load()))
 	pools := s.sup.poolList()
 	sort.Slice(pools, func(i, j int) bool { return pools[i].Key < pools[j].Key })
 	for _, pi := range pools {
@@ -121,6 +123,8 @@ func (s *StatusServer) metricsText() string {
 			m.add("dnsdir_cache_entries", "gauge", "Answers in the cache.", pl, float64(cs.Entries))
 			m.add("dnsdir_cache_hits_total", "counter", "Cache hits.", pl, float64(cs.Hits))
 			m.add("dnsdir_cache_misses_total", "counter", "Cache misses.", pl, float64(cs.Misses))
+			m.add("dnsdir_cache_prefetched_total", "counter", "Answers refreshed in the background before they expired.", pl, float64(cs.Prefetched))
+			m.add("dnsdir_cache_prefetch_failed_total", "counter", "Background refreshes that got no usable answer.", pl, float64(cs.PrefetchFailed))
 		}
 		for _, sv := range s.namedServers(pi) {
 			l := pl + "," + promLabel("server", sv.Addr)

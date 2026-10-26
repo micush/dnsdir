@@ -246,9 +246,12 @@ func (f *DNSFrontend) resolveRaw(query []byte, tcp bool, client netip.Addr, qi *
 			if r != nil { // answers from a policy row's servers are cached apart (policy.go)
 				kb = append(append(kb, '|', '@'), r.tag...)
 			}
-			if r := c.getBytes(kb, query, qi.nameEnd+4); r != nil {
-				f.cacheServed(p, c, r)
-				return r
+			if resp, pf := c.getBytesPF(kb, query, qi.nameEnd+4, r == nil); resp != nil {
+				f.cacheServed(p, c, resp)
+				if pf {
+					f.prefetch(p, query, tcp, client, string(kb))
+				}
+				return resp
 			}
 			ckey = string(kb) // a miss: the key is kept (flight table, cache)
 			// the same question already on its way to an upstream: wait for that answer instead of sending another
@@ -320,6 +323,31 @@ func (f *DNSFrontend) resolveRaw(query []byte, tcp bool, client netip.Addr, qi *
 		return errorResponse(query, rcodeServFail)
 	}
 	return resp
+}
+
+// prefetch refreshes a cached answer in the background, with a copy of the query of the client that just got it, and
+// replaces the entry.  The client is not kept waiting and nothing is counted as a query.
+func (f *DNSFrontend) prefetch(p *Pool, query []byte, tcp bool, client netip.Addr, key string) {
+	c := p.cache
+	select {
+	case c.pfSem <- struct{}{}:
+	default: // too many refreshes running: this one is tried at a later hit
+		c.endPrefetch(key, false)
+		return
+	}
+	q := append([]byte(nil), query...)
+	go func() {
+		defer func() { <-c.pfSem }()
+		ctx, cancel := context.WithTimeout(f.ctx, 10*time.Second)
+		defer cancel()
+		ok := false
+		if resp, err := p.forward(ctx, q, tcp, client, false); err == nil {
+			if h, hok := parseHeader(resp); hok && h.rcode != rcodeServFail && h.rcode != rcodeRefused {
+				ok = c.store(key, resp, 0, false)
+			}
+		}
+		c.endPrefetch(key, ok)
+	}()
 }
 
 // cacheServed counts a query that was answered from the cache: a hit, or a remembered failure (which is not a hit: the

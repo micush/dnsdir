@@ -66,7 +66,7 @@ func TestHelpCoversEveryField(t *testing.T) {
 		"Upstream servers": "config_dns0", "Load Balancing": "config_dns1", "Timing": "config_dns1", "Client names": "config_dns1",
 		"Listeners": "config_dns2", "Policy-Based Resolution": "config_dns3_0", "Sort List": "config_dns3_1",
 		"Conditional Forwarding": "config_dns3_2", "Block Lists": "config_dns3_3",
-		"Client network (ECS)": "config_dns4", "Cache": "config_dns4", "Client Rate Limiting": "config_dns5",
+		"Client network (ECS)": "config_dns4", "Cache": "config_dns4", "Query hardening": "config_dns4", "Client Rate Limiting": "config_dns5",
 	}
 	// single sign-on: the tab each field is on
 	ssoTab := map[string]string{}

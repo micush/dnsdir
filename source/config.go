@@ -636,15 +636,27 @@ type DNSConfig struct {
 	// FailureCacheSeconds is how long a failure (SERVFAIL, REFUSED, or every server timing out) is remembered, so a client that
 	// asks again and again for a name that fails does not send each question upstream (RFC 9520; cache.go).  0 turns it
 	// off; at most cacheFailTTLMax (5 minutes).  Shared like the rest of the cache settings.
-	FailureCacheSeconds int     `json:"failure_cache_seconds"`
-	ECSPrefix4          int     `json:"ecs_prefix4"`
-	ECSPrefix6          int     `json:"ecs_prefix6"`
-	ProbeIntervalMS     int     `json:"probe_interval_ms"`
-	ProbeTimeoutMS      int     `json:"probe_timeout_ms"`
-	QueryTimeoutMS      int     `json:"query_timeout_ms"`
-	MaxAttempts         int     `json:"max_attempts"`
-	FailThreshold       int     `json:"fail_threshold"`
-	LatencyAlpha        float64 `json:"latency_alpha"`
+	FailureCacheSeconds int `json:"failure_cache_seconds"`
+	// CachePrefetch refreshes a popular cached answer in the background shortly before it expires, so clients keep getting
+	// it from the cache instead of waiting for the upstream (cache.go).  It starts when an answer that is asked for again
+	// has CachePrefetchPercent percent (default 10) or less of its life left and has been asked for CachePrefetchHits
+	// times (default 2).  Off by default; shared with the other cache settings.
+	CachePrefetch        bool `json:"cache_prefetch,omitempty"`
+	CachePrefetchPercent int  `json:"cache_prefetch_percent,omitempty"`
+	CachePrefetchHits    int  `json:"cache_prefetch_hits,omitempty"`
+	// RandomizeCase spells the name of each query to an upstream server (plain UDP) with random upper and lower case letters
+	// ("0x20") and accepts the answer only when it comes back spelled the same way, which an attacker who cannot see the
+	// query cannot guess (dns0x20.go).  A server that does not keep the case is asked the usual way and left alone.  Off by
+	// default; shared.
+	RandomizeCase   bool    `json:"randomize_case,omitempty"`
+	ECSPrefix4      int     `json:"ecs_prefix4"`
+	ECSPrefix6      int     `json:"ecs_prefix6"`
+	ProbeIntervalMS int     `json:"probe_interval_ms"`
+	ProbeTimeoutMS  int     `json:"probe_timeout_ms"`
+	QueryTimeoutMS  int     `json:"query_timeout_ms"`
+	MaxAttempts     int     `json:"max_attempts"`
+	FailThreshold   int     `json:"fail_threshold"`
+	LatencyAlpha    float64 `json:"latency_alpha"`
 	// LB is a gateway's own load-balancing settings (see LBConfig).  Only meaningful in a gateway's own pool; nil
 	// means the gateway follows Settings.  A pointer with omitempty so a config that never used it stays readable
 	// by older versions.
@@ -958,6 +970,12 @@ func (d *DNSConfig) Validate() error {
 	if d.FailureCacheSeconds < 0 || d.FailureCacheSeconds > cacheFailTTLMax {
 		return fmt.Errorf("dns: failure_cache_seconds must be 0-%d seconds (0 = off)", cacheFailTTLMax)
 	}
+	if d.CachePrefetchPercent < 0 || d.CachePrefetchPercent > 50 {
+		return errors.New("dns: cache_prefetch_percent must be 1-50 (0 = the default, 10)")
+	}
+	if d.CachePrefetchHits < 0 || d.CachePrefetchHits > 1000 {
+		return errors.New("dns: cache_prefetch_hits must be 1-1000 (0 = the default, 2)")
+	}
 	if d.CacheMaxTTL < 1 || d.CacheMaxTTL > cacheMaxTTLLimit {
 		return fmt.Errorf("dns: cache_max_ttl must be 1-%d seconds", cacheMaxTTLLimit)
 	}
@@ -1112,6 +1130,8 @@ func (dc *DaemonConfig) poolFor(g *GroupConfig) (int, DNSConfig) {
 func (c *DNSConfig) followSettings(shared DNSConfig) {
 	c.Cache, c.CacheEntries, c.CacheMaxTTL = shared.Cache, shared.CacheEntries, shared.CacheMaxTTL
 	c.FailureCacheSeconds = shared.FailureCacheSeconds
+	c.CachePrefetch, c.CachePrefetchPercent, c.CachePrefetchHits = shared.CachePrefetch, shared.CachePrefetchPercent, shared.CachePrefetchHits
+	c.RandomizeCase = shared.RandomizeCase
 	c.AllowedClients = append([]string(nil), shared.AllowedClients...)
 	if len(c.AllowedClients) == 0 {
 		c.AllowedClients = nil

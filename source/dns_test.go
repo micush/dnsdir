@@ -22,6 +22,8 @@ type fakeDNS struct {
 	lastQ      atomic.Value // the last question name asked (a string)
 	failSuffix atomic.Value // a zone (a string): names in it are not answered (per-zone health tests)
 	only       atomic.Bool  // answer only the probe names (a.example, b.example): a server that cannot resolve anything else
+	lower      atomic.Bool  // write the name of the question in the answer in lower case (a server that does not keep the case)
+	lastRaw    atomic.Value // the question name as it came in, case and all (a string, wire format)
 	pc         net.PacketConn
 	tl         net.Listener
 }
@@ -37,6 +39,22 @@ func reply(q []byte, rcode int, answers int) []byte {
 }
 
 func (f *fakeDNS) answer(q []byte) []byte {
+	end, qok := questionEnd(q)
+	if qok {
+		f.lastRaw.Store(string(q[12 : end-4]))
+	}
+	r := f.answer0(q)
+	if r != nil && qok && f.lower.Load() && len(r) >= end {
+		for i := 12; i < end-4; i++ {
+			if r[i] >= 'A' && r[i] <= 'Z' {
+				r[i] += 0x20
+			}
+		}
+	}
+	return r
+}
+
+func (f *fakeDNS) answer0(q []byte) []byte {
 	f.hits.Add(1)
 	if n, _, ok := questionOf(q); ok {
 		f.lastQ.Store(n)

@@ -554,6 +554,7 @@ func (s *Supervisor) refreshPool(nu *DaemonConfig, preprobe bool) map[int]bool {
 		p := NewPool(c)
 		if cur := oldPools[k]; cur != nil && cur.cache != nil && p.cache != nil && cacheCarries(oldCfg[k], c) {
 			p.cache = cur.cache // servers changed, not the cache: what it holds is still right (cachewarm.go)
+			p.cache.setPrefetch(c)
 		}
 		if preprobe {
 			most := 1

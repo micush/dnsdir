@@ -2364,6 +2364,11 @@
     { shared: true, k: "cache_entries", l: "Most answers kept", t: "int", min: 100, max: 1000000000 },
     { shared: true, k: "cache_max_ttl", l: "Cache TTL (s)", t: "int", min: 1, max: 604800 },
     { shared: true, k: "failure_cache_seconds", l: "Failure cache (s)", t: "int", min: 0, max: 300 },
+    { shared: true, k: "cache_prefetch", l: "Refresh popular answers before they expire", t: "bool" },
+    { shared: true, k: "cache_prefetch_percent", l: "Refresh when this much of the TTL is left (%)", t: "int", min: 0, max: 50, hint: "Empty or 0 is 10." },
+    { shared: true, k: "cache_prefetch_hits", l: "Refresh after this many hits", t: "int", min: 0, max: 1000, hint: "Empty or 0 is 2." },
+    { section: "Query hardening" },
+    { shared: true, k: "randomize_case", l: "Randomize the case of names sent to the servers", t: "bool", hint: "0x20: an answer must come back with the name spelled the same way. Plain UDP servers only; a server that does not keep the case is asked the usual way." },
     { section: "Timing" },
     { shared: true, k: "probe_interval_ms", l: "Probe interval (ms)", t: "int", min: 1 },
     { shared: true, k: "probe_timeout_ms", l: "Probe timeout (ms)", t: "int", min: 1 },
@@ -3746,7 +3751,7 @@
           ["Health & balancing", ["Load Balancing", "Timing"]],
           ["Listeners", ["Listeners"]],
           ["Resolution", ["Policy-Based Resolution", "Sort List", "Conditional Forwarding", "Block Lists"]],
-          ["Cache & ECS", ["Cache", "Client network (ECS)"]],
+          ["Cache & ECS", ["Cache", "Query hardening", "Client network (ECS)"]],
           ["Clients", ["Client Rate Limiting"]],
         ];
         const titleOf = (c) => ((c.querySelector("header h2") || {}).textContent || "");

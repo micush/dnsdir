@@ -2365,8 +2365,8 @@
     { shared: true, k: "cache_max_ttl", l: "Cache TTL (s)", t: "int", min: 1, max: 604800 },
     { shared: true, k: "failure_cache_seconds", l: "Failure cache (s)", t: "int", min: 0, max: 300 },
     { shared: true, k: "cache_prefetch", l: "Refresh popular answers before they expire", t: "bool" },
-    { shared: true, k: "cache_prefetch_percent", l: "Refresh when this much of the TTL is left (%)", t: "int", min: 0, max: 50, hint: "Empty or 0 is 10." },
-    { shared: true, k: "cache_prefetch_hits", l: "Refresh after this many hits", t: "int", min: 0, max: 1000, hint: "Empty or 0 is 2." },
+    { shared: true, k: "cache_prefetch_percent", l: "TTL refresh percentage", t: "int", min: 1, max: 50, def: 10, hint: "Default 10." },
+    { shared: true, k: "cache_prefetch_hits", l: "Refresh after this many hits", t: "int", min: 1, max: 1000, def: 2, hint: "Default 2." },
     { section: "Query hardening" },
     { shared: true, k: "randomize_case", l: "Randomize the case of names sent to the servers", t: "bool", hint: "0x20: an answer must come back with the name spelled the same way. Plain UDP servers only; a server that does not keep the case is asked the usual way." },
     { section: "Timing" },
@@ -3403,7 +3403,7 @@
         get = () => { const t = input.value.trim(); return /^\d+$/.test(t) ? ":" + t : t; };
       } else if (f.t === "int" || f.t === "float") {
         input = h("input", { type: "number", step: f.t === "float" ? "any" : "1", min: f.min, max: f.max });
-        input.value = v == null ? "" : v;
+        input.value = v == null || (v === 0 && f.def != null) ? (f.def != null ? f.def : "") : v;   // a setting at its default shows that default
         get = () => (input.value === "" ? 0 : Number(input.value));
       } else {
         input = h("input", { type: "text", autocomplete: "off", spellcheck: "false" });

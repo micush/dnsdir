@@ -1,5 +1,15 @@
 # Changelog
 
+## [v587] - 2026-10-26 — Prefetch field name
+
+### Changed
+- "Refresh when this much of the TTL is left (%)" is now "TTL refresh percentage", so the two prefetch fields fit on one line each and line up.
+
+## [v586] - 2026-10-26 — Prefetch fields show their defaults
+
+### Fixed
+- The two prefetch numbers (percent of the TTL left, hits) were blank when unset; they now show their defaults, 10 and 2.
+
 ## [v585] - 2026-10-26 — Cache prefetch and 0x20 name randomization
 
 ### Added

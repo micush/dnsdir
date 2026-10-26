@@ -558,6 +558,11 @@ type DNSConfig struct {
 	// lives in DaemonConfig.SNMP.  See snmp.go.
 	SNMPCommunities []string `json:"snmp_communities,omitempty"`
 	SNMPContact     string   `json:"snmp_contact,omitempty"`
+	// SNMPACL is the sources snmpd answers to ("10.1.1.50", "10.1.0.0/24"); empty = nobody.  MetricsACL is who may
+	// read /metrics on the web GUI port (Configure ▸ Monitoring ▸ Metrics); the page is always there, and an empty list
+	// means nobody.  Shared by the cluster; neither is read by the pools.  See snmp.go and metrics.go.
+	SNMPACL    []string `json:"snmp_acl,omitempty"`
+	MetricsACL []string `json:"metrics_acl,omitempty"`
 	// Schedule is the scheduler's task list (Operate ▸ Scheduler), replicated with the rest; see scheduler.go.
 	Schedule []SchedTask `json:"schedule,omitempty"`
 	// SortList orders the A and AAAA records of an answer per client network: "10.1.0.0/16: 10.1.0.0/16, 10.0.0.0/8"
@@ -1249,14 +1254,19 @@ func (dc *DaemonConfig) Validate() error {
 		dc.DNS.Schedule = nil
 	}
 	{
-		sc := SNMPConfig{Communities: dc.DNS.SNMPCommunities, Contact: dc.DNS.SNMPContact}
+		sc := SNMPConfig{Communities: dc.DNS.SNMPCommunities, Contact: dc.DNS.SNMPContact, ACL: dc.DNS.SNMPACL}
 		if err := sc.Validate(); err != nil {
 			return err
 		}
-		dc.DNS.SNMPCommunities, dc.DNS.SNMPContact = sc.Communities, sc.Contact
+		dc.DNS.SNMPCommunities, dc.DNS.SNMPContact, dc.DNS.SNMPACL = sc.Communities, sc.Contact, sc.ACL
+		acl, err := normACL("metrics", dc.DNS.MetricsACL)
+		if err != nil {
+			return err
+		}
+		dc.DNS.MetricsACL = acl
 	}
 	if dc.SNMP != nil {
-		dc.SNMP.Communities, dc.SNMP.Contact = nil, ""
+		dc.SNMP.Communities, dc.SNMP.Contact, dc.SNMP.ACL = nil, "", nil
 		if err := dc.SNMP.Validate(); err != nil {
 			return err
 		}
@@ -1603,9 +1613,10 @@ func keepQueries(l []string, valid map[string]bool) []string {
 
 // live is the configuration the probe pool runs with: paused servers left out.
 func (d DNSConfig) live() DNSConfig {
-	d.ListenLocal = false // read by the node's own listeners (locallisten.go), not by the pool: a change must not restart it
-	d.Schedule = nil      // the scheduler's tasks are not the pool's: a change must not restart it
-	d.ServerNames = nil   // labels only: a rename must not restart the pool
+	d.SNMPACL, d.MetricsACL = nil, nil // monitoring settings, read by snmp.go and metrics.go
+	d.ListenLocal = false              // read by the node's own listeners (locallisten.go), not by the pool: a change must not restart it
+	d.Schedule = nil                   // the scheduler's tasks are not the pool's: a change must not restart it
+	d.ServerNames = nil                // labels only: a rename must not restart the pool
 	if len(d.PausedServers) != 0 || len(d.PausedServersHere) != 0 {
 		var up []string
 		for _, s := range d.Servers {
@@ -1841,7 +1852,7 @@ func (g GroupConfig) pausedAnycast() map[string]string {
 
 // snmpSettings is the whole SNMP configuration of this node: the cluster's communities and contact, this node's location.
 func (dc *DaemonConfig) snmpSettings() SNMPConfig {
-	c := SNMPConfig{Communities: dc.DNS.SNMPCommunities, Contact: dc.DNS.SNMPContact}
+	c := SNMPConfig{Communities: dc.DNS.SNMPCommunities, Contact: dc.DNS.SNMPContact, ACL: dc.DNS.SNMPACL}
 	if dc.SNMP != nil {
 		c.Location = dc.SNMP.Location
 	}

@@ -56,6 +56,11 @@ type Supervisor struct {
 
 	// The node's own addresses, when dns.listen_local is on (locallisten.go).
 	local localListeners
+
+	metricsMu    sync.Mutex // the /metrics access list as networks (metrics.go)
+	metricsKey   string
+	metricsAt    time.Time
+	metricsCache []netip.Prefix
 }
 
 type offnetWait struct {

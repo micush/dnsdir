@@ -628,6 +628,16 @@ func (h *HostStats) Load() (HostLoad, bool) {
 	return l, true
 }
 
+// lastNow is a copy of the latest sample; At is 0 before the first one.
+func (h *HostStats) lastNow() HostNow {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := h.last
+	n.FS = append([]fsUsage(nil), n.FS...)
+	n.Ifaces = append([]IfaceNow(nil), n.Ifaces...)
+	return n
+}
+
 // hostLoadFn is where the daemon reads its own load (tests replace it).
 var hostLoadFn = func() (HostLoad, bool) { return hoststats.Load() }
 

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"strings"
@@ -26,6 +29,7 @@ type SNMPConfig struct {
 	Communities []string `json:"communities,omitempty"`
 	Location    string   `json:"location,omitempty"`
 	Contact     string   `json:"contact,omitempty"`
+	ACL         []string `json:"acl,omitempty"` // sources snmpd answers to; empty = nobody
 }
 
 const (
@@ -54,6 +58,82 @@ var (
 		return err == nil
 	}
 )
+
+// aclHostName says whether s is written like a fully qualified host name (letters, digits, "-" and "_", at least two labels).
+func aclHostName(s string) bool {
+	if len(s) > 253 || strings.Count(s, ".") < 1 {
+		return false
+	}
+	for _, l := range strings.Split(s, ".") {
+		if l == "" || len(l) > 63 || l[0] == '-' || l[len(l)-1] == '-' {
+			return false
+		}
+		for _, r := range l {
+			if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// aclLookup turns a host name into its addresses; replaced in tests.
+var aclLookup = func(name string) []netip.Addr {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	ips, _ := net.DefaultResolver.LookupNetIP(ctx, "ip", name)
+	return ips
+}
+
+// expandACL is the networks an access list stands for: addresses and networks as written, a host name as the addresses it
+// has now (none when it cannot be looked up).  A list that was written but expands to nothing allows nobody.
+func expandACL(list []string) []netip.Prefix {
+	var out []netip.Prefix
+	for _, s := range list {
+		if nets, err := parseClientNets([]string{s}); err == nil {
+			out = append(out, nets...)
+			continue
+		}
+		for _, a := range aclLookup(s) {
+			a = a.Unmap()
+			out = append(out, netip.PrefixFrom(a, a.BitLen()))
+		}
+	}
+	return out
+}
+
+// normACL checks a list of sources ("10.1.1.50", "10.1.0.0/24", "2001:db8::/32") and writes each one the same way:
+// a single address without a length, a network with it.  At most 64, no repeats.
+func normACL(what string, list []string) ([]string, error) {
+	if len(list) > 64 {
+		return nil, fmt.Errorf("%s: at most 64 entries in the access list", what)
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range list {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		var t string
+		if nets, err := parseClientNets([]string{s}); err == nil {
+			p := nets[0]
+			t = p.String()
+			if p.Bits() == p.Addr().BitLen() {
+				t = p.Addr().String()
+			}
+		} else if n := strings.ToLower(strings.TrimSuffix(s, ".")); aclHostName(n) {
+			t = n
+		} else {
+			return nil, fmt.Errorf("%s: access list: %q is not an address, a network like 10.0.0.0/8 or a host name like host.example.com", what, s)
+		}
+		if !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
 
 func (c SNMPConfig) enabled() bool { return len(c.Communities) > 0 }
 
@@ -85,6 +165,11 @@ func (c *SNMPConfig) Validate() error {
 		return fmt.Errorf("snmp: at most %d community strings", maxSNMPCommunities)
 	}
 	c.Communities = out
+	acl, err := normACL("snmp", c.ACL)
+	if err != nil {
+		return err
+	}
+	c.ACL = acl
 	for _, f := range []struct {
 		name string
 		v    *string
@@ -108,7 +193,17 @@ func snmpdConfBody(c SNMPConfig) string {
 	b.WriteString(snmpHeader)
 	b.WriteString("agentaddress udp:161,udp6:161\n")
 	for _, s := range c.Communities {
-		fmt.Fprintf(&b, "rocommunity %s\nrocommunity6 %s\n", s, s)
+		for _, p := range expandACL(c.ACL) { // only from these sources: the IPv4 ones for rocommunity, the IPv6 ones for rocommunity6
+			src := p.String()
+			if p.Bits() == p.Addr().BitLen() {
+				src = p.Addr().String()
+			}
+			if p.Addr().Is6() {
+				fmt.Fprintf(&b, "rocommunity6 %s %s\n", s, src)
+			} else {
+				fmt.Fprintf(&b, "rocommunity %s %s\n", s, src)
+			}
+		}
 	}
 	if c.Location != "" {
 		fmt.Fprintf(&b, "sysLocation %s\n", c.Location)
@@ -117,6 +212,32 @@ func snmpdConfBody(c SNMPConfig) string {
 		fmt.Fprintf(&b, "sysContact %s\n", c.Contact)
 	}
 	return b.String()
+}
+
+// snmpRefresh writes snmpd.conf again every few minutes while the access list has a host name in it, so a name that
+// gets another address is followed.  It does nothing otherwise.
+func snmpRefresh(ctx context.Context, sup *Supervisor) {
+	t := time.NewTicker(5 * time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			sup.mu.Lock()
+			var c SNMPConfig
+			if sup.dc != nil {
+				c = sup.dc.snmpSettings()
+			}
+			sup.mu.Unlock()
+			for _, s := range c.ACL {
+				if _, err := netip.ParseAddr(s); err != nil && !strings.Contains(s, "/") {
+					applySNMP(c)
+					break
+				}
+			}
+		}
+	}
 }
 
 var snmpMu sync.Mutex

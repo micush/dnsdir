@@ -75,8 +75,8 @@ func TestDaemonConfigDropsAnEmptySNMPBlock(t *testing.T) {
 }
 
 func TestSNMPConfBody(t *testing.T) {
-	b := snmpdConfBody(SNMPConfig{Communities: []string{"public", "ro2"}, Location: "Phoenix DC", Contact: "noc@example.com"})
-	for _, w := range []string{snmpHeader, "agentaddress udp:161,udp6:161\n", "rocommunity public\n", "rocommunity6 public\n", "rocommunity ro2\n", "rocommunity6 ro2\n", "sysLocation Phoenix DC\n", "sysContact noc@example.com\n"} {
+	b := snmpdConfBody(SNMPConfig{Communities: []string{"public", "ro2"}, ACL: []string{"0.0.0.0/0", "::/0"}, Location: "Phoenix DC", Contact: "noc@example.com"})
+	for _, w := range []string{snmpHeader, "agentaddress udp:161,udp6:161\n", "rocommunity public 0.0.0.0/0\n", "rocommunity6 public ::/0\n", "rocommunity ro2 0.0.0.0/0\n", "rocommunity6 ro2 ::/0\n", "sysLocation Phoenix DC\n", "sysContact noc@example.com\n"} {
 		if !strings.Contains(b, w) {
 			t.Errorf("missing %q in %q", w, b)
 		}
@@ -101,7 +101,7 @@ func TestSNMPEnablesWhenACommunityIsSetAndDisablesWhenEmptied(t *testing.T) {
 		t.Fatalf("an snmpd that was never ours must not be touched: %v", *calls)
 	}
 	// a community: the file is written, the original kept, snmpd enabled and restarted
-	cfg := SNMPConfig{Communities: []string{"public"}, Location: "lab"}
+	cfg := SNMPConfig{Communities: []string{"public"}, ACL: []string{"10.0.0.0/8"}, Location: "lab"}
 	applySNMP(cfg)
 	got, _ := os.ReadFile(conf)
 	if string(got) != snmpdConfBody(cfg) {
@@ -124,7 +124,7 @@ func TestSNMPEnablesWhenACommunityIsSetAndDisablesWhenEmptied(t *testing.T) {
 	}
 	// another community: restarted
 	*calls = nil
-	applySNMP(SNMPConfig{Communities: []string{"public", "second"}, Location: "lab"})
+	applySNMP(SNMPConfig{Communities: []string{"public", "second"}, ACL: []string{"10.0.0.0/8"}, Location: "lab"})
 	if !strings.Contains(strings.Join(*calls, "|"), "restart snmpd") {
 		t.Fatalf("a changed file must restart snmpd: %v", *calls)
 	}

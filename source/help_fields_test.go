@@ -37,6 +37,7 @@ func TestHelpCoversEveryField(t *testing.T) {
 		{"SSO_FIELDS", ""}, // by tab, below
 		{"LDAP_FIELDS", "users_ldap"},
 		{"SNMP_FIELDS", "config_snmp"},
+		{"PROM_FIELDS", "config_metrics"},
 		{"CLUSTER_FIELDS", "config_cluster"},
 		{"LOG_FIELDS", "config_logs"},
 		{"SYSLOG_FIELDS", "config_logs"},

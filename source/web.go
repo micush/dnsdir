@@ -324,6 +324,7 @@ func (w *WebServer) Handler() http.Handler {
 	mux.Handle("GET /{$}", static)
 	mux.HandleFunc("GET /app.js", serveAppJS)
 	mux.Handle("GET /help.js", static)
+	mux.HandleFunc("GET /metrics", w.handleMetrics)
 	mux.Handle("GET /style.css", static)
 
 	mux.HandleFunc("POST /api/login", w.handleLogin)

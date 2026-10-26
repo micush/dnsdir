@@ -261,6 +261,14 @@ func cloneDNS(d DNSConfig) DNSConfig {
 	if len(d.SNMPCommunities) == 0 {
 		d.SNMPCommunities = nil
 	}
+	d.SNMPACL = append([]string(nil), d.SNMPACL...)
+	if len(d.SNMPACL) == 0 {
+		d.SNMPACL = nil
+	}
+	d.MetricsACL = append([]string(nil), d.MetricsACL...)
+	if len(d.MetricsACL) == 0 {
+		d.MetricsACL = nil
+	}
 	if len(d.Schedule) > 0 {
 		sch := make([]SchedTask, len(d.Schedule))
 		for i, t := range d.Schedule {

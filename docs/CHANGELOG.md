@@ -1,5 +1,20 @@
 # Changelog
 
+## [v572] - 2026-10-25 — Empty access lists allow nobody; the Prometheus tab is now Metrics
+
+### Changed
+- The SNMP **Allowed sources** list now works like the metrics one: **empty means nobody**. A community string answers no one until a source is listed. **After updating, add your monitoring system under Configure ▸ Monitoring ▸ SNMP ▸ Allowed sources, or SNMP stops answering.**
+- The Prometheus tab is called **Metrics** (the page is `/metrics`, and other collectors read the same format).
+
+## [v571] - 2026-10-25 — Configure ▸ Monitoring: SNMP access list and Prometheus metrics
+
+### Added
+- **Configure ▸ SNMP is now Configure ▸ Monitoring**, with two tabs: SNMP and Prometheus.
+- SNMP **Allowed sources** (`snmp_acl`): the addresses and networks snmpd answers to. Empty = any source, as before.
+- **Prometheus** tab with **Allowed sources** (`metrics_acl`): who may read `GET /metrics` on the web GUI port, which returns this node's counters in the Prometheus text format (queries, answers, SERVFAILs, refused and rate-limited queries, cache, upstream server health and answer time, gateway state). The page is always there; with the list empty nobody can read it, and everyone not listed gets 403. There is no login, and no client or domain names are in it.
+- The page also has the host: CPU, load, memory, swap, disk I/O, each filesystem and each network interface (`dnsdir_host_*`), from the same samples as the Host page.
+- Both lists take an address (`10.1.1.1`), a network (`10.1.1.0/24`, `2620::/64`; host bits are dropped) or a host name; a name is looked up (SNMP: when snmpd.conf is written and every 5 minutes; metrics: every minute).
+
 ## [v570] - 2026-10-25 — Gentler trackpad zoom in the topology
 
 ### Fixed

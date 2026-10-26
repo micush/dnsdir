@@ -267,7 +267,7 @@
   // Topology comes first; its items are the gateways themselves (filled in from the daemon).
   const TOPO = "Topology";
   const NAV_GROUPS = [
-    ["Configure", [["cfg_general", "Settings"], ["cfg_groups", "Gateways"], ["cfg_dns", "DNS"], ["cfg_web", "Web GUI"], ["cfg_snmp", "SNMP"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
+    ["Configure", [["cfg_general", "Settings"], ["cfg_groups", "Gateways"], ["cfg_dns", "DNS"], ["cfg_web", "Web GUI"], ["cfg_monitoring", "Monitoring"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
     ["Operate", [["node", "Node"], ["cluster", "Cluster"], ["anycastop", "Anycast"], ["scheduler", "Scheduler"], ["updates", "Upgrade"]]],
     ["Monitor", [["stats", "Statistics"], ["host", "Host"], ["gateways", "Gateways"], ["nodes", "Cluster"], ["dns", "DNS"], ["anycaststatus", "Anycast"], ["capture", "Capture"], ["log", "Log"]]],
   ];
@@ -488,7 +488,7 @@
       case "anycast": return "anycast_" + (state.anycastTab === 1 ? "ospf" : "bgp");
       case "anycaststatus": return "anycaststatus_" + (state.anycastMonTab === 1 ? "ospf" : "bgp");
       case "anycastop": return "anycastop_" + (state.anycastOpTab === 1 ? "ospf" : "bgp");
-      case "cfg_snmp": return "config_snmp";
+      case "cfg_monitoring": return state.monTab === 1 ? "config_metrics" : "config_snmp";
       case "cfg_dns": return "config_dns" + (state.dnsTab >= 0 ? state.dnsTab : 0) + (state.dnsTab === 3 ? "_" + (state.resTab >= 0 ? state.resTab : 0) : "");
       case "users": return state.usersTab === 1 ? "users_ldap" : state.usersTab === 2 ? "users_sso" + (state.ssoTab >= 0 ? state.ssoTab : 0) : "users_local";
       default: return state.tab;
@@ -2443,8 +2443,12 @@
   ];
   const SNMP_FIELDS = [
     { shared: true, k: "snmp_communities", l: "Community strings", t: "rows", rows: "community", wide: true },
+    { shared: true, k: "snmp_acl", l: "Allowed sources", t: "rows", rows: "snmpacl", wide: true },
     { k: "location", l: "Location", t: "text" },
     { shared: true, k: "snmp_contact", l: "Contact", t: "text" },
+  ];
+  const PROM_FIELDS = [
+    { shared: true, k: "metrics_acl", l: "Allowed sources", t: "rows", rows: "metricsacl", wide: true },
   ];
   const CLUSTER_FIELDS = [
     { k: "listen", l: "Binding address", t: "port" },
@@ -3039,6 +3043,8 @@
     morevip6: oneCol("morevip6", "IPv6 address", "2001:db8::11", "No more IPv6 addresses."),
     // a community string may contain commas: one string to a row, never split
     community: { ...oneCol("community", "Community string", "", "No community strings: SNMP is off."), format: (c) => [c[0]] },
+    snmpacl: oneCol("snmpacl", "Address or network", "10.1.0.0/24, 192.0.2.5, 2001:db8::/32", "Nobody may ask."),
+    metricsacl: oneCol("metricsacl", "Address or network", "10.1.0.0/24, 192.0.2.5, 2001:db8::/32", "Nobody may read /metrics."),
     allowdomains: oneCol("allowdomains", "Domain", "example.com", "No always-allowed names."),
     allowedclients: oneCol("allowedclients", "Network", "10.0.0.0/8, 192.168.1.5, 2001:db8::/32", "No restriction: every client may use the proxy."),
     exempt: oneCol("exempt", "Network", "10.0.0.0/8", "Nobody is exempt."),
@@ -3402,9 +3408,10 @@
       const sso = ssoTabs(cfg.web);
       const ldap = ldapTab(cfg.web);
       const dns = fieldset(DNS_FIELDS, cfg.dns, true);
-      const snmp = fieldset(SNMP_FIELDS, { snmp_communities: cfg.dns.snmp_communities, snmp_contact: cfg.dns.snmp_contact, location: (cfg.snmp || {}).location });
+      const snmp = fieldset(SNMP_FIELDS, { snmp_communities: cfg.dns.snmp_communities, snmp_acl: cfg.dns.snmp_acl, snmp_contact: cfg.dns.snmp_contact, location: (cfg.snmp || {}).location });
+      const prom = fieldset(PROM_FIELDS, { metrics_acl: cfg.dns.metrics_acl });
       // what snmpd is doing, under the form (refreshed after every save)
-      const snmpShared = () => { const v = snmp.get(); return { snmp_communities: v.snmp_communities, snmp_contact: v.snmp_contact }; };
+      const snmpShared = () => { const v = snmp.get(), m = prom.get(); return { snmp_communities: v.snmp_communities, snmp_acl: v.snmp_acl, snmp_contact: v.snmp_contact, metrics_acl: m.metrics_acl }; };
       const snmpLocal = () => { const v = snmp.get(); return { location: v.location }; };
       const snmpPill = h("span");   // ACTIVE beside the heading while snmpd is running
       refreshSNMP = async () => {
@@ -3574,6 +3581,31 @@
         show(state.webTab >= 0 && state.webTab < TABS.length ? state.webTab : 0);
         return h("div", {}, strip, ...panes);
       };
+      // the Monitoring page is two tabs: SNMP and Metrics (every card stays in the page, so a save reads both)
+      const monitoringTabs = () => {
+        const TABS = [
+          ["SNMP", (() => { const c = section("SNMP", snmp.el); c.querySelector("h2").append(snmpPill); return c; })()],
+          ["Metrics", section("Metrics", prom.el)],
+        ];
+        const panes = TABS.map(([, el]) => h("div", { role: "tabpanel" }, el));
+        const buttons = TABS.map(([name], i) => h("button", { type: "button", role: "tab", class: "dtab", onclick: () => show(i) }, name));
+        function show(i, focus) {
+          state.monTab = i;
+          refreshHelp();
+          panes.forEach((p, j) => { p.hidden = j !== i; });
+          buttons.forEach((b, j) => { b.setAttribute("aria-selected", j === i ? "true" : "false"); b.tabIndex = j === i ? 0 : -1; b.classList.toggle("on", j === i); });
+          if (focus) buttons[i].focus();
+        }
+        const strip = h("div", { class: "dtabs", role: "tablist", "aria-label": "Monitoring settings" }, buttons);
+        strip.addEventListener("keydown", (e) => {
+          const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+          if (!d) return;
+          e.preventDefault();
+          show((state.monTab + d + TABS.length) % TABS.length, true);
+        });
+        show(state.monTab >= 0 && state.monTab < TABS.length ? state.monTab : 0);
+        return h("div", {}, strip, ...panes);
+      };
       // Syslog: the state of the connection is shown under the settings, with a button that sends a test message
       const syslogState = h("div", { class: "hint" });
       const syslogMsg = h("span", { class: "hint" });
@@ -3635,7 +3667,7 @@
         ["sso", "SSO", section("Single sign-on",
           sso.el)],
         ["ldap", "LDAP", section("LDAP sign-in", ldap.el)],
-        ["snmp", "SNMP", h("div", {}, (() => { const c = section("SNMP", snmp.el); c.querySelector("h2").append(snmpPill); return c; })())],
+        ["monitoring", "Monitoring", monitoringTabs()],
       ];
       for (const [pid, , el] of panels) el.hidden = pid !== tab;
       const form = h("div", {}, ...panels.map((p) => p[2]));
@@ -3698,7 +3730,7 @@
       },
     };
   };
-  for (const id of ["general", "groups", "dns", "web", "sso", "ldap", "snmp"]) VIEWS["cfg_" + id] = makeConfigView(id);
+  for (const id of ["general", "groups", "dns", "web", "sso", "ldap", "monitoring"]) VIEWS["cfg_" + id] = makeConfigView(id);
 
   // ── shared helpers for the management pages ───────────────────────────────
   // Nothing is said when every node answered (the Node menu says "Cluster"); when one could not, which and why, since the

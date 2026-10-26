@@ -267,7 +267,7 @@
   // Topology comes first; its items are the gateways themselves (filled in from the daemon).
   const TOPO = "Topology";
   const NAV_GROUPS = [
-    ["Configure", [["cfg_general", "Settings"], ["cfg_groups", "Gateways"], ["cfg_dns", "DNS"], ["cfg_web", "Web GUI"], ["cfg_monitoring", "Monitoring"], ["cfg_alerts", "Alerts"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
+    ["Configure", [["cfg_general", "Settings"], ["cfg_groups", "Gateways"], ["cfg_dns", "DNS"], ["cfg_web", "Web GUI"], ["cfg_monitoring", "Monitoring"], ["cfg_alerts", "Alerts"], ["cfg_backup", "Backup"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
     ["Operate", [["node", "Node"], ["cluster", "Cluster"], ["anycastop", "Anycast"], ["scheduler", "Scheduler"], ["updates", "Upgrade"]]],
     ["Monitor", [["stats", "Statistics"], ["host", "Host"], ["gateways", "Gateways"], ["nodes", "Cluster"], ["dns", "DNS"], ["anycaststatus", "Anycast"], ["alerts", "Alerts"], ["capture", "Capture"], ["log", "Log"]]],
   ];
@@ -512,6 +512,7 @@
       case "anycaststatus": return "anycaststatus_" + (state.anycastMonTab === 1 ? "ospf" : "bgp");
       case "anycastop": return "anycastop_" + (state.anycastOpTab === 1 ? "ospf" : "bgp");
       case "cfg_alerts": return "config_alerts";
+      case "cfg_backup": return "config_backup";
       case "cfg_monitoring": return state.monTab === 1 ? "config_metrics" : "config_snmp";
       case "cfg_dns": return "config_dns" + (state.dnsTab >= 0 ? state.dnsTab : 0) + (state.dnsTab === 3 ? "_" + (state.resTab >= 0 ? state.resTab : 0) : "");
       case "users": return state.usersTab === 1 ? "users_ldap" : state.usersTab === 2 ? "users_sso" + (state.ssoTab >= 0 ? state.ssoTab : 0) : "users_local";
@@ -3493,6 +3494,68 @@
     };
   };
 
+
+  // Configure ▸ Backup: the settings are shared (the dns.backup block); the SSH key and what happened are this node's, shown
+  // for the node picked in the top bar.
+  const BACKUP_FIELDS = [
+    { shared: true, k: "enabled", l: "Back up every node automatically", t: "bool" },
+    { shared: true, k: "host", l: "Backup server", t: "text", hint: "A host name or address that takes SFTP." },
+    { shared: true, k: "port", l: "SSH port", t: "int", min: 0, max: 65535, hint: "Empty or 0 is 22." },
+    { shared: true, k: "user", l: "User on the server", t: "text" },
+    { shared: true, k: "dir", l: "Directory on the server", t: "text", hint: "Made if it is not there. Empty is the user's home directory." },
+    { shared: true, k: "keep", l: "Backups to keep per node", t: "int", min: 0, max: 365, hint: "The oldest are removed first. Empty is 14." },
+    { shared: true, k: "hours", l: "Every (hours)", t: "int", min: 0, max: 168, hint: "0 is once a day at the time below." },
+    { shared: true, k: "at", l: "Time of day", t: "text", hint: "HH:MM on each node's clock; empty is 02:30. A node waits a few minutes more than the others, so they do not all connect at once." },
+    { shared: true, k: "password", l: "Password for the archives", t: "secret", hint: "At least 8 characters. The archives are encrypted with it. It is in the backup too: keep a copy somewhere else, a restore cannot do without it." },
+  ];
+  const backupForm = (bcfg) => {
+    const fs = fieldset(BACKUP_FIELDS, bcfg || {});
+    const box = h("div", {});
+    const out = h("div", { class: "hint", "aria-live": "polite" });
+    const tell = (kind, t) => { out.textContent = ""; out.append(h("span", { class: kind === "bad" ? "bad-text" : "" }, t)); };
+    const at = (u) => (u ? new Date(u * 1000).toLocaleString() : "never");
+    const bytes = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " kB");
+    let timer = null;
+    const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+    async function show(fromTimer) {
+      if (fromTimer === true && !box.isConnected) { stop(); return; }
+      let v;
+      try { v = (await api("GET", "/api/backup")).data; } catch (e) { clear(box).append(h("div", { class: "hint" }, "This node's backups could not be read: " + e.message)); stop(); return; }
+      const st = v.status || {};
+      const key = h("textarea", { readonly: true, rows: 2, spellcheck: "false", class: "mono", "aria-label": "SSH public key of this node" });
+      key.value = v.public_key || "";
+      key.addEventListener("focus", () => key.select());
+      const run = h("button", { type: "button", class: "btn", disabled: v.running, onclick: async () => {
+        try { await api("POST", "/api/backup/run", {}); tell("ok", "The backup has started."); start(); show(false); } catch (e) { tell("bad", e.message); }
+      } }, v.running ? "Backing up…" : "Back up now");
+      const test = h("button", { type: "button", class: "btn", onclick: async () => {
+        tell("ok", "Connecting…");
+        try { const r = (await api("POST", "/api/backup/test", {})).data; tell("ok", "Connected. " + (r.remote || []).length + " backup(s) of this node are on the server."); show(false); } catch (e) { tell("bad", "Not connected: " + e.message + " (save the settings first, and add the key below to the server)"); }
+      } }, "Test connection");
+      const lines = [];
+      if (v.running) lines.push("A backup is running now.");
+      lines.push("Last started: " + at(st.last_start) + (st.last_ok ? ". Last successful: " + at(st.last_ok) + (st.last_file ? " (" + st.last_file + ", " + (st.last_files || 0) + " files, " + bytes(st.last_size || 0) + ")" : "") : ". No backup has succeeded yet."));
+      if (v.enabled && v.next && !v.running) lines.push("Next: " + at(v.next) + ".");
+      const rem = st.remote || [];
+      box.replaceChildren(
+        h("h3", {}, "This node (" + v.node + ")"),
+        h("p", { class: "hint" }, "The node uses its own SSH key to log in. Add this line to ~/.ssh/authorized_keys of the user on the backup server (every node has its own key):"),
+        key,
+        h("div", { class: "toolbar" }, run, test),
+        out,
+        h("p", {}, lines.join(" ")),
+        st.last_error ? h("p", { class: "bad-text" }, "The last attempt failed: " + st.last_error) : null,
+        rem.length ? h("details", {}, h("summary", {}, rem.length + " backup(s) of this node on the server"), h("ul", { class: "mono small" }, rem.slice().reverse().map((n) => h("li", {}, n)))) : null);
+      if (!v.running) stop();
+    }
+    function start() { if (!timer) timer = setInterval(() => show(true), 3000); }
+    show();
+    return {
+      el: h("div", {}, fs.el, h("p", { class: "hint" }, "A backup holds the configuration and its history, the certificates and their private keys, the cluster identity, the users, the alerts and the schedule. It leaves out the log, the statistics, the block lists (they are fetched again) and staged upgrades. Restore with: dnsdir --restore FILE (see the help)."), box),
+      get() { const o = fs.get(); const keep = Object.entries(o).filter(([, x]) => x !== "" && x !== 0 && x !== false); return keep.length ? Object.fromEntries(keep) : undefined; },
+    };
+  };
+
   const makeConfigView = (only) => {
     let holder, status, collect = null, refreshSNMP = () => {}, refreshSyslog = () => {};
     const tab = only;
@@ -3512,6 +3575,8 @@
       const prom = fieldset(PROM_FIELDS, { metrics_acl: cfg.dns.metrics_acl });
       const alerts = alertsForm(cfg.dns.alerts);
       const alertsShared = () => { const a = alerts.get(); return a ? { alerts: a } : {}; };
+      const backup = backupForm(cfg.dns.backup);
+      const backupShared = () => { const b = backup.get(); return b ? { backup: b } : {}; };
       // what snmpd is doing, under the form (refreshed after every save)
       const snmpShared = () => { const v = snmp.get(), m = prom.get(); return { snmp_communities: v.snmp_communities, snmp_acl: v.snmp_acl, snmp_contact: v.snmp_contact, metrics_acl: m.metrics_acl }; };
       const snmpLocal = () => { const v = snmp.get(); return { location: v.location }; };
@@ -3606,7 +3671,7 @@
         ...general.get(),
         // keep what this form has no fields for (a gateway's own DNS pool, per-server domains)
         groups: groups.map((g) => ({ ...(g.orig.dns ? { dns: g.orig.dns } : {}), ...(g.orig.paused ? { paused: true } : {}), ...(g.orig.paused_all ? { paused_all: true } : {}), ...(g.orig.excluded_nodes ? { excluded_nodes: g.orig.excluded_nodes } : {}), ...(g.orig.node_order ? { node_order: g.orig.node_order } : {}), ...(g.orig.paused_vips ? { paused_vips: g.orig.paused_vips } : {}), ...(g.orig.paused_vips_here ? { paused_vips_here: g.orig.paused_vips_here } : {}), ...(g.orig.extra_vips ? { extra_vips: g.orig.extra_vips } : {}), ...g.fs.get() })),
-        dns: { ...(cfg.dns.schedule ? { schedule: cfg.dns.schedule } : {}), ...(cfg.dns.server_queries ? { server_queries: cfg.dns.server_queries } : {}), ...(cfg.dns.server_names ? { server_names: cfg.dns.server_names } : {}), ...(cfg.dns.server_forward ? { server_forward: cfg.dns.server_forward } : {}), ...(cfg.dns.paused_servers ? { paused_servers: cfg.dns.paused_servers } : {}), ...(cfg.dns.paused_queries ? { paused_queries: cfg.dns.paused_queries } : {}), ...dns.get(), ...snmpShared(), ...alertsShared() },
+        dns: { ...(cfg.dns.schedule ? { schedule: cfg.dns.schedule } : {}), ...(cfg.dns.server_queries ? { server_queries: cfg.dns.server_queries } : {}), ...(cfg.dns.server_names ? { server_names: cfg.dns.server_names } : {}), ...(cfg.dns.server_forward ? { server_forward: cfg.dns.server_forward } : {}), ...(cfg.dns.paused_servers ? { paused_servers: cfg.dns.paused_servers } : {}), ...(cfg.dns.paused_queries ? { paused_queries: cfg.dns.paused_queries } : {}), ...dns.get(), ...snmpShared(), ...alertsShared(), ...backupShared() },
         // the certificate is managed under Web GUI; keep any file paths already in the config
         web: { cert_file: cfg.web.cert_file || "", key_file: cfg.web.key_file || "", ...web.get(), ...sso.get(), ...ldap.get() },
         cluster: cluster.get(),
@@ -3773,6 +3838,7 @@
         ["ldap", "LDAP", section("LDAP sign-in", ldap.el)],
         ["monitoring", "Monitoring", monitoringTabs()],
         ["alerts", "Alerts", section("Alerts", alerts.el)],
+        ["backup", "Backup", section("Backup", backup.el)],
       ];
       for (const [pid, , el] of panels) el.hidden = pid !== tab;
       const form = h("div", {}, ...panels.map((p) => p[2]));
@@ -3835,7 +3901,7 @@
       },
     };
   };
-  for (const id of ["general", "groups", "dns", "web", "sso", "ldap", "monitoring", "alerts"]) VIEWS["cfg_" + id] = makeConfigView(id);
+  for (const id of ["general", "groups", "dns", "web", "sso", "ldap", "monitoring", "alerts", "backup"]) VIEWS["cfg_" + id] = makeConfigView(id);
 
   // ── shared helpers for the management pages ───────────────────────────────
   // Nothing is said when every node answered (the Node menu says "Cluster"); when one could not, which and why, since the

@@ -16,6 +16,9 @@ import (
 func (w *WebServer) mgmtRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/vmactest", w.authed(w.op("vmac.test", nil)))
 	// configuration history
+	mux.HandleFunc("GET /api/backup", w.authed(w.op("backup.status", nil)))
+	mux.HandleFunc("POST /api/backup/run", w.authed(w.op("backup.run", nil)))
+	mux.HandleFunc("POST /api/backup/test", w.authed(w.op("backup.test", nil)))
 	mux.HandleFunc("GET /api/alerts", w.authed(w.op("alerts.list", nil)))
 	mux.HandleFunc("POST /api/alerts/ack", w.authed(w.op("alerts.ack", nil)))
 	mux.HandleFunc("POST /api/alerts/silence", w.authed(w.op("alerts.silence", nil)))

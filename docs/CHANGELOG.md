@@ -1,5 +1,18 @@
 # Changelog
 
+## [v582] - 2026-10-26 — Automatic backups
+
+### Added
+- **Configure ▸ Backup** (`backup` in the shared `dns` block): every node packs its state (the configuration and its history, the web and DNS certificates with their private keys, the cluster identity, the users, the alerts, the schedule and its own backup key) into one archive, encrypts it (AES-256-GCM, key from the password with PBKDF2-SHA256) and puts it on a server over SFTP, once a day at a time you choose or every N hours. Only the newest N archives of each node are kept (the oldest are removed after every upload; other nodes' files and anything else in the directory are never touched). Uploads go under a temporary name and are renamed when complete.
+- Each node makes its own SSH key (ed25519); the page shows the public line to add to `authorized_keys` on the backup server, a **Back up now** button, **Test connection**, when the last backup ran and how it went, and the archives on the server. The host key is accepted on the first connection and remembered.
+- A failed backup is tried again after 15 minutes. New alert rule **Backup failed** (on by default; opens after 30 minutes of failing).
+- `dnsdir --backup-status`, `dnsdir --backup-now` and `dnsdir --restore FILE [--restore-password-file F]` (the password can also come from `DNSDIR_BACKUP_PASSWORD` or a prompt). A restore needs the service stopped, checks the archive before touching anything, puts the contents in place of the state directory and keeps what was there in `<state dir>.before-restore-<time>`. The log, staged upgrades, block lists, statistics and sessions are not in a backup and are left alone.
+- Help page for Configure ▸ Backup.
+
+### Notes
+- The password is part of the configuration, so it is inside every backup: keep a copy elsewhere, a backup cannot be opened without it.
+- Needs `sftp` and `ssh-keygen` (the OpenSSH client) on the nodes.
+
 ## [v581] - 2026-10-25 — Alerts of other nodes
 
 ### Fixed

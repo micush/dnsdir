@@ -32,9 +32,10 @@ type Mgmt struct {
 	sched    *Scheduler // the scheduled tasks of this node (Operate ▸ Scheduler)
 	versions *VersionStore
 	certs    *CertManager
-	dnscerts *CertManager // what DoT and DoH present; the GUI's certificate when none is set
-	alerts   *AlertEngine // this node's alerts (alerts.go)
-	acme     *ACMEManager // orders and renews the certificates by itself (acmemgr.go)
+	dnscerts *CertManager  // what DoT and DoH present; the GUI's certificate when none is set
+	alerts   *AlertEngine  // this node's alerts (alerts.go)
+	backup   *BackupEngine // this node's backups (backup.go)
+	acme     *ACMEManager  // orders and renews the certificates by itself (acmemgr.go)
 	upd      *Updater
 	cl       *Cluster
 

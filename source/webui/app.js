@@ -3670,6 +3670,7 @@
     const table = h("div", { class: "scroll" }, h("table", { class: "tight bk-table" },
       h("thead", {}, h("tr", {}, BACKUP_COLS.map((c) => h("th", {}, c[1])))), tbody));
     const servers = section("Servers", bar, keyForm, table);
+    { const tag = sharedTag({ shared: true }); if (tag) servers.querySelector("h2").append(" ", tag); }   // the list is the cluster's
 
     // ── this node's status, in the two cards above ──
     let timer = null;
@@ -3699,8 +3700,10 @@
     // here at once; picking one lists its backups straight away (only Another server… needs List backups)
     let restoreFrom = () => {};
     function restoreUI() {
-      const rerr = h("span", { class: "bad-text small" });   // why the restore failed, after the button
-      const lerr = h("span", { class: "bad-text small" });   // why the backups could not be listed, beside the list
+      // why the backups could not be listed, or the restore failed: a line of its own under the controls
+      const rerr = h("span", {});
+      const lerr = h("span", {});
+      const errLine = h("div", { class: "bad-text small bk-err" }, lerr, rerr);
       const otherOpt = h("option", { value: "other" }, "Another server…");
       const src = h("select", { "aria-label": "Where the backup is" }, otherOpt, h("option", { value: "upload" }, "A file from this computer"));
       let chosen = false;   // the person picked a source: do not move it
@@ -3719,7 +3722,8 @@
         const mine = files.filter((f) => allIn.checked || f.node === myNode);
         clear(list).append(...mine.map((f) => h("option", { value: f.name }, (allIn.checked ? f.node + " — " : "") + new Date(f.time).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }))));
         list.hidden = !mine.length;
-        lerr.textContent = mine.length ? "" : files.length ? "No backups of this node there." : "No backups there.";
+        allBox.hidden = !files.length;   // only once there is a list to widen
+        lerr.textContent = mine.length ? "" : files.length ? "No backups of this node there: tick All nodes to see the others." : "No backups there.";
         canGo();
       };
       allIn.addEventListener("change", showFiles);
@@ -3740,7 +3744,7 @@
           files = r;
           list.disabled = false;
           showFiles();
-        } catch (e) { if (n === seq) { files = []; list.hidden = true; lerr.textContent = e.message; } }
+        } catch (e) { if (n === seq) { files = []; list.hidden = true; allBox.hidden = true; lerr.textContent = "Cannot list the backups: " + e.message; } }
         finally { if (n === seq) { list.disabled = false; listBtn.disabled = false; listBtn.textContent = "List backups"; canGo(); } }
       }
       listBtn.addEventListener("click", listFiles);
@@ -3785,7 +3789,7 @@
         const other = src.value === "other";
         seq++;
         otherBox.hidden = !other; fileIn.hidden = src.value !== "upload"; listBtn.hidden = !other; list.hidden = true; list.disabled = false; rerr.textContent = ""; lerr.textContent = "";
-        allBox.hidden = src.value === "upload"; files = [];
+        allBox.hidden = true; files = [];
         canGo();
         if (src.value.startsWith("s")) listFiles();
       };
@@ -3805,7 +3809,7 @@
         sync();
       };
       sync();
-      rbody.replaceChildren(h("div", { class: "bk-restore" }, h("div", { class: "toolbar nomargin" }, src, listBtn, list, allBox, fileIn, lerr, go, rerr), otherBox));
+      rbody.replaceChildren(h("div", { class: "bk-restore" }, h("div", { class: "toolbar nomargin" }, src, listBtn, list, fileIn, allBox, go), otherBox, errLine));
     }
     restoreUI();
     show();

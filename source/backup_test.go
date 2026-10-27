@@ -661,3 +661,21 @@ func TestBackupSaysWhatIsMissing(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// sftp's last line is "Connection closed"; the error is the line that says why.
+func TestSFTPErrorSaysWhy(t *testing.T) {
+	e := errors.New("exit status 255")
+	for _, c := range []struct{ out, want string }{
+		{"dnsdir@ns1: Permission denied (publickey).\r\nConnection closed\r\n", "use Install key"},
+		{"ssh: Could not resolve hostname ns1: Name or service not known\r\nConnection closed.\n", "Could not resolve hostname ns1"},
+		{"ssh: connect to host ns1 port 22: Connection refused\nConnection closed\n", "Connection refused"},
+		{"Connection closed\n", "the connection was closed: exit status 255"},
+	} {
+		if got := sftpError(c.out, e, false); !strings.Contains(got, c.want) || strings.HasPrefix(got, "Connection closed") {
+			t.Errorf("%q -> %q", c.out, got)
+		}
+	}
+	if got := sftpError("u@h: Permission denied (password).\nConnection closed\n", e, true); !strings.Contains(got, "wrong password") {
+		t.Errorf("%q", got)
+	}
+}

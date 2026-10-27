@@ -1,5 +1,29 @@
 # Changelog
 
+## [v595] - 2026-10-27 — Backup errors say why; tidier Restore row; Servers marked shared
+
+### Fixed
+- **"Connection closed" told nothing.** sftp's last line is always "Connection closed", and that is what the page showed. The error now comes from the line that says why (`sftpError`):
+  - A refused key reads "the server refused this node's key; use Install key… on this server".
+  - A wrong password while installing keys reads "wrong password, or that account may not log in".
+  - A changed host key, an unknown host or a refused connection show sftp's own line.
+  - This applies to listing, fetching, Test and the backups themselves.
+- **Restore row.** A listing or restore error is now a line of its own under the controls, starting "Cannot list the backups: …", instead of text squeezed between the tick box and the button. **All nodes** appears only once there is a list to widen. When the server has backups but none of this node's, the line says to tick All nodes.
+
+### Changed
+- **The Servers card is marked shared** in a cluster, with the same "shared" tag as other shared settings. The server list is the cluster's; the status lines under it are this node's.
+
+### Verified
+- `gofmt -l .` (empty), `go vet ./...`, `go test -race -count=1 ./...` (one run failed and two re-runs passed with no failing test printed, so it looks like an existing flaky test), `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64.
+- New test `TestSFTPErrorSaysWhy`: a refused key, an unknown host, a refused connection, a bare "Connection closed", and a wrong password.
+- Live, against the fake SFTP server, with one server answering and one refusing the key, in Chromium light and dark:
+  - The working server listed its backups with All nodes beside them.
+  - The refusing one showed "Cannot list the backups: the server refused this node's key…" on its own line, with All nodes hidden and Restore disabled.
+
+### Not verified
+- The shared tag needs a cluster of two or more nodes to appear, which was not run.
+- A real OpenSSH server.
+
 ## [v594] - 2026-10-27 — Restore asks once
 
 ### Changed

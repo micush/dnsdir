@@ -741,3 +741,6 @@ table.arules tr.flash { outline: 2px solid var(--accent); outline-offset: -2px; 
 .bk-restore select, .bk-restore input[type=text], .bk-restore input[type=password], .bk-restore input[type=number] { width: auto; flex: 0 1 14rem; min-width: 8rem; }
 .bk-restore input.arule-n { flex: 0 0 5rem; min-width: 0; }
 .bk-restore select[aria-label="Backup to restore"] { flex-basis: 20rem; }
+.bk-restore .bk-err { margin-top: .6rem; }
+.bk-restore .bk-err:not(:has(span:not(:empty))) { display: none; }
+.bk-restore label.check { margin-left: .2rem; }

@@ -683,16 +683,34 @@ func runSFTP(ctx context.Context, t *BackupTarget, dir string, script, password 
 		return "", errors.New(backupMissingTool("sftp"))
 	}
 	if err != nil {
-		msg := strings.TrimSpace(out.String())
-		if i := strings.LastIndexByte(msg, '\n'); i >= 0 {
-			msg = strings.TrimSpace(msg[i+1:])
-		}
-		if msg == "" {
-			msg = err.Error()
-		}
-		return out.String(), errors.New(msg)
+		return out.String(), errors.New(sftpError(out.String(), err, password != ""))
 	}
 	return out.String(), nil
+}
+
+// sftpError picks the line of sftp's output that says why it failed.  sftp ends with "Connection closed", which says
+// nothing; the reason is the line before it (for example "user@host: Permission denied (publickey)").
+func sftpError(out string, err error, withPassword bool) string {
+	msg := ""
+	for _, l := range strings.Split(strings.ReplaceAll(out, "\r", ""), "\n") {
+		l = strings.TrimSpace(l)
+		switch {
+		case l == "", strings.HasPrefix(l, "sftp>"), strings.HasPrefix(l, "Connection closed"), strings.HasPrefix(l, "Warning: Permanently added"):
+		default:
+			msg = l
+		}
+	}
+	switch {
+	case msg == "":
+		return "the connection was closed: " + err.Error()
+	case strings.Contains(msg, "Permission denied") && !withPassword:
+		return "the server refused this node's key; use Install key… on this server"
+	case strings.Contains(msg, "Permission denied"):
+		return "wrong password, or that account may not log in"
+	case strings.Contains(msg, "Host key verification failed"), strings.Contains(msg, "REMOTE HOST IDENTIFICATION HAS CHANGED"):
+		return "the server's host key is not the one this node saw before (" + msg + ")"
+	}
+	return msg
 }
 
 // backupKeygen makes the node's SSH key (replaceable in tests).

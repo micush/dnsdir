@@ -723,3 +723,21 @@ table.arules tr.flash { outline: 2px solid var(--accent); outline-offset: -2px; 
 
 .alert-mark { display: inline-flex; vertical-align: middle; margin-left: .5rem; }
 .alert-mark svg { display: block; }
+/* Configure ▸ Backup */
+.toolbar.nomargin { margin-bottom: 0; }
+.grid + .toolbar.nomargin { margin-top: 1rem; }
+.bk-table td { vertical-align: middle; }
+.bk-table tr.bk-statrow td { padding-top: 0; }
+.bk-table tr:not(.bk-statrow) td { border-bottom: 0; padding-bottom: .3rem; }
+.bk-table tr.bk-statrow td { line-height: 1.35; white-space: normal; padding-bottom: .55rem; }
+.bk-table td input.bk-port, .bk-table td input.bk-keep { width: 4.8rem; min-width: 0; }
+.bk-table td input.bk-name, .bk-table td input.bk-user { min-width: 6rem; }
+.bk-table td input.bk-host, .bk-table td input.bk-dir { min-width: 9rem; }
+.bk-foot { margin-top: .9rem; }
+.bk-keyform input[type=password] { width: 18rem; }
+.bk-table tbody tr { cursor: default; }
+.bk-foot input.grow { flex: 1 1 14rem; min-width: 10rem; width: auto; font-size: .8rem; }
+.kv + .bad-text, .kv + .toolbar.nomargin { margin-top: 1rem; }
+.bk-restore select, .bk-restore input[type=text], .bk-restore input[type=password], .bk-restore input[type=number] { width: auto; flex: 0 1 14rem; min-width: 8rem; }
+.bk-restore input.arule-n { flex: 0 0 5rem; min-width: 0; }
+.bk-restore select[aria-label="Backup to restore"] { flex-basis: 20rem; }

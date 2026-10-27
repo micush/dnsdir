@@ -1,5 +1,35 @@
 # Changelog
 
+## [v590] - 2026-10-27 — Configure ▸ Backup redesigned
+
+### Changed
+- **Configure ▸ Backup is three cards: Schedule, Servers, Restore.** The explanatory paragraphs on the page are gone (they are in the "?" help), and so is the separate "This node" block that listed every server a second time as its own card.
+- **Schedule**: the on/off box, Every (hours), Time of day and the archive password, with a short hint each, plus **Back up now** and "Last: … · Next: …" for the node picked in the top bar.
+- **Servers**: the table of servers, with this node's status for each server in a line under its row: the last backup, how many backups are on the server (hover for the file names) and, in red, why the last attempt failed. Click a row to pick it. **Add a server**, **Test**, **Install key…** and **Remove** sit in one toolbar above the table and act on the picked row, so the rows have no buttons. Install key opens a password field under the toolbar (Enter installs, Escape closes). This node's SSH key is a one-line field with **Copy** under the table, not a textarea with a paragraph.
+- **Restore**: the source, List backups, the backup password and Check backup sit on compact rows. After a check, the card shows the backup's node, date, version and file count, with any warning in red, and **Restore and restart** / **Cancel**. The "notice" box is gone, and the explanation of what a restore replaces is now the button's tooltip.
+- Progress shows in the buttons themselves (Testing…, Installing…, Listing…, Checking…, Backing up…), not in lines of text.
+- Help (`config_backup`) describes the new layout and no longer says to press Save. The README's restore paragraph names the Restore card.
+
+### Fixed
+- **Remove** on a backup server did not save. The row went away, but the server stayed in the configuration until some other field changed. It now saves at once.
+- Typing in the restore fields or the Install-key password, or switching the restore source, set off a configuration save. These controls are no longer treated as settings.
+- After a saved change to the servers, their status is read again, so a new row shows its status without reloading the page.
+
+### Verified
+- `gofmt -l .` (empty), `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64. The PAM path was verified only on the native amd64 build; the cross-builds use the fail-closed stub.
+- `node --check` on `app.js` and `help.js`.
+- Live: a scratch daemon (`"groups": []`, two backup servers, a real PAM user) driven in headless Chromium in light and dark. Checked that:
+  - Test, Install key… and Remove are disabled until a row is picked, and then act on that row.
+  - Back up now shows the per-server failure line.
+  - Test on the second server shows its error once.
+  - Typing in the restore and install password fields and switching the restore source make no `PUT /api/config`.
+  - Remove makes exactly one `PUT`, and the server is gone from the file.
+- `TestEnsureReadGroupMakesOnlyTheDefaultGroup` failed once because the live run had left a `dnsdir-ro` group in the sandbox. It passes once that group is removed, and the unchanged v589 tree fails it the same way while the group is there.
+
+### Not verified
+- Test, Install key and a successful backup or restore against a real SFTP server. The sandbox has no `ssh`, `sftp` or `ssh-keygen`, so only the failure paths were seen, and the SSH key field stayed empty.
+- The page on a phone-width screen. The server table scrolls sideways there, as the other wide tables do.
+
 ## [v589] - 2026-10-26 — Server form: erasing the name looks the address up again
 
 ### Fixed

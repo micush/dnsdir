@@ -1507,8 +1507,8 @@ type RemoteBackup struct {
 	Time string `json:"time"`
 }
 
-// ListRemote lists the backups of every node on a server.  With a password it logs in with it (a server this node has no key
-// on, as on a node that was just installed).
+// ListRemote lists the backups of every node on a server (the page shows this node's own unless "All nodes" is ticked).
+// With a password it logs in with it (a server this node has no key on, as on a node that was just installed).
 func (e *BackupEngine) ListRemote(t *BackupTarget, password string) ([]RemoteBackup, error) {
 	if err := t.validate(); err != nil {
 		return nil, err

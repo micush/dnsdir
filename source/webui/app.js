@@ -3711,6 +3711,18 @@
       const fileIn = h("input", { type: "file", accept: ".dnsbak", hidden: true, "aria-label": "Backup file" });
       const list = h("select", { "aria-label": "Backup to restore", hidden: true });
       const listBtn = h("button", { type: "button", class: "btn" }, "List backups");
+      // the list shows this node's backups; "All nodes" adds the other nodes' (to rebuild a lost node on this one)
+      const allIn = h("input", { type: "checkbox" });
+      const allBox = h("label", { class: "check", hidden: true }, allIn, " All nodes");
+      let files = [], myNode = "";
+      const showFiles = () => {
+        const mine = files.filter((f) => allIn.checked || f.node === myNode);
+        clear(list).append(...mine.map((f) => h("option", { value: f.name }, (allIn.checked ? f.node + " — " : "") + new Date(f.time).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }))));
+        list.hidden = !mine.length;
+        lerr.textContent = mine.length ? "" : files.length ? "No backups of this node there." : "No backups there.";
+        canGo();
+      };
+      allIn.addEventListener("change", showFiles);
       const go = h("button", { type: "button", class: "btn danger", disabled: true }, "Restore");
       // Restore is for a picked backup: a listed one, or a chosen file
       const canGo = () => { go.disabled = src.value === "upload" ? !fileIn.files.length : (list.hidden || list.disabled || !list.value); };
@@ -3725,10 +3737,10 @@
         try {
           const r = (await api("POST", "/api/backup/files", serverArg())).data.files || [];
           if (n !== seq) return;
-          clear(list).append(...r.map((f) => h("option", { value: f.name }, f.node + " — " + new Date(f.time).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }))));
-          list.hidden = !r.length;
-          if (!r.length) lerr.textContent = "No backups there.";
-        } catch (e) { if (n === seq) { list.hidden = true; lerr.textContent = e.message; } }
+          files = r;
+          list.disabled = false;
+          showFiles();
+        } catch (e) { if (n === seq) { files = []; list.hidden = true; lerr.textContent = e.message; } }
         finally { if (n === seq) { list.disabled = false; listBtn.disabled = false; listBtn.textContent = "List backups"; canGo(); } }
       }
       listBtn.addEventListener("click", listFiles);
@@ -3748,10 +3760,11 @@
           const r = (await api("POST", "/api/backup/restore/prepare", body)).data;
           prepared = true;
           o.pw.value = "";
-          const warn = [];
-          if (!r.same_node) warn.push("This is a backup of another node (" + r.node + "): this node becomes " + r.node + ". Never do this while " + r.node + " is still running.");
-          if (r.newer) warn.push("It was made by a newer version (" + r.version + ") than this node runs.");
-          const ok = confirm("Restore the backup of " + r.node + " made " + r.created + "?\n\nThis node's settings and keys are replaced and it restarts. The old ones are kept next to its state directory." + (warn.length ? "\n\n" + warn.join("\n") : ""));
+          // one question; for another node's backup it is the "are you sure" one
+          const newer = r.newer ? "\n\nIt was made by a newer version (" + r.version + ") than this node runs." : "";
+          const ok = confirm(r.same_node
+            ? "Restore the backup of " + r.node + " made " + r.created + "?\n\nThis node's settings and keys are replaced and it restarts. The old ones are kept next to its state directory." + newer
+            : "Are you sure? This is a backup of " + r.node + " (made " + r.created + "), not of this node (" + (myNode || "this node") + ").\n\nThis node becomes " + r.node + ": its identity, keys and certificates, and it restarts. Do this only to replace " + r.node + " when it is gone, never while it is still running." + newer);
           if (!ok) throw new Error("");   // declined: drop what was opened
           await api("POST", "/api/backup/restore/apply", {});
           go.textContent = "Restarting…";
@@ -3772,12 +3785,14 @@
         const other = src.value === "other";
         seq++;
         otherBox.hidden = !other; fileIn.hidden = src.value !== "upload"; listBtn.hidden = !other; list.hidden = true; list.disabled = false; rerr.textContent = ""; lerr.textContent = "";
+        allBox.hidden = src.value === "upload"; files = [];
         canGo();
         if (src.value.startsWith("s")) listFiles();
       };
       src.addEventListener("change", () => { chosen = true; sync(); });
       let known = null;
       restoreFrom = (v) => {
+        myNode = v.node || "";
         const tl = v.targets || [];
         const sig = JSON.stringify(tl.map((t) => [t.label, t.host, t.user]));
         if (sig === known) return;
@@ -3790,7 +3805,7 @@
         sync();
       };
       sync();
-      rbody.replaceChildren(h("div", { class: "bk-restore" }, h("div", { class: "toolbar nomargin" }, src, listBtn, list, fileIn, lerr, go, rerr), otherBox));
+      rbody.replaceChildren(h("div", { class: "bk-restore" }, h("div", { class: "toolbar nomargin" }, src, listBtn, list, allBox, fileIn, lerr, go, rerr), otherBox));
     }
     restoreUI();
     show();

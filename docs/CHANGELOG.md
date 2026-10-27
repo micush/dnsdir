@@ -1,5 +1,37 @@
 # Changelog
 
+## [v594] - 2026-10-27 — Restore asks once
+
+### Changed
+- **Restoring another node's backup asks one question, not two.** For a backup of this node, the confirmation is the usual "Restore the backup of … made …?". For another node's backup, that same single confirmation is the "Are you sure?" one, naming both nodes and saying this node then becomes the other one. Declining drops what was unpacked. Help and README updated.
+
+### Verified
+- `gofmt -l .` (empty), `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64.
+- Live, against the fake SFTP server (`DNSDIR_SFTP`/`DNSDIR_SSHKEYGEN` scripts) in Chromium:
+  - ns2's backup gave exactly one dialog, the "Are you sure?" text, and declining left nothing pending.
+  - This node's backup gave exactly one dialog, and accepting restarted the daemon into the backup, with the old state kept in `state.before-restore-…`.
+
+### Not verified
+- A real OpenSSH server.
+
+## [v593] - 2026-10-27 — Restore lists this node's backups; "All nodes" for the rest
+
+### Changed
+- **The Restore list shows only this node's backups** on the picked server, by date. Tick **All nodes** to list every node's backups there, with node names, to rebuild a lost node on this one.
+- **Restoring another node's backup asks twice.** After the usual confirmation comes **"Are you sure?"**, which names both nodes and says this node then becomes the other one (identity, keys, certificates). Declining either question drops what was unpacked. A backup of this node still asks once.
+- The server still lists every node's files. Only the page filters them, so the restore of another node's backup stays possible, from the page or from `dnsdir --restore`.
+- Help and README updated.
+
+### Verified
+- `gofmt -l .` (empty), `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64.
+- Live, against a fake SFTP server: a script given as `DNSDIR_SFTP` that serves a directory, plus a fake `DNSDIR_SSHKEYGEN`, holding a backup of this node (`vm`) and one of `ns2`. Checked in Chromium, light and dark:
+  - The list showed only vm's backup, and **All nodes** showed both, with names.
+  - Restoring ns2's backup asked twice, and declining the second question left nothing pending and brought the button back.
+  - Restoring vm's backup asked once, fetched it over the fake SFTP and restarted. The daemon swapped in the backup's files and kept the old state in `state.before-restore-…`.
+
+### Not verified
+- A real OpenSSH server: the sandbox has none. The fake server covers the page and the fetch path, not ssh itself.
+
 ## [v592] - 2026-10-27 — Backup page: no password, one Restore button, no SSH key row
 
 ### Changed

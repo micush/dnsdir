@@ -192,19 +192,45 @@ func TestBackupRestoreRefusesBadPaths(t *testing.T) {
 	}
 }
 
+// The archive password is the person's own choice: any length, any characters, or none; it is kept exactly as typed and
+// opens the archive again.
+func TestBackupPasswordHasNoLimits(t *testing.T) {
+	long := strings.Repeat("ab ", 400)
+	for _, pw := range []string{"", "x", " lead and trail ", "tab\there", long, "ünï©ødé"} {
+		c := BackupConfig{Enabled: true, Targets: []BackupTarget{{Host: "h", User: "u"}}, Password: pw}
+		if err := (&c).Validate(); err != nil {
+			t.Fatalf("%q refused: %v", pw, err)
+		}
+		if c.Password != pw {
+			t.Fatalf("%q was changed to %q", pw, c.Password)
+		}
+		state := t.TempDir()
+		writeTree(t, state, map[string]string{"dnsdir.conf": "CONF"})
+		var buf bytes.Buffer
+		if _, err := writeBackupArchive(&buf, pw, state, filepath.Join(state, "dnsdir.conf"), "ns1", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := readBackupArchive(bytes.NewReader(buf.Bytes()), pw, t.TempDir()); err != nil {
+			t.Fatalf("%q: %v", pw, err)
+		}
+		if _, err := readBackupArchive(bytes.NewReader(buf.Bytes()), pw+"?", t.TempDir()); err == nil {
+			t.Fatalf("%q: a wrong password opened it", pw)
+		}
+	}
+}
+
 func TestBackupConfigIsChecked(t *testing.T) {
 	good := BackupConfig{Enabled: true, Host: "backup.example.com", User: "dnsdir", Dir: "backups/dns", Keep: 7, At: "03:15", Password: "longenough"}
 	if err := (&good).Validate(); err != nil {
 		t.Fatal(err)
 	}
 	for i, c := range []BackupConfig{
-		{Enabled: true, User: "u", Password: "longenough"},       // no server
-		{Enabled: true, Host: "h", Password: "longenough"},       // no user
-		{Enabled: true, Host: "h", User: "u", Password: "short"}, // password too short
-		{Host: "-oProxyCommand=x"},                               // option as a host
-		{Host: "a b"},                                            // space
-		{User: "-x"},                                             // option as a user
-		{Dir: "../x"}, {Dir: "a b"}, {Dir: `a"b`}, {Dir: "-r"},   // directories
+		{Enabled: true, User: "u", Password: "longenough"},     // no server
+		{Enabled: true, Host: "h", Password: "longenough"},     // no user
+		{Host: "-oProxyCommand=x"},                             // option as a host
+		{Host: "a b"},                                          // space
+		{User: "-x"},                                           // option as a user
+		{Dir: "../x"}, {Dir: "a b"}, {Dir: `a"b`}, {Dir: "-r"}, // directories
 		{Port: 70000}, {Keep: 500}, {Hours: 200}, {At: "25:00"}, {At: "9:00"}, // numbers
 	} {
 		if err := (&c).Validate(); err == nil {
@@ -274,6 +300,7 @@ func newBackupRig(t *testing.T, cfg *BackupConfig) (*BackupEngine, *fakeServer, 
 	clock := time.Date(2026, 10, 25, 12, 0, 0, 0, time.Local)
 	e := NewBackupEngine(state, filepath.Join(state, "dnsdir.conf"), "NS1.example", func() *BackupConfig { return cfg })
 	e.now = func() time.Time { return clock }
+	e.scheduled = func() bool { return true }
 	return e, srv, &clock
 }
 
@@ -351,51 +378,104 @@ func TestBackupFailureIsReportedAndRetried(t *testing.T) {
 	}
 }
 
-// ran notes that a backup to every server has just been made.
-func ran(e *BackupEngine, cfg *BackupConfig, clock *time.Time) {
-	e.status.LastStart, e.status.LastFull = clock.Unix(), clock.Unix()
-	for i := range cfg.Targets {
-		e.tstat(&cfg.Targets[i]).LastStart = clock.Unix()
+// Between the Scheduler's runs the engine only retries failed servers and serves new ones, and only while a backup task
+// runs on the node.
+func TestBackupRetriesOnlyWhileScheduled(t *testing.T) {
+	cfg := &BackupConfig{Targets: []BackupTarget{{Host: "h", User: "u"}}, Password: "pw"}
+	e, _, _ := newBackupRig(t, cfg)
+	if !e.due() {
+		t.Fatal("a server that never had a backup is not due")
+	}
+	e.scheduled = func() bool { return false }
+	if e.due() {
+		t.Fatal("due without a backup task")
+	}
+	if err := e.start(false); err == nil {
+		t.Fatal("started without a backup task")
+	}
+	if on, _ := e.Status()["enabled"].(bool); on {
+		t.Fatal("the page says scheduled")
 	}
 }
 
-func TestBackupSchedule(t *testing.T) {
-	cfg := &BackupConfig{Enabled: true, Targets: []BackupTarget{{Host: "h", User: "u"}}, Password: "longenough", At: "02:30"}
-	e, _, clock := newBackupRig(t, cfg)
-	e.jitter = 0
-	if !e.due() {
-		t.Fatal("a backup that never ran is due")
+// The Scheduler's action waits for the backup and says how it went.
+func TestBackupRunScheduled(t *testing.T) {
+	cfg := &BackupConfig{Password: "pw", Targets: []BackupTarget{{Name: "A", Host: "a", User: "u"}, {Name: "B", Host: "b", User: "u"}}}
+	e, _, _ := newBackupRig(t, cfg)
+	servers := map[string]*fakeServer{"a": {files: map[string]bool{}}, "b": {files: map[string]bool{}, fail: os.ErrPermission}}
+	backupSFTP = func(ctx context.Context, tg *BackupTarget, d, script, pw string) (string, error) {
+		return servers[tg.Host].run(ctx, tg, d, script, pw)
 	}
-	ran(e, cfg, clock) // ran just now (12:00)
-	if e.due() {
-		t.Fatal("due right after a run")
+	out, err := e.RunScheduled("test")
+	if err == nil || !strings.Contains(err.Error(), "B:") || strings.Contains(err.Error(), "A:") || !strings.Contains(out, "A (ns1.example-") {
+		t.Fatalf("out %q err %v", out, err)
 	}
-	*clock = time.Date(2026, 10, 26, 2, 29, 0, 0, time.Local)
-	if e.due() {
-		t.Fatal("due before 02:30")
+	servers["b"].fail = nil
+	if out, err := e.RunScheduled("test"); err != nil || !strings.Contains(out, "A (") || !strings.Contains(out, "B (") {
+		t.Fatalf("out %q err %v", out, err)
 	}
-	*clock = time.Date(2026, 10, 26, 2, 31, 0, 0, time.Local)
-	if !e.due() {
-		t.Fatal("not due after 02:30")
+	if _, err := (&BackupEngine{cfg: func() *BackupConfig { return &BackupConfig{} }}).RunScheduled("x"); err == nil {
+		t.Fatal("ran with no server")
 	}
-	ran(e, cfg, clock)
-	*clock = clock.Add(20 * time.Hour)
-	if e.due() {
-		t.Fatal("due twice in a day")
+}
+
+// A configuration file with the old schedule reads as the task, so a page that saves what it read keeps the backups on.
+func TestBackupOldScheduleReadsAsATask(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "c.json")
+	os.WriteFile(f, []byte(`{"groups":[],"dns":{"backup":{"enabled":true,"hours":6,"password":"p","targets":[{"host":"h","user":"u"}]}}}`), 0o600)
+	dc, err := loadConfig(f)
+	if err != nil {
+		t.Fatal(err)
 	}
-	cfg.Hours = 6
-	ran(e, cfg, clock)
-	*clock = clock.Add(5 * time.Hour)
-	if e.due() {
-		t.Fatal("due before 6 hours")
+	if len(dc.DNS.Schedule) != 1 || dc.DNS.Schedule[0].Action != "backup" || dc.DNS.Backup.Enabled || dc.DNS.Backup.Hours != 0 {
+		t.Fatalf("%+v %+v", dc.DNS.Schedule, dc.DNS.Backup)
 	}
-	*clock = clock.Add(61 * time.Minute)
-	if !e.due() {
-		t.Fatal("not due after 6 hours")
+	if err := dc.Validate(); err != nil {
+		t.Fatal(err)
 	}
-	cfg.Enabled = false
-	if e.due() {
-		t.Fatal("due while switched off")
+	if len(dc.DNS.Schedule) != 1 {
+		t.Fatalf("%+v", dc.DNS.Schedule)
+	}
+}
+
+// The schedule of v583-v591 becomes a Scheduler task once, and the old fields are cleared.
+func TestBackupScheduleMovesToTheScheduler(t *testing.T) {
+	d := DNSConfig{Backup: &BackupConfig{Enabled: true, At: "03:15", Targets: []BackupTarget{{Host: "h", User: "u"}}}}
+	migrateBackupSchedule(&d)
+	if len(d.Schedule) != 1 || d.Schedule[0].Action != "backup" || d.Schedule[0].Freq != "daily" || d.Backup.Enabled || d.Backup.At != "" {
+		t.Fatalf("%+v %+v", d.Schedule, d.Backup)
+	}
+	if err := validateSchedule(d.Schedule); err != nil {
+		t.Fatal(err)
+	}
+	if !backupScheduled(d.Schedule, "any") {
+		t.Fatal("not scheduled")
+	}
+	migrateBackupSchedule(&d) // nothing more
+	if len(d.Schedule) != 1 {
+		t.Fatalf("%+v", d.Schedule)
+	}
+	// local time becomes UTC
+	tk := oldBackupTask(0, "03:15", time.FixedZone("x", -7*3600))
+	if tk.At != "10:15" || tk.Until != "10:20" {
+		t.Fatalf("%+v", tk)
+	}
+	h := oldBackupTask(6, "", time.UTC)
+	if h.Freq != "hourly" || h.Every != 6 {
+		t.Fatalf("%+v", h)
+	}
+	if err := validateSchedule([]SchedTask{h}); err != nil {
+		t.Fatal(err)
+	}
+	// switched off: no task, the fields go
+	off := DNSConfig{Backup: &BackupConfig{Hours: 4, Targets: []BackupTarget{{Host: "h", User: "u"}}}}
+	migrateBackupSchedule(&off)
+	if len(off.Schedule) != 0 || off.Backup.Hours != 0 {
+		t.Fatalf("%+v", off)
+	}
+	// a disabled task, or one for other nodes, does not count
+	if backupScheduled([]SchedTask{{Action: "backup", Disabled: true}}, "n1") || backupScheduled([]SchedTask{{Action: "backup", Nodes: []string{"n2"}}}, "n1") {
+		t.Fatal("counted")
 	}
 }
 

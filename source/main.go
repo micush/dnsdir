@@ -587,6 +587,7 @@ func run(dc *DaemonConfig, confFile, sockPath, stateDir string) error {
 	mg.alerts, st.alerts = ae, ae
 	go ae.Run(ctx)
 	be := NewBackupEngine(stateDir, confFile, host, func() *BackupConfig { return sup.config().DNS.Backup })
+	be.scheduled = func() bool { return backupScheduled(sup.config().DNS.Schedule, localNodeID()) }
 	mg.backup = be
 	go be.Run(ctx)
 	if err := st.Start(); err != nil {

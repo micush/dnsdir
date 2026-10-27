@@ -101,6 +101,8 @@ var schedActions = map[string]string{
 	"node_reboot":    "Reboot this node",
 	// on the primary only, and only when the certificate is due: safe to leave on every node (acmemgr.go)
 	"certificate_renew": "Renew the automatic certificate",
+	// to every backup server of Configure ▸ Backup; the task's history says how it went (backup.go)
+	"backup": "Back up this node",
 }
 
 var schedEveryMax = map[string]int{"once": 1, "hourly": 720, "daily": 366, "weekly": 52, "monthly": 24, "yearly": 10}
@@ -969,6 +971,11 @@ func (s *Scheduler) builtin(action, actor string) (string, error) {
 		return s.updateOnline(actor)
 	case "certificate_renew":
 		return s.m.acme.RunScheduled(actor)
+	case "backup":
+		if s.m.backup == nil {
+			return "", errors.New("backups are not available on this node")
+		}
+		return s.m.backup.RunScheduled(actor)
 	case "node_reboot":
 		return s.rebootHost(actor)
 	case "stats_clear":

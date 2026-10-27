@@ -15,7 +15,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"io"
 	"io/fs"
 	"net"
@@ -68,11 +67,13 @@ type BackupTarget struct {
 
 // BackupConfig is the "backup" block of the shared settings (Configure ▸ Backup).
 type BackupConfig struct {
-	Enabled  bool           `json:"enabled,omitempty"`
 	Targets  []BackupTarget `json:"targets,omitempty"`
-	Hours    int            `json:"hours,omitempty"` // 0: once a day at At; N: every N hours
-	At       string         `json:"at,omitempty"`    // HH:MM, this node's local time (02:30 when empty)
 	Password string         `json:"password,omitempty"`
+	// When backups run is a Scheduler task (action "backup").  Enabled, Hours and At are the schedule of v583-v591: when the
+	// configuration is read, migrateBackupSchedule turns them into such a task and clears them.
+	Enabled bool   `json:"enabled,omitempty"`
+	Hours   int    `json:"hours,omitempty"` // 0: once a day at At; N: every N hours
+	At      string `json:"at,omitempty"`    // HH:MM, the node's local time (02:30 when empty)
 	// the one server of v582, which becomes the first of Targets when the block is read
 	Host string `json:"host,omitempty"`
 	Port int    `json:"port,omitempty"`
@@ -123,13 +124,6 @@ func (t *BackupTarget) label() string {
 		return t.Name
 	}
 	return t.Host
-}
-
-func (c *BackupConfig) at() string {
-	if c.At == "" {
-		return "02:30"
-	}
-	return c.At
 }
 
 func (t *BackupTarget) validate() error {
@@ -196,17 +190,8 @@ func (c *BackupConfig) Validate() error {
 	if c.At != "" && !backupAtRe.MatchString(c.At) {
 		return errors.New("backup: the time of day is HH:MM")
 	}
-	if len(c.Password) > 512 || hasControl(c.Password) {
-		return errors.New("backup: the password is not valid")
-	}
-	if c.Enabled {
-		switch {
-		case len(c.Targets) == 0:
-			return errors.New("backup: say which server to back up to")
-		case len(c.Password) < 8:
-			return errors.New("backup: the password that encrypts the archives needs at least 8 characters")
-		}
-	}
+	// the archive password is whatever the person types, any length, or nothing (then the archives are sealed with an
+	// empty password: anyone with the file can open it)
 	return nil
 }
 
@@ -755,16 +740,18 @@ type BackupEngine struct {
 	now       func() time.Time
 	status    BackupStatus
 	running   bool
-	jitter    time.Duration
 	runCtx    context.Context
 	onRunDone func()
+	// scheduled says the Scheduler has a backup task that runs on this node: only then are failed servers tried again, and
+	// a server added later gets its first backup at once.
+	scheduled func() bool
 }
 
+func (e *BackupEngine) isScheduled() bool { return e.scheduled != nil && e.scheduled() }
+
 func NewBackupEngine(stateDir, confFile, node string, cfg func() *BackupConfig) *BackupEngine {
-	h := fnv.New32a()
-	h.Write([]byte(node))
 	e := &BackupEngine{dir: filepath.Join(stateDir, "backup"), stateDir: stateDir, confFile: confFile, node: node, cfg: cfg, now: time.Now,
-		jitter: time.Duration(h.Sum32()%300) * time.Second, runCtx: context.Background()}
+		runCtx: context.Background()}
 	if b, err := os.ReadFile(filepath.Join(e.dir, "status.json")); err == nil {
 		_ = json.Unmarshal(b, &e.status)
 	}
@@ -833,10 +820,11 @@ func (e *BackupEngine) Status() map[string]any {
 			ts = append(ts, map[string]any{"label": t.label(), "host": t.Host, "user": t.User, "status": st})
 		}
 	}
-	out := map[string]any{"status": e.status, "targets": ts, "running": e.running, "node": e.nodeName(), "public_key": strings.TrimSpace(string(pub)), "enabled": c != nil && c.Enabled}
-	if c != nil && c.Enabled {
-		if next := e.nextLocked(c); !next.IsZero() {
-			out["next"] = next.Unix()
+	sched := e.isScheduled()
+	out := map[string]any{"status": e.status, "targets": ts, "running": e.running, "node": e.nodeName(), "public_key": strings.TrimSpace(string(pub)), "enabled": sched}
+	if c != nil && sched && !e.running {
+		if _, next := e.retryLocked(c); !next.IsZero() {
+			out["retry"] = next.Unix()
 		}
 	}
 	if p := e.pendingSummary(); p != nil {
@@ -850,8 +838,9 @@ func (e *BackupEngine) Failing() (failing, enabled bool, msg string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	c := e.cfg()
-	if c == nil || !c.Enabled || e.running {
-		return false, c != nil && c.Enabled, ""
+	sched := e.isScheduled()
+	if c == nil || !sched || e.running {
+		return false, c != nil && sched, ""
 	}
 	var bad []string
 	for i := range c.Targets {
@@ -878,29 +867,6 @@ func (e *BackupEngine) ensureKey() error {
 	return backupKeygen(key, backupProduct+"-backup@"+e.nodeName())
 }
 
-// scheduleDueLocked says whether the scheduled backup to every server is due, and when the next one is.
-func (e *BackupEngine) scheduleLocked(c *BackupConfig) (due bool, next time.Time) {
-	now := e.now()
-	if e.status.LastFull == 0 {
-		return true, now
-	}
-	last := time.Unix(e.status.LastFull, 0)
-	if c.Hours > 0 {
-		t := last.Add(time.Duration(c.Hours) * time.Hour)
-		return !t.After(now), t
-	}
-	var hh, mm int
-	fmt.Sscanf(c.at(), "%d:%d", &hh, &mm)
-	t := time.Date(now.Year(), now.Month(), now.Day(), hh, mm, 0, 0, now.Location()).Add(e.jitter)
-	if t.After(now) { // today's time has not come: the one that counts is yesterday's
-		t = t.AddDate(0, 0, -1)
-	}
-	if last.Before(t) {
-		return true, now // missed it: now
-	}
-	return false, t.AddDate(0, 0, 1)
-}
-
 // retryLocked is the servers that need another try now: the ones that failed (after a pause) and the ones that never had a
 // backup (at once).
 func (e *BackupEngine) retryLocked(c *BackupConfig) (ts []BackupTarget, next time.Time) {
@@ -922,39 +888,19 @@ func (e *BackupEngine) retryLocked(c *BackupConfig) (ts []BackupTarget, next tim
 	return ts, next
 }
 
-func (e *BackupEngine) nextLocked(c *BackupConfig) time.Time {
+// pickLocked is the servers to back up to between the Scheduler's runs: the ones that failed (after a pause) and the
+// ones that never had a backup.
+func (e *BackupEngine) pickLocked(c *BackupConfig) []BackupTarget {
 	if len(c.Targets) == 0 {
-		return time.Time{}
+		return nil
 	}
-	due, next := e.scheduleLocked(c)
-	if due {
-		return e.now()
-	}
-	rt, rnext := e.retryLocked(c)
-	if len(rt) > 0 {
-		return e.now()
-	}
-	if !rnext.IsZero() && rnext.Before(next) {
-		return rnext
-	}
-	return next
-}
-
-// pick says what to back up now: everything when the schedule says so, else the servers that need a retry.
-func (e *BackupEngine) pickLocked(c *BackupConfig) (ts []BackupTarget, full bool) {
-	if len(c.Targets) == 0 {
-		return nil, false
-	}
-	if due, _ := e.scheduleLocked(c); due {
-		return c.Targets, true
-	}
-	ts, _ = e.retryLocked(c)
-	return ts, false
+	ts, _ := e.retryLocked(c)
+	return ts
 }
 
 func (e *BackupEngine) due() bool {
 	c := e.cfg()
-	if c == nil || !c.Enabled || c.Validate() != nil {
+	if c == nil || !e.isScheduled() || c.Validate() != nil {
 		return false
 	}
 	e.mu.Lock()
@@ -962,11 +908,10 @@ func (e *BackupEngine) due() bool {
 	if e.running {
 		return false
 	}
-	ts, _ := e.pickLocked(c)
-	return len(ts) > 0
+	return len(e.pickLocked(c)) > 0
 }
 
-// Run starts the scheduled backups.
+// Run tries failed servers again between the Scheduler's runs (the runs themselves are the Scheduler's "backup" task).
 func (e *BackupEngine) Run(ctx context.Context) {
 	e.runCtx = ctx
 	t := time.NewTicker(30 * time.Second)
@@ -989,8 +934,8 @@ func (e *BackupEngine) start(all bool) error {
 	if c == nil || len(c.Targets) == 0 {
 		return errors.New("say which server to back up to first")
 	}
-	if !all && !c.Enabled {
-		return errors.New("backups are not switched on")
+	if !all && !e.isScheduled() {
+		return errors.New("backups are not scheduled")
 	}
 	cc := c.clone()
 	if err := cc.Validate(); err != nil {
@@ -1003,7 +948,7 @@ func (e *BackupEngine) start(all bool) error {
 	}
 	targets, full := cc.Targets, true
 	if !all {
-		targets, full = e.pickLocked(cc)
+		targets, full = e.pickLocked(cc), false
 		if len(targets) == 0 {
 			e.mu.Unlock()
 			return errors.New("nothing is due")
@@ -1033,6 +978,55 @@ func (e *BackupEngine) start(all bool) error {
 		}
 	}()
 	return nil
+}
+
+// RunScheduled is the Scheduler's "backup" action: a backup of this node to every server, waited for, so the task's
+// history says how it went.
+func (e *BackupEngine) RunScheduled(actor string) (string, error) {
+	if err := e.start(true); err != nil {
+		return "", err
+	}
+	infof("backup: started by %s", actor)
+	e.mu.Lock()
+	began := e.status.LastStart
+	e.mu.Unlock()
+	for deadline := time.Now().Add(backupTimeout + time.Minute); time.Now().Before(deadline); time.Sleep(time.Second) {
+		e.mu.Lock()
+		running := e.running
+		e.mu.Unlock()
+		if !running {
+			break
+		}
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	c := e.cfg()
+	if c == nil {
+		return "", errors.New("the backup settings are gone")
+	}
+	var ok, bad []string
+	for i := range c.Targets {
+		t := &c.Targets[i]
+		st := e.status.Targets[t.key()]
+		switch {
+		case st == nil || st.LastStart < began:
+		case st.LastError != "":
+			bad = append(bad, t.label()+": "+st.LastError)
+		default:
+			ok = append(ok, t.label()+" ("+st.LastFile+")")
+		}
+	}
+	if e.running {
+		return "", errors.New("still running after " + backupTimeout.String())
+	}
+	out := "backed up to " + strings.Join(ok, ", ")
+	if len(ok) == 0 {
+		out = ""
+	}
+	if len(bad) > 0 {
+		return out, errors.New(strings.Join(bad, "; "))
+	}
+	return out, nil
 }
 
 // RunNow starts a backup to every server now (the button).
@@ -1399,9 +1393,6 @@ func (e *BackupEngine) pendingSummary() map[string]any {
 
 // PrepareRestore opens the backup file with the password and keeps what is in it, checked, for the restart.
 func (e *BackupEngine) PrepareRestore(file, password, actor string) (map[string]any, error) {
-	if password == "" {
-		return nil, errors.New("type the password the backup was made with")
-	}
 	pd := pendingDir(e.stateDir)
 	if err := os.RemoveAll(pd); err != nil {
 		return nil, err
@@ -1701,7 +1692,7 @@ func showBackupStatus(sock string) {
 		Enabled   bool         `json:"enabled"`
 		Running   bool         `json:"running"`
 		PublicKey string       `json:"public_key"`
-		Next      int64        `json:"next"`
+		Retry     int64        `json:"retry"`
 		Status    BackupStatus `json:"status"`
 		Targets   []struct {
 			Label  string             `json:"label"`
@@ -1719,13 +1710,13 @@ func showBackupStatus(sock string) {
 		}
 		return time.Unix(u, 0).Format("2006-01-02 15:04:05")
 	}
-	fmt.Printf("Backups:       %s\n", map[bool]string{true: "on", false: "off"}[v.Enabled])
+	fmt.Printf("Backups:       %s\n", map[bool]string{true: "scheduled (a \"Back up this node\" task in --schedule)", false: "not scheduled: add a task with the action backup (--schedule-set)"}[v.Enabled])
 	if v.Running {
 		fmt.Println("Running now:   yes")
 	}
 	fmt.Printf("Last started:  %s\nLast success:  %s\n", at(v.Status.LastStart), at(v.Status.LastOK))
-	if v.Next != 0 && v.Enabled {
-		fmt.Printf("Next:          %s\n", at(v.Next))
+	if v.Retry != 0 {
+		fmt.Printf("Retry:         %s\n", at(v.Retry))
 	}
 	for _, t := range v.Targets {
 		fmt.Printf("\nServer %s (%s)\n  last success: %s", t.Label, t.Host, at(t.Status.LastOK))

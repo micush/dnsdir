@@ -3398,7 +3398,7 @@
       } else if (f.t === "secret") {
         input = h("input", { type: "password", autocomplete: "new-password", spellcheck: "false" });
         input.value = v == null ? "" : v;
-        get = () => input.value.trim();
+        get = () => (f.raw ? input.value : input.value.trim());   // raw: kept exactly as typed
       } else if (f.t === "port") {
         // a listen address kept as ":53853" in the file is shown as the port alone; one with a host in front is shown as it is
         input = h("input", { type: "text", inputmode: "numeric", autocomplete: "off", spellcheck: "false" });
@@ -3503,21 +3503,21 @@
   };
 
 
-  // Configure ▸ Backup: three cards.  Schedule and Servers are the shared settings (the dns.backup block); the status, the
-  // SSH key and the restore are those of the node picked in the top bar.  Every explanation is in the help.
+  // Configure ▸ Backup: three cards.  The password and the servers are the shared settings (the dns.backup block); when
+  // backups run is a Scheduler task (action "backup"), shown and created from the first card.  The status, the SSH key and
+  // the restore are those of the node picked in the top bar.  Every explanation is in the help.
   const BACKUP_FIELDS = [
-    { shared: true, k: "enabled", l: "Back up every node automatically", t: "bool" },
-    { br: true },
-    { shared: true, k: "hours", l: "Every (hours)", t: "int", min: 0, max: 168, def: 0, hint: "0 is once a day." },
-    { shared: true, k: "at", l: "Time of day", t: "text", hint: "HH:MM; empty is 02:30." },
-    { shared: true, k: "password", l: "Password for the archives", t: "secret", hint: "At least 8 characters." },
+    { shared: true, k: "password", l: "Password for the archives", t: "secret", raw: true, hint: "Empty: anyone can open them." },
   ];
+  // the task the "Schedule daily backups" button adds (02:30 UTC; each node at its own time within five minutes)
+  const BACKUP_TASK = { id: "backup", name: "Back up every node", action: "backup", freq: "daily", at: "02:30", until: "02:35" };
   // the columns of the table of backup servers (the server entries are part of the same shared block)
   const BACKUP_COLS = [
     ["name", "Name", "text", "Backup 1"], ["host", "Server", "text", "backup.example.com"], ["port", "Port", "int", "22"],
     ["user", "User", "text", "dnsdir"], ["dir", "Directory", "text", "backups/dns"], ["keep", "Keep", "int", "14"],
   ];
-  const backupForm = (bcfg) => {
+  // setSchedule(list) tells the config page the Scheduler's task list changed, so its next save carries the new one
+  const backupForm = (bcfg, setSchedule) => {
     bcfg = bcfg || {};
     const notSetting = (el) => { el.addEventListener("change", (e) => e.stopPropagation()); return el; };
     const at = (u) => (u ? new Date(u * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "never");
@@ -3533,7 +3533,31 @@
       runBtn.disabled = true; runErr.textContent = "";
       try { await api("POST", "/api/backup/run", {}); start(); show(); } catch (e) { runBtn.disabled = false; runErr.textContent = e.message; }
     });
-    const schedule = section("Schedule", fs.el, h("div", { class: "toolbar nomargin" }, runBtn, runState, runErr));
+    // when: the Scheduler's backup tasks
+    const when = h("span", { class: "muted small" });
+    const toSched = h("button", { type: "button", class: "btn small" }, "Open Scheduler");
+    toSched.addEventListener("click", () => selectTab("scheduler"));
+    const addTask = h("button", { type: "button", class: "btn small", hidden: true }, "Schedule daily backups");
+    addTask.addEventListener("click", async () => {
+      addTask.disabled = true; addTask.textContent = "Scheduling…"; runErr.textContent = "";
+      try {
+        await api("POST", "/api/schedule/task", { task: BACKUP_TASK });
+        try { const c = await api("GET", "/api/config"); if (setSchedule) setSchedule(c.config.dns.schedule); } catch (_) { /* the next load reads it */ }
+        show();
+      } catch (e) { runErr.textContent = e.message; }
+      finally { addTask.disabled = false; addTask.textContent = "Schedule daily backups"; }
+    });
+    async function showWhen() {
+      let tasks;
+      try { tasks = ((await api("GET", "/api/schedule")).data.tasks || []).filter((t) => t.action === "backup"); } catch (_) { return; }
+      const on = tasks.filter((t) => !t.disabled && t.applies);
+      const next = on.map((t) => t.next_run).filter(Boolean).sort((a, b) => a - b)[0];
+      when.textContent = !tasks.length ? "Not scheduled" : !on.length ? "Scheduled task off" : "Next: " + at(next) + " (" + on.map((t) => t.describe).join("; ") + ")";
+      when.className = on.length ? "muted small" : "bad-text small";
+      addTask.hidden = tasks.length > 0;
+    }
+    const schedule = section("Schedule", fs.el,
+      h("div", { class: "toolbar nomargin bk-when" }, runBtn, runState, when, addTask, toSched, runErr));
 
     // ── Servers: one row per server with its status under it; click a row to pick it, the toolbar acts on that one ──
     const initial = (bcfg.targets || []).slice();
@@ -3666,13 +3690,14 @@
       last = v;
       const st = v.status || {};
       runBtn.disabled = !!v.running; runBtn.textContent = v.running ? "Backing up…" : "Back up now";
-      runState.textContent = "Last: " + at(st.last_ok) + (v.enabled && v.next && !v.running ? " · Next: " + at(v.next) : "");
+      runState.textContent = "Last: " + at(st.last_ok) + (v.retry ? " · Retry: " + at(v.retry) : "") + " ·";
+      showWhen();
       keyLabel.textContent = "SSH key of " + (v.node || "this node");
       keyIn.value = v.public_key || "";
       rows().forEach((tr) => tr._status(v.targets || []));
+      restoreFrom(v);
       if (v.running) start(); else stop();
     }
-    show();
     // a saved edit can change the servers: read their status again once the save is through
     let again = null;
     const later = () => { clearTimeout(again); again = setTimeout(show, 1500); };
@@ -3680,15 +3705,17 @@
     // ── Restore ──
     const rbody = h("div", {});
     const restore = notSetting(section("Restore", rbody));
-    async function restoreUI() {
-      let v = {};
-      try { v = (await api("GET", "/api/backup")).data; } catch (_) { /* the Schedule card says why */ }
-      const tl = v.targets || [];
+    // the configured servers are the first choices and are read from the status, so a server added on this page shows up
+    // here at once; picking one lists its backups straight away (only Another server… needs List backups)
+    let restoreFrom = () => {};
+    function restoreUI() {
       const rerr = h("span", { class: "bad-text small" });
       const rinfo = h("span", { class: "muted small" });
       const fail = (t) => { rerr.textContent = t; rinfo.textContent = ""; };
-      const src = h("select", { "aria-label": "Where the backup is" }, tl.map((t, i) => h("option", { value: "s" + i }, t.label)),
-        h("option", { value: "other" }, "Another server…"), h("option", { value: "upload" }, "A file from this computer"));
+      const lerr = h("span", { class: "bad-text small" });   // why the backups could not be listed, beside the list
+      const otherOpt = h("option", { value: "other" }, "Another server…");
+      const src = h("select", { "aria-label": "Where the backup is" }, otherOpt, h("option", { value: "upload" }, "A file from this computer"));
+      let chosen = false;   // the person picked a source: do not move it
       const o = { host: h("input", { type: "text", placeholder: "Server", spellcheck: "false", "aria-label": "Server" }), port: h("input", { type: "number", placeholder: "22", class: "arule-n", "aria-label": "SSH port" }),
         user: h("input", { type: "text", placeholder: "User", spellcheck: "false", "aria-label": "User" }), dir: h("input", { type: "text", placeholder: "Directory", spellcheck: "false", "aria-label": "Directory" }),
         pw: h("input", { type: "password", autocomplete: "new-password", placeholder: "Account password", "aria-label": "Password of the account on that server" }) };
@@ -3696,15 +3723,22 @@
       const fileIn = h("input", { type: "file", accept: ".dnsbak", hidden: true, "aria-label": "Backup file" });
       const list = h("select", { "aria-label": "Backup to restore", hidden: true });
       const listBtn = h("button", { type: "button", class: "btn" }, "List backups");
-      listBtn.addEventListener("click", async () => {
-        listBtn.disabled = true; listBtn.textContent = "Listing…"; rerr.textContent = ""; rinfo.textContent = "";
+      let seq = 0;
+      async function listFiles() {
+        const n = ++seq;
+        rerr.textContent = ""; lerr.textContent = "";
+        listBtn.disabled = true; listBtn.textContent = "Listing…";
+        clear(list).append(h("option", { value: "" }, "Listing…")); list.disabled = true; list.hidden = false;
         try {
           const r = (await api("POST", "/api/backup/files", serverArg())).data.files || [];
+          if (n !== seq) return;
           clear(list).append(...r.map((f) => h("option", { value: f.name }, f.node + " — " + new Date(f.time).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }))));
           list.hidden = !r.length;
-          if (!r.length) fail("No backups there.");
-        } catch (e) { fail(e.message); } finally { listBtn.disabled = false; listBtn.textContent = "List backups"; }
-      });
+          if (!r.length) lerr.textContent = "No backups there.";
+        } catch (e) { if (n === seq) { list.hidden = true; lerr.textContent = e.message; } }
+        finally { if (n === seq) { list.disabled = false; listBtn.disabled = false; listBtn.textContent = "List backups"; } }
+      }
+      listBtn.addEventListener("click", listFiles);
       const bpw = h("input", { type: "password", autocomplete: "new-password", placeholder: "Backup password", "aria-label": "Password the backup was made with" });
       const check = h("button", { type: "button", class: "btn" }, "Check backup");
       check.addEventListener("click", async () => {
@@ -3716,7 +3750,7 @@
             await apiUpload("/api/backup/upload", fileIn.files[0]);
             body = { source: "upload", password: bpw.value };
           } else {
-            if (list.hidden || !list.value) throw new Error("List the backups and pick one.");
+            if (list.hidden || list.disabled || !list.value) throw new Error(src.value === "other" ? "List the backups and pick one." : "Pick a backup.");
             body = { source: "server", file: list.value, password: bpw.value, ...serverArg() };
           }
           const r = (await api("POST", "/api/backup/restore/prepare", body)).data;
@@ -3729,11 +3763,29 @@
         return { host: o.host.value.trim(), port: Number(o.port.value) || 0, user: o.user.value.trim(), dir: o.dir.value.trim(), server_password: o.pw.value };
       }
       const sync = () => {
-        const up = src.value === "upload";
-        otherBox.hidden = src.value !== "other"; fileIn.hidden = !up; listBtn.hidden = up; list.hidden = true; rerr.textContent = "";
+        const other = src.value === "other";
+        seq++;
+        otherBox.hidden = !other; fileIn.hidden = src.value !== "upload"; listBtn.hidden = !other; list.hidden = true; list.disabled = false; rerr.textContent = ""; lerr.textContent = ""; rinfo.textContent = "";
+        if (src.value.startsWith("s")) listFiles();
       };
-      src.addEventListener("change", sync); sync();
-      const pick = h("div", { class: "bk-restore" }, h("div", { class: "toolbar tight" }, src, listBtn, list, fileIn), otherBox,
+      src.addEventListener("change", () => { chosen = true; sync(); });
+      let known = null, pendingShown = false;
+      restoreFrom = (v) => {
+        const tl = v.targets || [];
+        const sig = JSON.stringify(tl.map((t) => [t.label, t.host, t.user]));
+        if (sig !== known) {
+          known = sig;
+          const was = src.value;
+          [...src.options].filter((op) => op.value.startsWith("s")).forEach((op) => op.remove());
+          tl.forEach((t, i) => src.insertBefore(h("option", { value: "s" + i }, t.label), otherOpt));
+          if (chosen && [...src.options].some((op) => op.value === was)) src.value = was;
+          else { chosen = chosen && !was.startsWith("s"); src.value = !chosen && tl.length ? "s0" : (was.startsWith("s") ? "other" : was); }
+          sync();
+        }
+        if (v.pending_restore && !pendingShown) { pendingShown = true; confirmBox(v.pending_restore); }
+      };
+      sync();
+      const pick = h("div", { class: "bk-restore" }, h("div", { class: "toolbar tight" }, src, listBtn, list, fileIn, lerr), otherBox,
         h("div", { class: "toolbar nomargin" }, bpw, check, rinfo, rerr));
       const conf = h("div", { hidden: true });
       function confirmBox(r) {
@@ -3763,9 +3815,9 @@
         conf.hidden = false; pick.hidden = true;
       }
       rbody.replaceChildren(pick, conf);
-      if (v.pending_restore) confirmBox(v.pending_restore);
     }
     restoreUI();
+    show();
 
     const el = h("div", {}, schedule, servers, restore);
     el.addEventListener("change", later);
@@ -3800,7 +3852,7 @@
       const prom = fieldset(PROM_FIELDS, { metrics_acl: cfg.dns.metrics_acl });
       const alerts = alertsForm(cfg.dns.alerts);
       const alertsShared = () => { const a = alerts.get(); return a ? { alerts: a } : {}; };
-      const backup = backupForm(cfg.dns.backup);
+      const backup = backupForm(cfg.dns.backup, (sch) => { cfg.dns.schedule = sch; if (state.cfg && state.cfg.dns) state.cfg.dns.schedule = sch; });
       const backupShared = () => { const b = backup.get(); return b ? { backup: b } : {}; };
       // what snmpd is doing, under the form (refreshed after every save)
       const snmpShared = () => { const v = snmp.get(), m = prom.get(); return { snmp_communities: v.snmp_communities, snmp_acl: v.snmp_acl, snmp_contact: v.snmp_contact, metrics_acl: m.metrics_acl }; };

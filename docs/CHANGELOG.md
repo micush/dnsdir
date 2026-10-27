@@ -1,5 +1,53 @@
 # Changelog
 
+## [v591] - 2026-10-27 — Backups run from the Scheduler; restore uses the configured servers; archive password without limits
+
+### Changed
+- **Backups are now a Scheduler task.** There is a new Scheduler action, `backup` ("Back up this node"). It backs the node up to every server on Configure ▸ Backup, waits for the backup to finish, and records the result in the task's history: which servers took the archive, and which failed and why. You choose when backups run on Operate ▸ Scheduler, like any other task (hourly, daily, weekly, chosen nodes, time windows).
+- **The Backup page's Schedule card** no longer has *Back up every node automatically*, *Every (hours)* or *Time of day*. In their place:
+  - It shows the next run and the schedule of the backup tasks.
+  - **Schedule daily backups** appears when there is no task. It adds `backup`, "Back up every node", daily 02:30 to 02:35 UTC, with each node at its own time in that window.
+  - **Open Scheduler** goes to the Scheduler page.
+  - "Not scheduled" shows in red when no backup task runs on the node.
+  - The config page's next save carries the new task list, so it cannot drop a task that was just added.
+- **The engine has no timer of its own any more.** It still retries a failed server after 15 minutes, and gives a newly added server its first backup at once, but only while a backup task runs on the node. The alert **Backup failed** follows the same rule. `--backup-status` says whether backups are scheduled and when the next retry is.
+- **Migration.** The `enabled`, `hours` and `at` of v583 to v590 become such a task when the configuration file is read (`migrateBackupSchedule`, called from `loadConfig` and from validation):
+  - `at` is converted from the node's clock to UTC.
+  - `hours` N becomes "every N hours, 00:00 to 00:05".
+  - The old fields are then cleared.
+  - A cluster that had backups on keeps them, and a page that saves what it read keeps the task.
+- **The archive password has no limits.** Any length and any characters are accepted, kept exactly as typed (no trimming), or none at all. With none, the archives are sealed with an empty password and anyone with a file can open it; the field's hint says so. The 8-character minimum, the 512-character maximum and the control-character check are gone. A restore accepts an empty backup password.
+
+### Fixed
+- **Restore listed only "Another server…" for a server added in the same visit.** The Restore card built its list of servers once, when the page opened, so a server added on the page was missing until a reload.
+  - The list now follows the Servers table.
+  - A configured server is picked by default, and its backups are listed as soon as it is picked.
+  - **List backups** and the server/user/directory/password fields appear only for **Another server…**.
+  - An error while listing shows beside the list.
+
+### Verified
+- `gofmt -l .` (empty), `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64. The PAM path was checked only on the native amd64 build.
+- New tests:
+  - `TestBackupPasswordHasNoLimits`: empty, one character, spaces at both ends, a tab, 1200 characters and Unicode all validate unchanged, seal and open, and a wrong password does not open them.
+  - `TestBackupRetriesOnlyWhileScheduled`.
+  - `TestBackupRunScheduled`: the action reports the server that failed and the one that worked.
+  - `TestBackupScheduleMovesToTheScheduler`: daily and hourly migration, local to UTC, idempotent, disabled tasks and other nodes' tasks do not count.
+  - `TestBackupOldScheduleReadsAsATask`: through `loadConfig`.
+- `TestBackupSchedule` was removed because the engine no longer has a schedule.
+- Live, with a scratch daemon (TZ America/Phoenix, a real PAM user) started from a v590 file with `"enabled": true, "at": "03:15"`:
+  - `--schedule` showed the task at 10:15 to 10:20 UTC, and the Backup page showed it.
+  - A password edit on the page saved the task into the file and dropped `enabled` and `at`.
+  - After `--schedule-del backup`, the page showed "Not scheduled". **Schedule daily backups** added the task, and a later save kept it.
+  - **Open Scheduler** opened the Scheduler, which lists "Back up this node".
+  - `--schedule-run backup` wrote a failed history entry naming both servers.
+  - The password field saved `"  a b  "`, `"x"` and empty exactly as typed.
+  - Restore: with no servers it offered only Another server and file. After a server was added in the same visit, it was picked and its backups were requested (`{"index":0}`) with no click.
+- Checked in Chromium, light and dark.
+
+### Not verified
+- A real SFTP server: the sandbox has no `ssh`, `sftp` or `ssh-keygen`, so every backup and listing ended in the error path.
+- The migration and the new task in a running multi-node cluster. Each node migrates the same file the same way, but nodes whose clocks are in different time zones would turn `at` into different UTC times if each migrated its own copy. In a cluster the primary's shared settings decide.
+
 ## [v590] - 2026-10-27 — Configure ▸ Backup redesigned
 
 ### Changed

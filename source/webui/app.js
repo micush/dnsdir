@@ -2276,7 +2276,10 @@
               h("tbody", {}, p.servers.map((s) => h("tr", {},
                 h("td", {}, s.healthy && s.rank ? s.rank : "–"),
                 h("td", { class: "sname", title: s.name || null }, s.name || "–"),   // a long name is cut short; the whole is the tooltip
-                h("td", { class: "mono" }, s.addr, s.fallback ? [h("span", { class: "muted small fb-tag", title: "Used only while every other server is down" }, "fallback")] : null),
+                h("td", { class: "mono" }, s.addr, s.fallback ? [h("span", { class: "muted small fb-tag", title: "Used only while every other server is down" }, "fallback")] : null,
+                  // a server given by name: its address and where that came from (the host's resolver may be this node itself)
+                  s.resolved_via ? h("div", { class: "small " + (s.resolved_via === "host resolver" ? "warn-text" : "muted"), title: s.resolved_via === "host resolver" ? "No server is given by IP address and no bootstrap server is set, so the name comes from this host's resolver. If that is this node, the server can only be reached while another one answers." : null },
+                    (s.resolved_ips || []).join(", ") + " via " + s.resolved_via) : null),
                 h("td", {}, pill(s.healthy ? "up" : "down", s.healthy ? "ok" : "bad")),
                 h("td", { class: "num" }, s.healthy ? h("span", { class: "bar-wrap" }, h("span", { class: "bar-fill" })) : null, s.healthy ? fmtMs(s.ewma_ms) : "–"),
                 h("td", { class: "num" }, s.last_ms > 0 ? fmtMs(s.last_ms) : "–"),
@@ -2318,6 +2321,7 @@
     { section: "Upstream servers", note: "The default settings for every gateway that has no servers of its own (a gateway drawn on the Topology page can have its own)." },
     { shared: true, k: "servers", l: "Servers", t: "rows", rows: "servers", wide: true, hint: "One per row: 10.0.0.53, 10.0.1.53:5353, [2001:db8::53]:53, tls://dns.example.com (DNS over TLS, port 853), https://dns.example.com/dns-query (DNS over HTTPS)" },
     { shared: true, k: "fallback_servers", l: "Fallback servers", t: "rows", rows: "fallback", wide: true, hint: "Same forms. Used only while no server above is in service (all down or paused), and dropped as soon as one answers again. They are never probed and always count as up, so a public resolver that knows nothing of your internal names is fine." },
+    { shared: true, k: "bootstrap", l: "Bootstrap servers", t: "rows", rows: "bootstrap", wide: true, hint: "IP addresses only. They look up the names of servers given by name (tls://name, https://name) when no server above is given by IP address and up; otherwise they are not needed." },
     { shared: true, k: "queries", l: "Probe queries", t: "rows", rows: "queries", wide: true, hint: "Every server is asked each of these to check it works: a name and a record type." },
     { shared: true, k: "tls_insecure", l: "Accept any certificate from tls:// and https:// servers (insecure)", t: "bool" },
     { section: "Load Balancing", cols: 3, note: "Applies to every gateway unless that gateway has its own load balancing (Topology ▸ right-click the gateway ▸ Edit)." },
@@ -3072,6 +3076,7 @@
     },
     servers: oneCol("servers", "Server", "10.0.0.53, 10.0.1.53:5353, tls://dns.example.com, https://dns.example.com/dns-query", "No servers."),
     fallback: oneCol("fallback", "Fallback server", "8.8.8.8", "No fallback servers."),
+    bootstrap: oneCol("bootstrap", "Bootstrap server", "1.1.1.1", "No bootstrap servers: the servers given by IP address do it."),
     neighbors: oneCol("neighbors", "Neighbor IP address", "10.0.0.2", "No neighbors: multicast."),
     morevip4: oneCol("morevip4", "IPv4 address", "10.0.0.11", "No more IPv4 addresses."),
     morevip6: oneCol("morevip6", "IPv6 address", "2001:db8::11", "No more IPv6 addresses."),

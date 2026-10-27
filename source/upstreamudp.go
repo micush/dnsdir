@@ -176,7 +176,7 @@ func (u *udpUpstreams) closeAll() {
 
 func dialUDP(ctx context.Context, addr string) (*net.UDPConn, error) {
 	var d net.Dialer
-	c, err := dialPrefer4(ctx, &d, "udp", addr)
+	c, err := dialUpstream(ctx, &d, "udp", addr) // a name is looked up as in bootstrap.go
 	if err != nil {
 		return nil, err
 	}

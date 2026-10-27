@@ -1,5 +1,39 @@
 # Changelog
 
+## [v596] - 2026-10-27 — Upstreams given by name are looked up by dnsdir, not through the host (no more VIP loop)
+
+### Fixed
+- **A DoH/DoT upstream given by name could go down because its own name could not be looked up.** The name of an upstream such as `https://idot2.74software.com/dns-query` was resolved through the host's resolver. When that resolver is the node's own VIP (common), the lookup went round through dnsdir and depended on the other upstreams. A short stumble then failed the lookup ("lookup … on 192.168.168.169:53: server misbehaving"), and the named server was marked down with all of its probes.
+
+### Added
+- **Bootstrap lookup** (`bootstrap.go`). The name of an upstream given by name (`tls://name`, `https://name/…`, or a plain host name) is now looked up by dnsdir itself:
+  - **Who is asked:** first the upstreams given by IP address that are up (plain, or `tls://`/`https://` with an IP), the server's own gateway first and the fastest first. Just after a start, before anything has been probed, the upstreams given by address are still asked first. Then the bootstrap servers below. The host's resolver is used only when neither is there, and a warning is logged then, at most once an hour per name.
+  - **Caching:** an address is kept for its TTL (30 s to 1 h). While no fresh one can be had, the last good one stays in use, so a resolver that stumbles no longer takes a working server out. Lookups of the same name at the same moment share one query.
+  - **Certificate check:** the TLS check still uses the name, so nothing is weakened.
+  - **Error text:** a failed lookup now reads "cannot resolve NAME: SERVER: the server answered SERVFAIL" rather than Go's "server misbehaving".
+- **Bootstrap servers** (`bootstrap` in the shared `dns` block; Configure ▸ DNS ▸ Servers): plain DNS servers by IP address, for setups where every upstream is given by name. Duplicates are dropped and names are refused. The block is copied with the shared settings and shown in the history.
+- **Monitor ▸ DNS** shows, under a server given by name, its addresses and which server gave them, in amber when they came from the host's resolver. The API has them as `resolved_ips` and `resolved_via`.
+- Help (Configure ▸ DNS ▸ Servers) and README updated.
+
+### Verified
+- `gofmt -l .` (empty), `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64.
+- New tests in `bootstrap_test.go`:
+  - parsing answers with a CNAME in front, and SERVFAIL and NXDOMAIN
+  - the host part of every upstream form
+  - asking only the servers given by address, fastest first; skipping down ones but using not-yet-probed ones
+  - caching, and keeping the last good answer
+  - bootstrap servers, then the host's resolver
+  - the server's own gateway first
+  - validating the bootstrap setting
+- Live, with a gateway on `lo` (VIP 127.0.0.10) and two stub UDP DNS servers. The upstreams were `127.0.0.2:5300` (which answers `stub.test` with 127.0.0.3) and `stub.test:5300` (a name the host's resolver cannot resolve at all).
+  - Both came up, and `stub.test` was resolved through 127.0.0.2. Monitor ▸ DNS showed "127.0.0.3 via 127.0.0.2" in Chromium, light and dark.
+  - With 127.0.0.2 then stopped, `stub.test` stayed up and kept answering queries to the VIP, through the TTL running out (the host-resolver warning was logged and the last good address kept, 0 failed probes).
+- Before this change, `stub.test` could not have been reached at all.
+
+### Not verified
+- A real DoT or DoH server given by name. The code path is the same dial, but no TLS upstream was run here.
+- A cluster.
+
 ## [v595] - 2026-10-27 — Backup errors say why; tidier Restore row; Servers marked shared
 
 ### Fixed

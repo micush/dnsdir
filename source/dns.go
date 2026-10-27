@@ -194,7 +194,7 @@ func exchangeOptID(ctx context.Context, addr string, query []byte, tcp bool, tim
 		// name (or IP), then the same length-prefixed messages as DNS over TCP.
 		tcp = true
 		host, _, _ := net.SplitHostPort(hp)
-		tc, derr := dialPrefer4(ctx, &d, "tcp", hp)
+		tc, derr := dialUpstream(ctx, &d, "tcp", hp) // a name is looked up as in bootstrap.go
 		if derr != nil {
 			return nil, 0, derr
 		}
@@ -205,7 +205,7 @@ func exchangeOptID(ctx context.Context, addr string, query []byte, tcp bool, tim
 			return nil, 0, herr
 		}
 		conn = tl
-	} else if conn, err = dialPrefer4(ctx, &d, network, addr); err != nil {
+	} else if conn, err = dialUpstream(ctx, &d, network, addr); err != nil {
 		return nil, 0, err
 	}
 	defer conn.Close()
@@ -298,6 +298,10 @@ type ServerStat struct {
 	LastProbeAgo float64 `json:"last_probe_ago_s"`
 	// Tests holds the outcome of each probe query in the latest round.
 	Tests []TestStat `json:"tests"`
+	// ResolvedIPs and ResolvedVia: for a server given by name, the addresses its name has and the server that gave them
+	// ("host resolver" when it came from the host's own resolver, which may be this node; see bootstrap.go)
+	ResolvedIPs []string `json:"resolved_ips,omitempty"`
+	ResolvedVia string   `json:"resolved_via,omitempty"`
 	// ZonesDown are the zones the server serves whose probe domains fail: it is out of service for them only.
 	ZonesDown []string `json:"zones_down,omitempty"`
 }
@@ -398,6 +402,7 @@ func NewPool(cfg DNSConfig) *Pool {
 func (p *Pool) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
+	boot.register(p) // its servers given by address can look up the names of the others
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
@@ -416,6 +421,7 @@ func (p *Pool) Start() {
 }
 
 func (p *Pool) Stop() {
+	boot.unregister(p)
 	if p.cancel != nil {
 		p.cancel()
 	}
@@ -972,6 +978,7 @@ func (p *Pool) Snapshot() []ServerStat {
 			Served: s.served.Load(), LastError: s.lastErr,
 			Tests: append([]TestStat{}, s.tests...),
 		}
+		st.ResolvedIPs, st.ResolvedVia = boot.resolvedVia(s.Addr)
 		if !s.lastProbe.IsZero() {
 			st.LastProbeAgo = round2(time.Since(s.lastProbe).Seconds())
 			for z := range s.zoneProbed {

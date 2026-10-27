@@ -509,6 +509,10 @@ type DNSConfig struct {
 	// again.  Same address forms as Servers.  They are never probed (the domains the normal servers are tested with
 	// may be ones only those know) and always count as up.
 	FallbackServers []string `json:"fallback_servers,omitempty"`
+	// Bootstrap are plain DNS servers, by IP address, that look up the names of upstream servers given by name
+	// (tls://name, https://name/…, or a plain name) when no upstream given by address is up (bootstrap.go).  Empty is
+	// fine whenever some upstream is given by address.
+	Bootstrap []string `json:"bootstrap,omitempty"`
 	// PausedServers are listed servers that are taken out of service (no
 	// queries, no probes) until resumed, e.g. during maintenance.  Replicated
 	// with the rest of the DNS block.
@@ -876,6 +880,23 @@ func (d *DNSConfig) Validate() error {
 		}
 	} else {
 		d.FallbackServers = nil
+	}
+	if len(d.Bootstrap) > 0 {
+		bs := make([]string, 0, len(d.Bootstrap))
+		have := map[string]bool{}
+		for _, s := range d.Bootstrap {
+			n, err := normalizePlain(strings.TrimSpace(s), "53")
+			if err != nil || !isIPHost(upstreamHost(n)) {
+				return fmt.Errorf("dns: bootstrap server %q: give an IP address (optionally with :port)", s)
+			}
+			if !have[n] {
+				have[n] = true
+				bs = append(bs, n)
+			}
+		}
+		d.Bootstrap = bs
+	} else {
+		d.Bootstrap = nil
 	}
 	if len(d.PausedServers) > 0 { // keep only real, distinct servers
 		keep := []string{}

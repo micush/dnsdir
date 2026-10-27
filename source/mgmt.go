@@ -146,6 +146,7 @@ func (m *Mgmt) OnConfigLoaded(dc *DaemonConfig) {
 	m.bgp.Apply(dc)
 	sysSink.Apply(dc.Syslog)
 	m.sched.SetTasks(dc.DNS.Schedule)
+	boot.setExtra(dc.DNS.Bootstrap)
 	m.blocks.Apply(dc.DNS.BlockLists, dc.DNS.BlockUpdateHours)
 	m.certs.Refresh()
 	m.dnscerts.Refresh()

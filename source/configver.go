@@ -585,6 +585,16 @@ func configSections(a, b *DaemonConfig) []Section {
 		}
 		out = append(out, Section{"DNS fallback servers", strings.Join(parts, "; ")})
 	}
+	if badd, brem := setDiff(a.DNS.Bootstrap, b.DNS.Bootstrap); len(badd)+len(brem) > 0 {
+		var parts []string
+		if len(badd) > 0 {
+			parts = append(parts, "added "+strings.Join(badd, ", "))
+		}
+		if len(brem) > 0 {
+			parts = append(parts, "removed "+strings.Join(brem, ", "))
+		}
+		out = append(out, Section{"DNS bootstrap servers", strings.Join(parts, "; ")})
+	}
 	if padd, prem := setDiff(a.DNS.PausedServers, b.DNS.PausedServers); len(padd)+len(prem) > 0 {
 		var parts []string
 		if len(padd) > 0 {

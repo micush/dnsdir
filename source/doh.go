@@ -67,7 +67,7 @@ func dohExchange(ctx context.Context, addr string, query []byte, timeout time.Du
 		ForceAttemptHTTP2: true,
 		Proxy:             nil, // never through a proxy from the environment
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return dialPrefer4(ctx, &net.Dialer{}, network, addr)
+			return dialUpstream(ctx, &net.Dialer{}, network, addr) // the name is looked up as in bootstrap.go
 		},
 	}
 	defer tr.CloseIdleConnections()

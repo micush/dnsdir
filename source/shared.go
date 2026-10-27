@@ -248,6 +248,11 @@ func cloneDNS(d DNSConfig) DNSConfig {
 	} else {
 		d.FallbackServers = nil
 	}
+	if len(d.Bootstrap) > 0 {
+		d.Bootstrap = append([]string{}, d.Bootstrap...)
+	} else {
+		d.Bootstrap = nil
+	}
 	d.AllowedClients = append([]string(nil), d.AllowedClients...)
 	if len(d.AllowedClients) == 0 {
 		d.AllowedClients = nil

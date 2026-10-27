@@ -3503,12 +3503,10 @@
   };
 
 
-  // Configure ▸ Backup: three cards.  The password and the servers are the shared settings (the dns.backup block); when
-  // backups run is a Scheduler task (action "backup"), shown and created from the first card.  The status, the SSH key and
-  // the restore are those of the node picked in the top bar.  Every explanation is in the help.
-  const BACKUP_FIELDS = [
-    { shared: true, k: "password", l: "Password for the archives", t: "secret", raw: true, hint: "Empty: anyone can open them." },
-  ];
+  // Configure ▸ Backup: three cards.  The servers are the shared settings (the dns.backup block); when backups run is a
+  // Scheduler task (action "backup"), shown and created from the first card.  There is no archive password (since v592):
+  // an old one in the settings is kept as it is, to open the archives it made.  The status and the restore
+  // are those of the node picked in the top bar.  Every explanation is in the help.
   // the task the "Schedule daily backups" button adds (02:30 UTC; each node at its own time within five minutes)
   const BACKUP_TASK = { id: "backup", name: "Back up every node", action: "backup", freq: "daily", at: "02:30", until: "02:35" };
   // the columns of the table of backup servers (the server entries are part of the same shared block)
@@ -3524,20 +3522,18 @@
     const bytes = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " kB");
     let last = null;   // the last /api/backup answer
 
-    // ── Schedule ──
-    const fs = fieldset(BACKUP_FIELDS, bcfg);
+    // ── Schedule: when this node last backed up and will next; the buttons under it ──
+    const lastEl = h("dd", {}, "");
+    const nextEl = h("dd", {}, "");
     const runBtn = h("button", { type: "button", class: "btn" }, "Back up now");
-    const runState = h("span", { class: "muted small" });
     const runErr = h("span", { class: "bad-text small" });
     runBtn.addEventListener("click", async () => {
       runBtn.disabled = true; runErr.textContent = "";
       try { await api("POST", "/api/backup/run", {}); start(); show(); } catch (e) { runBtn.disabled = false; runErr.textContent = e.message; }
     });
-    // when: the Scheduler's backup tasks
-    const when = h("span", { class: "muted small" });
-    const toSched = h("button", { type: "button", class: "btn small" }, "Open Scheduler");
+    const toSched = h("button", { type: "button", class: "btn" }, "Open Scheduler");
     toSched.addEventListener("click", () => selectTab("scheduler"));
-    const addTask = h("button", { type: "button", class: "btn small", hidden: true }, "Schedule daily backups");
+    const addTask = h("button", { type: "button", class: "btn", hidden: true }, "Schedule daily backups");
     addTask.addEventListener("click", async () => {
       addTask.disabled = true; addTask.textContent = "Scheduling…"; runErr.textContent = "";
       try {
@@ -3552,13 +3548,13 @@
       try { tasks = ((await api("GET", "/api/schedule")).data.tasks || []).filter((t) => t.action === "backup"); } catch (_) { return; }
       const on = tasks.filter((t) => !t.disabled && t.applies);
       const next = on.map((t) => t.next_run).filter(Boolean).sort((a, b) => a - b)[0];
-      when.textContent = !tasks.length ? "Not scheduled" : !on.length ? "Scheduled task off" : "Next: " + at(next) + " (" + on.map((t) => t.describe).join("; ") + ")";
-      when.className = on.length ? "muted small" : "bad-text small";
+      clear(nextEl).append(on.length ? at(next) + " · " + on.map((t) => t.describe).join("; ")
+        : h("span", { class: "bad-text" }, tasks.length ? "Not scheduled (the task is off)" : "Not scheduled"));
       addTask.hidden = tasks.length > 0;
     }
-    const schedule = section("Schedule", fs.el,
-      h("div", { class: "toolbar nomargin bk-when" }, runBtn, runState, when, addTask, toSched, runErr));
-
+    const schedule = section("Schedule",
+      h("dl", { class: "kv" }, h("dt", {}, "Last backup"), lastEl, h("dt", {}, "Next backup"), nextEl),
+      h("div", { class: "toolbar nomargin" }, runBtn, addTask, toSched, runErr));
     // ── Servers: one row per server with its status under it; click a row to pick it, the toolbar acts on that one ──
     const initial = (bcfg.targets || []).slice();
     if (bcfg.host || bcfg.user || bcfg.dir) initial.unshift({ host: bcfg.host, port: bcfg.port, user: bcfg.user, dir: bcfg.dir, keep: bcfg.keep });   // the single server of older versions
@@ -3671,13 +3667,9 @@
     pickRow(null);
     const bar = notSetting(h("div", { class: "toolbar tight" }, addBtn, testBtn, keyBtn, delBtn));
     notSetting(keyForm);
-    const keyIn = notSetting(h("input", { type: "text", readonly: true, spellcheck: "false", class: "mono grow", "aria-label": "SSH public key of this node" }));
-    keyIn.addEventListener("focus", () => keyIn.select());
-    const keyLabel = h("span", { class: "muted" }, "SSH key");
     const table = h("div", { class: "scroll" }, h("table", { class: "tight bk-table" },
       h("thead", {}, h("tr", {}, BACKUP_COLS.map((c) => h("th", {}, c[1])))), tbody));
-    const servers = section("Servers", bar, keyForm, table,
-      h("div", { class: "toolbar nomargin bk-foot" }, keyLabel, keyIn, copyBtn(() => keyIn.value)));
+    const servers = section("Servers", bar, keyForm, table);
 
     // ── this node's status, in the two cards above ──
     let timer = null;
@@ -3686,14 +3678,12 @@
     async function show(fromTimer) {
       if (fromTimer === true && !schedule.isConnected) { stop(); return; }
       let v;
-      try { v = (await api("GET", "/api/backup")).data; } catch (e) { runState.textContent = ""; runErr.textContent = e.message; stop(); return; }
+      try { v = (await api("GET", "/api/backup")).data; } catch (e) { runErr.textContent = e.message; stop(); return; }
       last = v;
       const st = v.status || {};
       runBtn.disabled = !!v.running; runBtn.textContent = v.running ? "Backing up…" : "Back up now";
-      runState.textContent = "Last: " + at(st.last_ok) + (v.retry ? " · Retry: " + at(v.retry) : "") + " ·";
+      lastEl.textContent = at(st.last_ok) + (v.retry ? " · a failed server is tried again " + at(v.retry) : "");
       showWhen();
-      keyLabel.textContent = "SSH key of " + (v.node || "this node");
-      keyIn.value = v.public_key || "";
       rows().forEach((tr) => tr._status(v.targets || []));
       restoreFrom(v);
       if (v.running) start(); else stop();
@@ -3702,16 +3692,14 @@
     let again = null;
     const later = () => { clearTimeout(again); again = setTimeout(show, 1500); };
 
-    // ── Restore ──
+    // ── Restore: pick where the backup is and which one, then Restore (one confirmation, then the node restarts) ──
     const rbody = h("div", {});
     const restore = notSetting(section("Restore", rbody));
     // the configured servers are the first choices and are read from the status, so a server added on this page shows up
     // here at once; picking one lists its backups straight away (only Another server… needs List backups)
     let restoreFrom = () => {};
     function restoreUI() {
-      const rerr = h("span", { class: "bad-text small" });
-      const rinfo = h("span", { class: "muted small" });
-      const fail = (t) => { rerr.textContent = t; rinfo.textContent = ""; };
+      const rerr = h("span", { class: "bad-text small" });   // why the restore failed, after the button
       const lerr = h("span", { class: "bad-text small" });   // why the backups could not be listed, beside the list
       const otherOpt = h("option", { value: "other" }, "Another server…");
       const src = h("select", { "aria-label": "Where the backup is" }, otherOpt, h("option", { value: "upload" }, "A file from this computer"));
@@ -3723,12 +3711,17 @@
       const fileIn = h("input", { type: "file", accept: ".dnsbak", hidden: true, "aria-label": "Backup file" });
       const list = h("select", { "aria-label": "Backup to restore", hidden: true });
       const listBtn = h("button", { type: "button", class: "btn" }, "List backups");
+      const go = h("button", { type: "button", class: "btn danger", disabled: true }, "Restore");
+      // Restore is for a picked backup: a listed one, or a chosen file
+      const canGo = () => { go.disabled = src.value === "upload" ? !fileIn.files.length : (list.hidden || list.disabled || !list.value); };
+      fileIn.addEventListener("change", canGo);
+      list.addEventListener("change", canGo);
       let seq = 0;
       async function listFiles() {
         const n = ++seq;
         rerr.textContent = ""; lerr.textContent = "";
         listBtn.disabled = true; listBtn.textContent = "Listing…";
-        clear(list).append(h("option", { value: "" }, "Listing…")); list.disabled = true; list.hidden = false;
+        clear(list).append(h("option", { value: "" }, "Listing…")); list.disabled = true; list.hidden = false; canGo();
         try {
           const r = (await api("POST", "/api/backup/files", serverArg())).data.files || [];
           if (n !== seq) return;
@@ -3736,27 +3729,40 @@
           list.hidden = !r.length;
           if (!r.length) lerr.textContent = "No backups there.";
         } catch (e) { if (n === seq) { list.hidden = true; lerr.textContent = e.message; } }
-        finally { if (n === seq) { list.disabled = false; listBtn.disabled = false; listBtn.textContent = "List backups"; } }
+        finally { if (n === seq) { list.disabled = false; listBtn.disabled = false; listBtn.textContent = "List backups"; canGo(); } }
       }
       listBtn.addEventListener("click", listFiles);
-      const bpw = h("input", { type: "password", autocomplete: "new-password", placeholder: "Backup password", "aria-label": "Password the backup was made with" });
-      const check = h("button", { type: "button", class: "btn" }, "Check backup");
-      check.addEventListener("click", async () => {
-        check.disabled = true; check.textContent = "Checking…"; rerr.textContent = "";
+      go.addEventListener("click", async () => {
+        go.disabled = true; go.textContent = "Opening…"; rerr.textContent = "";
+        let prepared = false;
         try {
           let body;
           if (src.value === "upload") {
             if (!fileIn.files[0]) throw new Error("Choose the backup file first.");
             await apiUpload("/api/backup/upload", fileIn.files[0]);
-            body = { source: "upload", password: bpw.value };
+            body = { source: "upload" };
           } else {
             if (list.hidden || list.disabled || !list.value) throw new Error(src.value === "other" ? "List the backups and pick one." : "Pick a backup.");
-            body = { source: "server", file: list.value, password: bpw.value, ...serverArg() };
+            body = { source: "server", file: list.value, ...serverArg() };
           }
           const r = (await api("POST", "/api/backup/restore/prepare", body)).data;
-          bpw.value = ""; o.pw.value = "";
-          confirmBox(r);
-        } catch (e) { fail(e.message); } finally { check.disabled = false; check.textContent = "Check backup"; }
+          prepared = true;
+          o.pw.value = "";
+          const warn = [];
+          if (!r.same_node) warn.push("This is a backup of another node (" + r.node + "): this node becomes " + r.node + ". Never do this while " + r.node + " is still running.");
+          if (r.newer) warn.push("It was made by a newer version (" + r.version + ") than this node runs.");
+          const ok = confirm("Restore the backup of " + r.node + " made " + r.created + "?\n\nThis node's settings and keys are replaced and it restarts. The old ones are kept next to its state directory." + (warn.length ? "\n\n" + warn.join("\n") : ""));
+          if (!ok) throw new Error("");   // declined: drop what was opened
+          await api("POST", "/api/backup/restore/apply", {});
+          go.textContent = "Restarting…";
+          const wait = async () => { try { const r2 = await fetch("/api/session", { credentials: "same-origin" }); if (r2.status < 500) { location.reload(); return; } } catch (_) { /* still down */ } setTimeout(wait, 3000); };
+          setTimeout(wait, 6000);
+          return;   // the button stays as it is until the page reloads
+        } catch (e) {
+          rerr.textContent = e.message;
+          if (prepared) api("POST", "/api/backup/restore/cancel", {}).catch(() => {});
+        }
+        go.textContent = "Restore"; canGo();
       });
       function serverArg() {
         if (src.value.startsWith("s")) return { index: Number(src.value.slice(1)) };
@@ -3765,56 +3771,26 @@
       const sync = () => {
         const other = src.value === "other";
         seq++;
-        otherBox.hidden = !other; fileIn.hidden = src.value !== "upload"; listBtn.hidden = !other; list.hidden = true; list.disabled = false; rerr.textContent = ""; lerr.textContent = ""; rinfo.textContent = "";
+        otherBox.hidden = !other; fileIn.hidden = src.value !== "upload"; listBtn.hidden = !other; list.hidden = true; list.disabled = false; rerr.textContent = ""; lerr.textContent = "";
+        canGo();
         if (src.value.startsWith("s")) listFiles();
       };
       src.addEventListener("change", () => { chosen = true; sync(); });
-      let known = null, pendingShown = false;
+      let known = null;
       restoreFrom = (v) => {
         const tl = v.targets || [];
         const sig = JSON.stringify(tl.map((t) => [t.label, t.host, t.user]));
-        if (sig !== known) {
-          known = sig;
-          const was = src.value;
-          [...src.options].filter((op) => op.value.startsWith("s")).forEach((op) => op.remove());
-          tl.forEach((t, i) => src.insertBefore(h("option", { value: "s" + i }, t.label), otherOpt));
-          if (chosen && [...src.options].some((op) => op.value === was)) src.value = was;
-          else { chosen = chosen && !was.startsWith("s"); src.value = !chosen && tl.length ? "s0" : (was.startsWith("s") ? "other" : was); }
-          sync();
-        }
-        if (v.pending_restore && !pendingShown) { pendingShown = true; confirmBox(v.pending_restore); }
+        if (sig === known) return;
+        known = sig;
+        const was = src.value;
+        [...src.options].filter((op) => op.value.startsWith("s")).forEach((op) => op.remove());
+        tl.forEach((t, i) => src.insertBefore(h("option", { value: "s" + i }, t.label), otherOpt));
+        if (chosen && [...src.options].some((op) => op.value === was)) src.value = was;
+        else { chosen = chosen && !was.startsWith("s"); src.value = !chosen && tl.length ? "s0" : (was.startsWith("s") ? "other" : was); }
+        sync();
       };
       sync();
-      const pick = h("div", { class: "bk-restore" }, h("div", { class: "toolbar tight" }, src, listBtn, list, fileIn, lerr), otherBox,
-        h("div", { class: "toolbar nomargin" }, bpw, check, rinfo, rerr));
-      const conf = h("div", { hidden: true });
-      function confirmBox(r) {
-        const warn = [];
-        if (!r.same_node) warn.push("From another node (" + r.node + "): this node becomes " + r.node + ". Never while the original is running.");
-        if (r.newer) warn.push("Made by a newer version (" + r.version + ").");
-        const cerr = h("span", { class: "bad-text small" });
-        const restoreBtn = h("button", { type: "button", class: "btn danger", title: "Replaces this node's state (the old one is kept as …before-restore-…) and restarts the service" }, "Restore and restart");
-        restoreBtn.addEventListener("click", async () => {
-          restoreBtn.disabled = true; restoreBtn.textContent = "Restarting…"; cerr.textContent = "";
-          try {
-            await api("POST", "/api/backup/restore/apply", {});
-            const wait = async () => { try { const r2 = await fetch("/api/session", { credentials: "same-origin" }); if (r2.status < 500) { location.reload(); return; } } catch (_) { /* still down */ } setTimeout(wait, 3000); };
-            setTimeout(wait, 6000);
-          } catch (e) { restoreBtn.disabled = false; restoreBtn.textContent = "Restore and restart"; cerr.textContent = e.message; }
-        });
-        const cancel = h("button", { type: "button", class: "btn" }, "Cancel");
-        cancel.addEventListener("click", async () => {
-          try { await api("POST", "/api/backup/restore/cancel", {}); } catch (_) { /* nothing prepared */ }
-          conf.hidden = true; pick.hidden = false;
-        });
-        clear(conf).append(
-          h("dl", { class: "kv" }, h("dt", {}, "Node"), h("dd", {}, r.node), h("dt", {}, "Made"), h("dd", {}, r.created),
-            h("dt", {}, "Version"), h("dd", {}, String(r.version)), h("dt", {}, "Files"), h("dd", {}, String(r.files))),
-          ...warn.map((w) => h("p", { class: "bad-text" }, w)),
-          h("div", { class: "toolbar nomargin" }, restoreBtn, cancel, cerr));
-        conf.hidden = false; pick.hidden = true;
-      }
-      rbody.replaceChildren(pick, conf);
+      rbody.replaceChildren(h("div", { class: "bk-restore" }, h("div", { class: "toolbar nomargin" }, src, listBtn, list, fileIn, lerr, go, rerr), otherBox));
     }
     restoreUI();
     show();
@@ -3824,8 +3800,7 @@
     return {
       el,
       get() {
-        const o = fs.get();
-        const b = Object.fromEntries(Object.entries(o).filter(([, x]) => x !== "" && x !== 0 && x !== false));
+        const b = bcfg.password ? { password: bcfg.password } : {};   // the old archive password, kept to open old archives
         const ts = rows().map((tr) => tr._get()).filter((t) => Object.keys(t).length);
         if (ts.length) b.targets = ts;
         return Object.keys(b).length ? b : undefined;

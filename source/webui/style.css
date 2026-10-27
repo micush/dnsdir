@@ -735,10 +735,8 @@ table.arules tr.flash { outline: 2px solid var(--accent); outline-offset: -2px; 
 .bk-table td input.bk-port, .bk-table td input.bk-keep { width: 4.8rem; min-width: 0; }
 .bk-table td input.bk-name, .bk-table td input.bk-user { min-width: 6rem; }
 .bk-table td input.bk-host, .bk-table td input.bk-dir { min-width: 9rem; }
-.bk-foot { margin-top: .9rem; }
 .bk-keyform input[type=password] { width: 18rem; }
 .bk-table tbody tr { cursor: default; }
-.bk-foot input.grow { flex: 1 1 14rem; min-width: 10rem; width: auto; font-size: .8rem; }
 .kv + .bad-text, .kv + .toolbar.nomargin { margin-top: 1rem; }
 .bk-restore select, .bk-restore input[type=text], .bk-restore input[type=password], .bk-restore input[type=number] { width: auto; flex: 0 1 14rem; min-width: 8rem; }
 .bk-restore input.arule-n { flex: 0 0 5rem; min-width: 0; }

@@ -35,9 +35,10 @@ import (
 // puts it on a server of the operator's, over SFTP.  The archives are named after the node, and only the newest few are
 // kept there.  The settings are shared by the cluster; the SSH key is each node's own.
 //
-// The archive is a tar.gz that is sealed in 64 KiB pieces with AES-256-GCM; the key comes from the password with
-// PBKDF2-HMAC-SHA256.  The password is part of the configuration, so it is in the backup itself: keep it somewhere else
-// too, because it is the one thing a restore cannot read out of the archive.
+// The archive is a tar.gz that is sealed in 64 KiB pieces with AES-256-GCM; the key comes from a password with
+// PBKDF2-HMAC-SHA256.  Since v592 there is no password to set: the archives are sealed with an empty one, which keeps the
+// format (and its check for a cut-off or changed file) but anyone with the file can open it.  Archives that v583-v591
+// made with a password are opened with the one still in the settings (BackupConfig.Password), or the one given.
 
 const (
 	backupProduct  = "dnsdir"
@@ -67,8 +68,10 @@ type BackupTarget struct {
 
 // BackupConfig is the "backup" block of the shared settings (Configure ▸ Backup).
 type BackupConfig struct {
-	Targets  []BackupTarget `json:"targets,omitempty"`
-	Password string         `json:"password,omitempty"`
+	Targets []BackupTarget `json:"targets,omitempty"`
+	// Password is what the archives of v583-v591 were sealed with.  It is no longer set or used for new archives; a restore
+	// tries it when an archive does not open without one.
+	Password string `json:"password,omitempty"`
 	// When backups run is a Scheduler task (action "backup").  Enabled, Hours and At are the schedule of v583-v591: when the
 	// configuration is read, migrateBackupSchedule turns them into such a task and clears them.
 	Enabled bool   `json:"enabled,omitempty"`
@@ -190,8 +193,6 @@ func (c *BackupConfig) Validate() error {
 	if c.At != "" && !backupAtRe.MatchString(c.At) {
 		return errors.New("backup: the time of day is HH:MM")
 	}
-	// the archive password is whatever the person types, any length, or nothing (then the archives are sealed with an
-	// empty password: anyone with the file can open it)
 	return nil
 }
 
@@ -678,6 +679,9 @@ func runSFTP(ctx context.Context, t *BackupTarget, dir string, script, password 
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
+	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
+		return "", errors.New(backupMissingTool("sftp"))
+	}
 	if err != nil {
 		msg := strings.TrimSpace(out.String())
 		if i := strings.LastIndexByte(msg, '\n'); i >= 0 {
@@ -694,10 +698,22 @@ func runSFTP(ctx context.Context, t *BackupTarget, dir string, script, password 
 // backupKeygen makes the node's SSH key (replaceable in tests).
 var backupKeygen = func(file, comment string) error {
 	out, err := exec.Command(envOr(backupEnv+"_SSHKEYGEN", "ssh-keygen"), "-q", "-t", "ed25519", "-N", "", "-C", comment, "-f", file).CombinedOutput()
+	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
+		return errors.New(backupMissingTool("ssh-keygen"))
+	}
 	if err != nil {
-		return fmt.Errorf("ssh-keygen: %s", strings.TrimSpace(string(out)))
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("could not make the SSH key (ssh-keygen: %s)", msg)
 	}
 	return nil
+}
+
+// backupMissingTool says which OpenSSH program this node lacks and what to install.
+func backupMissingTool(name string) string {
+	return name + " is not installed on this node: install the OpenSSH client (openssh-client, or openssh-clients on RHEL/Fedora)"
 }
 
 func envOr(k, d string) string {
@@ -1074,7 +1090,7 @@ func (e *BackupEngine) backup(c *BackupConfig, targets []BackupTarget) error {
 	if err != nil {
 		return fail(err)
 	}
-	files, err := writeBackupArchive(f, c.Password, e.stateDir, e.confFile, e.nodeName(), began)
+	files, err := writeBackupArchive(f, "", e.stateDir, e.confFile, e.nodeName(), began)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -1394,19 +1410,26 @@ func (e *BackupEngine) pendingSummary() map[string]any {
 // PrepareRestore opens the backup file with the password and keeps what is in it, checked, for the restart.
 func (e *BackupEngine) PrepareRestore(file, password, actor string) (map[string]any, error) {
 	pd := pendingDir(e.stateDir)
-	if err := os.RemoveAll(pd); err != nil {
-		return nil, err
+	var man *backupManifest
+	var err error
+	for _, pw := range e.restorePasswords(password) {
+		if err = os.RemoveAll(pd); err != nil {
+			return nil, err
+		}
+		if err = os.MkdirAll(filepath.Join(pd, "data"), 0o700); err != nil {
+			return nil, err
+		}
+		var f *os.File
+		if f, err = os.Open(file); err != nil {
+			os.RemoveAll(pd)
+			return nil, err
+		}
+		man, err = readBackupArchive(f, pw, filepath.Join(pd, "data"))
+		f.Close()
+		if !errors.Is(err, errBackupPassword) {
+			break
+		}
 	}
-	if err := os.MkdirAll(filepath.Join(pd, "data"), 0o700); err != nil {
-		return nil, err
-	}
-	f, err := os.Open(file)
-	if err != nil {
-		os.RemoveAll(pd)
-		return nil, err
-	}
-	defer f.Close()
-	man, err := readBackupArchive(f, password, filepath.Join(pd, "data"))
 	if err != nil {
 		os.RemoveAll(pd)
 		return nil, err
@@ -1426,6 +1449,19 @@ func (e *BackupEngine) PrepareRestore(file, password, actor string) (map[string]
 	}
 	warnf("backup: %s prepared the restore of a backup of %s from %s", actor, man.Node, man.Created)
 	return e.pendingSummary(), nil
+}
+
+// restorePasswords are the passwords to try on an archive, in order: the one given, none (archives since v592), and the
+// one in the settings (archives of v583-v591).
+func (e *BackupEngine) restorePasswords(given string) []string {
+	out := []string{given}
+	if given != "" {
+		out = append(out, "")
+	}
+	if c := e.cfg(); c != nil && c.Password != "" && c.Password != given {
+		out = append(out, c.Password)
+	}
+	return out
 }
 
 // CancelRestore forgets a prepared restore.
@@ -1750,7 +1786,16 @@ func runRestore(file, pwFile, stateDir, conf, sock string) error {
 	case os.Getenv(backupEnv+"_BACKUP_PASSWORD") != "":
 		pw = os.Getenv(backupEnv + "_BACKUP_PASSWORD")
 	default:
-		fmt.Fprint(os.Stderr, "Backup password: ")
+		// archives since v592 have no password: ask only for an older one that needs it
+		man, aside, err := restoreBackup(file, "", stateDir, conf)
+		if !errors.Is(err, errBackupPassword) {
+			if err != nil {
+				return err
+			}
+			restoredMsg(man, aside, stateDir)
+			return nil
+		}
+		fmt.Fprint(os.Stderr, "This backup was made with a password (v583-v591). Backup password: ")
 		tty := false
 		if fi, err := os.Stdin.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
 			tty = true
@@ -1771,8 +1816,12 @@ func runRestore(file, pwFile, stateDir, conf, sock string) error {
 	if err != nil {
 		return err
 	}
+	restoredMsg(man, aside, stateDir)
+	return nil
+}
+
+func restoredMsg(man *backupManifest, aside, stateDir string) {
 	fmt.Printf("Restored the backup of %s (%s, v%s) into %s.\n", man.Node, man.Created, man.Version, stateDir)
 	fmt.Printf("What was there before is in %s; delete it when you no longer need it.\n", aside)
 	fmt.Printf("Start the service again: systemctl start %s\n", backupProduct)
-	return nil
 }

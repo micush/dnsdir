@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -612,5 +613,51 @@ func TestPendingRestoreIsAppliedAtStart(t *testing.T) {
 	}
 	if m, _ := filepath.Glob(state + ".before-restore-*"); len(m) != 1 {
 		t.Fatalf("the old state is not kept: %v", m)
+	}
+}
+
+// New archives have no password; a restore opens them, and opens one of v583-v591 with the password still in the settings.
+func TestBackupRestoreNeedsNoPassword(t *testing.T) {
+	cfg := &BackupConfig{Targets: []BackupTarget{{Host: "h", User: "u"}}}
+	e, _, _ := newBackupRig(t, cfg)
+	src := t.TempDir()
+	writeTree(t, src, map[string]string{"dnsdir.conf": "CONF"})
+	mk := func(pw string) string {
+		f := filepath.Join(t.TempDir(), "b"+backupExt)
+		var buf bytes.Buffer
+		if _, err := writeBackupArchive(&buf, pw, src, filepath.Join(src, "dnsdir.conf"), "ns1", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		os.WriteFile(f, buf.Bytes(), 0o600)
+		return f
+	}
+	if _, err := e.PrepareRestore(mk(""), "", "t"); err != nil {
+		t.Fatalf("new archive: %v", err)
+	}
+	old := mk("old secret")
+	if _, err := e.PrepareRestore(old, "", "t"); !errors.Is(err, errBackupPassword) {
+		t.Fatalf("an old archive opened without its password: %v", err)
+	}
+	cfg.Password = "old secret"
+	if _, err := e.PrepareRestore(old, "", "t"); err != nil {
+		t.Fatalf("old archive with the settings' password: %v", err)
+	}
+	cfg.Password = ""
+	if _, err := e.PrepareRestore(old, "old secret", "t"); err != nil {
+		t.Fatalf("old archive with the given password: %v", err)
+	}
+}
+
+// A node without the OpenSSH client gets an error that says so, not an empty one.
+func TestBackupSaysWhatIsMissing(t *testing.T) {
+	t.Setenv(backupEnv+"_SSHKEYGEN", "/nonexistent/ssh-keygen")
+	err := backupKeygen(filepath.Join(t.TempDir(), "k"), "c")
+	if err == nil || !strings.Contains(err.Error(), "not installed") || !strings.Contains(err.Error(), "openssh-client") {
+		t.Fatalf("%v", err)
+	}
+	t.Setenv(backupEnv+"_SFTP", "/nonexistent/sftp")
+	_, err = runSFTP(context.Background(), &BackupTarget{Host: "h", User: "u"}, t.TempDir(), "ls\n", "")
+	if err == nil || !strings.Contains(err.Error(), "sftp is not installed") {
+		t.Fatalf("%v", err)
 	}
 }

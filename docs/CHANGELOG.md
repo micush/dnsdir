@@ -1,5 +1,38 @@
 # Changelog
 
+## [v592] - 2026-10-27 — Backup page: no password, one Restore button, no SSH key row
+
+### Changed
+- **No backup password.** The password field is gone. New archives are sealed without a password: the AES-GCM framing stays, so a cut-off or changed file is still refused, but anyone who can read the file can open it, private keys included. The help and the README say to keep the backup directories private.
+  - A restore first tries without a password. If that fails, it tries the password still in the settings from v583-v591, so older archives still open.
+  - The page keeps that old password in the settings without showing it.
+  - `dnsdir --restore` asks for a password only when an archive needs one. `--restore-password-file` and `DNSDIR_BACKUP_PASSWORD` remain for those older archives.
+- **One Restore button.** *Check backup*, the backup-password field, and the details block with *Restore and restart* / *Cancel* are gone.
+  - Pick where the backup is and which one, then press **Restore**.
+  - The node opens and checks the archive, then asks one confirmation naming the node and date, with warnings for another node's backup or a newer version.
+  - Confirming restarts the node into the backup. Declining drops what was unpacked.
+  - **Restore** stays disabled until a backup is picked or a file is chosen.
+- **Schedule card**: a two-line list (Last backup, Next backup) with the buttons under it (**Back up now**, **Schedule daily backups** / **Open Scheduler**), instead of text between buttons.
+- **The "SSH key of …" row on the Servers card is gone.** **Install key…** puts the keys on a server. `dnsdir --backup-status` still prints the node's key for anyone who adds it by hand.
+
+### Fixed
+- **A node without the OpenSSH client** showed just "ssh-keygen:", with nothing after it. It now says "ssh-keygen is not installed on this node: install the OpenSSH client (openssh-client, or openssh-clients on RHEL/Fedora)", and the same for a missing `sftp`. Other ssh-keygen failures say "could not make the SSH key (…)" with the reason.
+- An error while listing a server's backups now shows beside the server list, not after the Restore button.
+
+### Verified
+- `gofmt -l .` (empty), `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64. The PAM path was checked only on the native amd64 build.
+- New tests:
+  - `TestBackupRestoreNeedsNoPassword`: an archive without a password opens; an old one opens with the settings' password or the one given, and not without it.
+  - `TestBackupSaysWhatIsMissing`: missing `ssh-keygen` or `sftp`.
+- `TestHelpCoversEveryField` no longer looks for `BACKUP_FIELDS`, which is gone; the server columns are covered by a Fields section in the help.
+- Live, with a scratch daemon, a real PAM user and Chromium in light and dark:
+  - No password field and no Check backup button anywhere on the page.
+  - With a file uploaded, **Restore** asked once. Declining left nothing pending and brought the button back. Accepting restarted the daemon, which swapped in the archive's files and kept the old state in `state.before-restore-…`.
+  - With a configured server, the missing-ssh-keygen message showed beside the list and Restore stayed disabled. Restore was disabled for an upload with no file and enabled once a file was chosen.
+
+### Not verified
+- Listing, fetching and restoring from a real SFTP server: the sandbox has no OpenSSH client.
+
 ## [v591] - 2026-10-27 — Backups run from the Scheduler; restore uses the configured servers; archive password without limits
 
 ### Changed

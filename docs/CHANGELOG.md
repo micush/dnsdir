@@ -1,5 +1,14 @@
 # Changelog
 
+## [v604] - 2026-10-28 — The Topology colour key is always on screen
+
+### Fixed
+- **The Topology page's colour key (working, degraded, down, not yet known, paused, active) showed only sometimes.** It sits under the drawing, so with a drawing taller than the window (a gateway with many servers and domains) it was below the bottom of the window until the page was scrolled down. It now sticks to the bottom of the window, on the page's background, wherever the page is scrolled. When the drawing fits, it sits right under it as before.
+
+### Verified
+- `gofmt -l .` (empty), `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64.
+- Headless Chromium, light and dark, in a window 380 px tall so the drawing does not fit: the key was inside the window both at the top of the page and scrolled to the bottom.
+
 ## [v603] - 2026-10-28 — Gateways in the Node menu for Alerts, Capture and Log; Cluster for Log
 
 ### Added

@@ -54,7 +54,8 @@ type DNSFrontend struct {
 	dohPort int
 	ctx     context.Context
 	cancel  context.CancelFunc
-	wg      sync.WaitGroup
+	wg      sync.WaitGroup // every goroutine of the frontend, the queries being answered included
+	lwg     sync.WaitGroup // the loops that hold a listening socket: when they are done, its port is free
 	sem     chan struct{}
 
 	fmu    sync.Mutex
@@ -118,19 +119,63 @@ func (f *DNSFrontend) Start() error {
 	f.ctx, f.cancel = context.WithCancel(context.Background())
 	f.sem = make(chan struct{}, maxInflight)
 	f.wg.Add(2)
+	f.lwg.Add(2)
 	go f.serveUDP(udp)
 	go f.serveTCP(tcp)
 	infof("dns: proxy listening on %s (udp+tcp)", f.listenAddr())
-	f.startDoTLocked(lc, netw)
-	f.startDoHLocked(lc, netw)
+	if !f.startDoTLocked(lc, netw, false) {
+		f.retryLocked(func() bool { return f.startDoTLocked(lc, netw, true) })
+	}
+	if !f.startDoHLocked(lc, netw, false) {
+		f.retryLocked(func() bool { return f.startDoHLocked(lc, netw, true) })
+	}
 	return nil
 }
 
+// retryLocked tries to open a DoT or DoH listener again every dnsRetryEvery until it opens or the frontend stops: a port
+// still held for a moment by a listener being closed used to leave it off until the gateway was restarted.
+func (f *DNSFrontend) retryLocked(try func() bool) {
+	if dnsRetryEvery <= 0 {
+		return // switched off (the tests, whose gateways and listeners are never stopped)
+	}
+	ctx := f.ctx
+	go func() {
+		t := time.NewTicker(dnsRetryEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+			f.mu.Lock()
+			if f.ctx != ctx || ctx.Err() != nil {
+				f.mu.Unlock()
+				return
+			}
+			ok := try()
+			f.mu.Unlock()
+			if ok {
+				return
+			}
+		}
+	}()
+}
+
 func (f *DNSFrontend) Stop() {
+	if drain := f.stopListening(); drain != nil {
+		drain()
+	}
+}
+
+// stopListening closes the frontend's sockets and returns once their ports are free (the loops that held them have
+// ended), so that a listener opened right after on the same address can have them.  The queries still being answered
+// are left running: the returned func waits for them (nil when the frontend was not running).
+func (f *DNSFrontend) stopListening() (drain func()) {
 	f.mu.Lock()
 	if f.udp == nil {
 		f.mu.Unlock()
-		return
+		return nil
 	}
 	f.cancel()
 	f.udp.Close()
@@ -145,16 +190,27 @@ func (f *DNSFrontend) Stop() {
 	}
 	f.udp, f.tcp = nil, nil
 	f.mu.Unlock()
-	// The sockets are closed and the context cancelled, so in-flight queries end on their own; but one stuck in an
-	// upstream call must not hold up whoever stopped us (a gateway restart holds the engine lock around this).  After
-	// dnsStopWait the stragglers are left to finish by themselves: they only touch their own, closed, sockets.
-	done := make(chan struct{})
-	go func() { f.wg.Wait(); close(done) }()
+	// A closed socket is only let go of by the kernel once no goroutine is blocked on it any more: wait for the loops
+	// (a moment), not for the queries.
+	lw := make(chan struct{})
+	go func() { f.lwg.Wait(); close(lw) }()
 	select {
-	case <-done:
-		infof("dns: proxy on %s stopped", f.listenAddr())
+	case <-lw:
 	case <-time.After(dnsStopWait):
-		warnf("dns: proxy on %s stopped; some queries were still running after %v and are left to finish on their own", f.listenAddr(), dnsStopWait)
+		warnf("dns: the sockets of %s took more than %v to close", f.listenAddr(), dnsStopWait)
+	}
+	return func() {
+		// The sockets are closed and the context cancelled, so in-flight queries end on their own; but one stuck in an
+		// upstream call must not hold up whoever stopped us (a gateway restart holds the engine lock around this).  After
+		// dnsStopWait the stragglers are left to finish by themselves: they only touch their own, closed, sockets.
+		done := make(chan struct{})
+		go func() { f.wg.Wait(); close(done) }()
+		select {
+		case <-done:
+			infof("dns: proxy on %s stopped", f.listenAddr())
+		case <-time.After(dnsStopWait):
+			warnf("dns: proxy on %s stopped; some queries were still running after %v and are left to finish on their own", f.listenAddr(), dnsStopWait)
+		}
 	}
 }
 
@@ -434,6 +490,7 @@ func (f *DNSFrontend) endFlight(key string, call *flightCall) {
 
 func (f *DNSFrontend) serveUDP(pc net.PacketConn) {
 	defer f.wg.Done()
+	defer f.lwg.Done() // after rep.close below: the duplicate of the socket keeps the port too
 	bigRcvBuf(pc)
 	rep := newUDPReplier(pc)
 	defer rep.close() // after the readers are gone; the Stop that closed pc also waits for the workers
@@ -573,6 +630,7 @@ func (f *DNSFrontend) streamRelease(key netip.Addr) {
 
 func (f *DNSFrontend) serveTCP(l net.Listener) {
 	defer f.wg.Done()
+	defer f.lwg.Done() // the accept loop has let go of the listening socket
 	for {
 		c, err := l.Accept()
 		if err != nil {
@@ -709,45 +767,57 @@ var dotCertificate func(*tls.ClientHelloInfo) (*tls.Certificate, error)
 
 // startDoTLocked opens the DNS-over-TLS listener (RFC 7858) when a port is set. A failure is logged and
 // leaves plain DNS running. Clients are served exactly as over TCP: length-prefixed messages on one
-// connection, the same idle limit.
-func (f *DNSFrontend) startDoTLocked(lc net.ListenConfig, netw string) {
-	if f.dotPort == 0 {
-		return
+// connection, the same idle limit.  It returns false when the listener could not be opened (Start then tries again
+// every dnsRetryEvery; retry marks such a later try, which logs nothing until it succeeds).
+func (f *DNSFrontend) startDoTLocked(lc net.ListenConfig, netw string, retry bool) bool {
+	if f.dotPort == 0 || f.dot != nil {
+		return true
 	}
 	addr := net.JoinHostPort(f.addr.String(), strconv.Itoa(f.dotPort))
 	if dotCertificate == nil {
-		errorf("dns: cannot serve DNS over TLS on %s: no certificate is available", addr)
-		return
+		if !retry {
+			errorf("dns: cannot serve DNS over TLS on %s: no certificate is available", addr)
+		}
+		return false
 	}
 	l, err := lc.Listen(context.Background(), "tcp"+netw, addr)
 	if err != nil {
-		errorf("dns: cannot listen for DNS over TLS on %s: %v", addr, err)
-		return
+		if !retry {
+			errorf("dns: cannot listen for DNS over TLS on %s: %v (trying again every %v)", addr, err, dnsRetryEvery)
+		}
+		return false
 	}
 	f.dot = tls.NewListener(l, &tls.Config{GetCertificate: dotCertificate, MinVersion: tls.VersionTLS12, NextProtos: []string{"dot"}})
 	f.wg.Add(1)
+	f.lwg.Add(1)
 	go f.serveTCP(f.dot)
 	infof("dns: DNS over TLS listening on %s", addr)
+	return true
 }
 
 // dohPath is where DNS over HTTPS is served (RFC 8484's usual path).
 const dohPath = "/dns-query"
 
 // startDoHLocked opens the DNS-over-HTTPS listener when a port is set (HTTP/2 and HTTP/1.1, TLS 1.2+, the
-// web GUI's certificate). A failure is logged and leaves the other listeners running.
-func (f *DNSFrontend) startDoHLocked(lc net.ListenConfig, netw string) {
-	if f.dohPort == 0 {
-		return
+// web GUI's certificate). A failure is logged and leaves the other listeners running; false and retry as for
+// startDoTLocked.
+func (f *DNSFrontend) startDoHLocked(lc net.ListenConfig, netw string, retry bool) bool {
+	if f.dohPort == 0 || f.doh != nil {
+		return true
 	}
 	addr := net.JoinHostPort(f.addr.String(), strconv.Itoa(f.dohPort))
 	if dotCertificate == nil {
-		errorf("dns: cannot serve DNS over HTTPS on %s: no certificate is available", addr)
-		return
+		if !retry {
+			errorf("dns: cannot serve DNS over HTTPS on %s: no certificate is available", addr)
+		}
+		return false
 	}
 	l, err := lc.Listen(context.Background(), "tcp"+netw, addr)
 	if err != nil {
-		errorf("dns: cannot listen for DNS over HTTPS on %s: %v", addr, err)
-		return
+		if !retry {
+			errorf("dns: cannot listen for DNS over HTTPS on %s: %v (trying again every %v)", addr, err, dnsRetryEvery)
+		}
+		return false
 	}
 	srv := &http.Server{
 		Handler:           http.HandlerFunc(f.serveDoH),
@@ -761,11 +831,14 @@ func (f *DNSFrontend) startDoHLocked(lc net.ListenConfig, netw string) {
 	f.doh = srv
 	tl := tls.NewListener(l, &tls.Config{GetCertificate: dotCertificate, MinVersion: tls.VersionTLS12, NextProtos: []string{"h2", "http/1.1"}})
 	f.wg.Add(1)
+	f.lwg.Add(1)
 	go func() {
 		defer f.wg.Done()
+		defer f.lwg.Done()
 		srv.Serve(tl)
 	}()
 	infof("dns: DNS over HTTPS listening on %s%s", addr, dohPath)
+	return true
 }
 
 // serveDoH answers one DNS-over-HTTPS request: a POST whose body is the DNS message, or a GET with the

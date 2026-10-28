@@ -37,3 +37,5 @@ func makeTgz(t *testing.T, files []srcFile) []byte {
 }
 
 func timeNow() time.Time { return time.Now().UTC() }
+
+func init() { dnsRetryEvery = 0 } // see dnsRetryEvery; the tests of the retries set it themselves

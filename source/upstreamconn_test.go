@@ -303,3 +303,94 @@ func TestRecoverPanicFromCatches(t *testing.T) {
 		t.Fatal("the panic was not counted")
 	}
 }
+
+// A frontend's ports are free as soon as stopListening returns, even with a client connected and queries running: a
+// new frontend on the same address starts at once (a gateway restart used to lose this race now and then).
+func TestFrontendPortsAreFreeWhenStopListeningReturns(t *testing.T) {
+	up := newFakeDNS(t)
+	p := NewPool(testDNSCfg(up.addr))
+	p.ProbeNow(context.Background())
+	crt, key, err := generateSelfSigned()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, _ := tls.X509KeyPair(crt, key)
+	old := dotCertificate
+	dotCertificate = func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return &cert, nil }
+	t.Cleanup(func() { dotCertificate = old })
+	port, dport, hport := freeTCPPort(t), freeTCPPort(t), freeTCPPort(t)
+	mk := func() *DNSFrontend {
+		fe := NewDNSFrontend(mustAddr("127.0.0.1"), port, func() *Pool { return p })
+		fe.dotPort, fe.dohPort = dport, hport
+		return fe
+	}
+	fe := mk()
+	if err := fe.Start(); err != nil {
+		t.Skipf("cannot bind: %v", err)
+	}
+	for i := 0; i < 30; i++ {
+		// a client holds a TCP connection, and one sits in a DoT handshake
+		c1, _ := net.Dial("tcp", "127.0.0.1:"+itoa(port))
+		c2, _ := net.Dial("tcp", "127.0.0.1:"+itoa(dport))
+		drain := fe.stopListening()
+		fe = mk()
+		if err := fe.Start(); err != nil {
+			t.Fatalf("round %d: %v", i, err)
+		}
+		fe.mu.Lock()
+		dot, doh := fe.dot != nil, fe.doh != nil
+		fe.mu.Unlock()
+		if !dot || !doh {
+			t.Fatalf("round %d: DoT %v, DoH %v after the restart", i, dot, doh)
+		}
+		if c1 != nil {
+			c1.Close()
+		}
+		if c2 != nil {
+			c2.Close()
+		}
+		go drain()
+	}
+	fe.Stop()
+}
+
+// A DoT or DoH port that is taken when the frontend starts is tried again until it is free.
+func TestFrontendRetriesATakenDoTPort(t *testing.T) {
+	old := dnsRetryEvery
+	dnsRetryEvery = 50 * time.Millisecond
+	t.Cleanup(func() { dnsRetryEvery = old })
+	up := newFakeDNS(t)
+	p := NewPool(testDNSCfg(up.addr))
+	crt, key, _ := generateSelfSigned()
+	cert, _ := tls.X509KeyPair(crt, key)
+	oldc := dotCertificate
+	dotCertificate = func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return &cert, nil }
+	t.Cleanup(func() { dotCertificate = oldc })
+	port, dport := freeTCPPort(t), freeTCPPort(t)
+	busy, err := net.Listen("tcp4", "127.0.0.1:"+itoa(dport))
+	if err != nil {
+		t.Skip(err)
+	}
+	fe := NewDNSFrontend(mustAddr("127.0.0.1"), port, func() *Pool { return p })
+	fe.dotPort = dport
+	if err := fe.Start(); err != nil {
+		t.Skipf("cannot bind: %v", err)
+	}
+	defer fe.Stop()
+	fe.mu.Lock()
+	if fe.dot != nil {
+		t.Fatal("DoT opened on a taken port")
+	}
+	fe.mu.Unlock()
+	busy.Close()
+	for i := 0; i < 40; i++ {
+		time.Sleep(25 * time.Millisecond)
+		fe.mu.Lock()
+		ok := fe.dot != nil
+		fe.mu.Unlock()
+		if ok {
+			return
+		}
+	}
+	t.Fatal("DoT did not open once its port was free")
+}

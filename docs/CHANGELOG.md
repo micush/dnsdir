@@ -1,5 +1,33 @@
 # Changelog
 
+## [v601] - 2026-10-28 — A gateway restart can no longer leave it without a DNS listener
+
+### Fixed
+- **After switching DoT (then DoH) off, the gateway stopped answering until it was paused and resumed.** In the field log (ns1, 15:09:29) the change restarted the gateway:
+  ```
+  dns: proxy on 192.168.5.56:53 stopped
+  dns: cannot listen on 192.168.5.56:53: listen tcp4 192.168.5.56:53: bind: address already in use
+  dns: cannot listen for DNS over HTTPS on [fdf5:168:5::56]:443: ... address already in use
+  ```
+  Nothing tried again, so the VIP had no listener at all (the alert "DNS listener down" opened).
+  - **Cause:** when a gateway stopped, its listeners were closed in the background (`go fe.Stop()`), and the new listeners were opened at once. A closed socket is only let go of by the kernel once the goroutine blocked on it has woken up and left, so the new listener could find the port still taken.
+  - **Cause:** a listener that could not be opened, on the VIP, a further shared address, or the DoT or DoH port, was never tried again.
+- **Now: ports are free before the new listeners open.** Stopping a gateway's listeners (`stopListening`) closes the sockets and waits until the loops that held them have ended, which takes a moment, before it returns. Only the wait for queries still being answered goes on in the background, as before. Every path that stops a gateway's listeners uses it.
+- **Now: a listener that cannot be opened is tried again** every 2 s until it opens or the gateway stops. One error is logged ("… (trying again every 2s)"), then "listening on … again". The VIP and its further addresses are retried by the gateway; a DoT or DoH port by its frontend.
+
+### Verified
+- `gofmt -l .` (empty), `go vet ./...`, `go test -race -count=1 ./...` (four runs, all passing after the fix below), `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64.
+- New test `TestFrontendPortsAreFreeWhenStopListeningReturns`: 30 stop-and-restart rounds with a TCP client connected and a DoT handshake pending, each needing UDP, TCP, DoT and DoH to reopen at once. With the old background close put back, it fails in round 0 ("bind: address already in use"), so it catches the bug.
+- New test `TestFrontendRetriesATakenDoTPort`: a DoT port held by another socket opens once freed.
+- One full `-race` run failed on the first version of this fix: a retry armed by an earlier test's gateway (tests never stop their gateways) fired during a later test. Retries are now off in the tests (`dnsRetryEvery = 0`) except in the retry tests themselves.
+- Live, with a gateway on `lo` (VIP 127.0.0.10) under continuous UDP queries and two clients holding TCP connections:
+  - **Toggling:** 4 rounds of DoT off, DoH off, then both on again. The VIP answered after every change, with 0 failed queries in 6818.
+  - **Retry:** the listen port was changed to one another process held. The error was logged with "trying again every 2s", the VIP did not answer, and it came back by itself ("listening on 127.0.0.10:15354 again") when the other process let go.
+  - **v600 the same way:** it did not lose the race here (2 failed queries, no bind error). The race depends on timing, so the unit test above is the proof.
+
+### Not verified
+- A real two-node cluster on a real interface.
+
 ## [v600] - 2026-10-28 — The gateway circle says which protocols it serves
 
 ### Added

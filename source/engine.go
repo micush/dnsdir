@@ -133,6 +133,9 @@ type Engine struct {
 	dnsFE      *DNSFrontend
 	dnsMore    []*DNSFrontend // listeners of the further shared addresses
 	dnsLoAdded bool
+	// dnsRetrying: a DNS listener could not be opened and is tried again every dnsRetryEvery; dnsRetryArmed: the
+	// timer for the next try is set
+	dnsRetrying, dnsRetryArmed bool
 
 	leaving bool // told the group we are going: no more hellos
 }
@@ -1307,21 +1310,58 @@ func (e *Engine) setupDNSLocked(macvlanUp bool) {
 			e.dnsLoAdded = true
 		}
 	}
-	if e.dnsFE != nil {
-		e.startMoreDNSLocked()
+	e.startDNSListenersLocked(vip)
+}
+
+// startDNSListenersLocked opens the DNS listener on the VIP and on each further shared address that has none.  One that
+// cannot be opened (its port still held for a moment by a listener being closed, say) is tried again every two seconds
+// until it opens or the gateway stops: a listener that failed once used to stay down until the gateway was restarted.
+func (e *Engine) startDNSListenersLocked(vip string) {
+	if e.dnsFE == nil {
+		addr, err := vipAddr(vip)
+		if err != nil {
+			return
+		}
+		fe := e.newDNSFrontendLocked(addr)
+		if err := fe.Start(); err != nil {
+			if !e.dnsRetrying {
+				errorf("dns: cannot listen on %s: %v (trying again every %v)", fe.listenAddr(), err, dnsRetryEvery)
+			}
+			e.retryDNSLocked(vip)
+			return
+		}
+		if e.dnsRetrying {
+			infof("dns: listening on %s again", fe.listenAddr())
+		}
+		e.dnsFE = fe
+	}
+	if !e.startMoreDNSLocked() {
+		e.retryDNSLocked(vip)
 		return
 	}
-	addr, err := vipAddr(vip)
-	if err != nil {
+	e.dnsRetrying = false
+}
+
+// dnsRetryEvery is how often a DNS listener that could not be opened is tried again; 0 switches the retries off (the
+// tests do, except those of the retries: their engines and listeners are mostly never stopped, so a retry would go on
+// running into the next test).
+var dnsRetryEvery = 2 * time.Second
+
+func (e *Engine) retryDNSLocked(vip string) {
+	e.dnsRetrying = true
+	if e.dnsRetryArmed || dnsRetryEvery <= 0 {
 		return
 	}
-	fe := e.newDNSFrontendLocked(addr)
-	if err := fe.Start(); err != nil {
-		errorf("dns: cannot listen on %s: %v", fe.listenAddr(), err)
-		return
-	}
-	e.dnsFE = fe
-	e.startMoreDNSLocked()
+	e.dnsRetryArmed = true
+	time.AfterFunc(dnsRetryEvery, func() {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		e.dnsRetryArmed = false
+		if !e.running || !e.dnsRetrying {
+			return // the gateway stopped, or its listeners were torn down and set up again meanwhile
+		}
+		e.startDNSListenersLocked(e.cfg.vipFor(e.af)) // the address as it is now
+	})
 }
 
 func (e *Engine) newDNSFrontendLocked(addr netip.Addr) *DNSFrontend {
@@ -1333,8 +1373,9 @@ func (e *Engine) newDNSFrontendLocked(addr netip.Addr) *DNSFrontend {
 	return fe
 }
 
-// startMoreDNSLocked opens a listener for each further shared address that has none yet.
-func (e *Engine) startMoreDNSLocked() {
+// startMoreDNSLocked opens a listener for each further shared address that has none yet; false when one could not be.
+func (e *Engine) startMoreDNSLocked() bool {
+	ok := true
 	have := map[netip.Addr]bool{}
 	for _, f := range e.dnsMore {
 		have[f.addr] = true
@@ -1346,31 +1387,46 @@ func (e *Engine) startMoreDNSLocked() {
 		}
 		fe := e.newDNSFrontendLocked(addr)
 		if err := fe.Start(); err != nil {
-			errorf("dns: cannot listen on %s: %v", fe.listenAddr(), err)
+			if !e.dnsRetrying {
+				errorf("dns: cannot listen on %s: %v (trying again every %v)", fe.listenAddr(), err, dnsRetryEvery)
+			}
+			ok = false
 			continue
 		}
 		e.dnsMore = append(e.dnsMore, fe)
 	}
+	return ok
 }
 
 func (e *Engine) stopMoreDNSLocked(wait bool) {
 	more := e.dnsMore
 	e.dnsMore = nil
 	for _, f := range more {
+		drain := f.stopListening() // the ports are free when this returns (see teardownDNSLocked)
+		if drain == nil {
+			continue
+		}
 		if wait {
-			f.Stop()
+			drain()
 		} else {
-			go f.Stop()
+			go drain()
 		}
 	}
 }
 
 func (e *Engine) teardownDNSLocked() {
+	e.dnsRetrying = false // a retry armed before is for listeners that are no longer wanted
 	e.stopMoreDNSLocked(false)
 	if e.dnsFE != nil {
 		fe := e.dnsFE
 		e.dnsFE = nil
-		go fe.Stop() // Stop waits for in-flight queries; never block the engine
+		// The sockets are closed (and their ports free) before this returns, so a listener opened right after on
+		// the same address does not find the port still taken; only the wait for queries still running goes on in
+		// the background (it must never block the engine).  Closing them in the background too was a race that a
+		// quick restart of the gateway (a DoT or DoH port switched off) could lose, leaving it with no listener.
+		if drain := fe.stopListening(); drain != nil {
+			go drain()
+		}
 	}
 	if e.dnsLoAdded {
 		e.delLoVIPsLocked()
@@ -1388,6 +1444,7 @@ func (e *Engine) RestartDNS() {
 	}
 	fe := e.dnsFE
 	e.dnsFE = nil
+	e.dnsRetrying = false
 	fe.Stop()
 	e.stopMoreDNSLocked(true)
 	e.setupDNSLocked(true)

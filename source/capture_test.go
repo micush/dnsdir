@@ -523,10 +523,10 @@ func TestClusterCaptureBundlesEveryNode(t *testing.T) {
 	l, _ := net.ListenPacket("udp", "127.0.0.1:0")
 	defer l.Close()
 	port := l.LocalAddr().(*net.UDPAddr).Port
-	if _, err := a.mg.CaptureClusterStart("lo", "udp and dst port "+itoa(port), 2, "tester"); err != nil {
+	if _, err := a.mg.CaptureClusterStart("lo", "udp and dst port "+itoa(port), 2, 0, "tester"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.mg.CaptureClusterStart("lo", "", 2, "tester"); err == nil || !strings.Contains(err.Error(), "already running") {
+	if _, err := a.mg.CaptureClusterStart("lo", "", 2, 0, "tester"); err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Errorf("a second job at once: %v", err)
 	}
 	time.Sleep(600 * time.Millisecond)
@@ -567,7 +567,7 @@ func TestClusterCaptureBundlesEveryNode(t *testing.T) {
 
 	// a node that cannot be asked is named in errors.txt and the others still make the bundle
 	b.mg.webH = nil
-	if _, err := a.mg.CaptureClusterStart("lo", "", 1, "tester"); err != nil {
+	if _, err := a.mg.CaptureClusterStart("lo", "", 1, 0, "tester"); err != nil {
 		t.Fatal(err)
 	}
 	j = waitJob(t, a.mg)
@@ -582,7 +582,7 @@ func TestClusterCaptureBundlesEveryNode(t *testing.T) {
 		t.Fatalf("one node down: bad %d ready %v files %v", bad, j.Ready, keys(files))
 	}
 	// an interface the nodes do not have: every node says so, and there is nothing to download
-	if _, err := a.mg.CaptureClusterStart("nonesuch0", "", 1, "tester"); err != nil {
+	if _, err := a.mg.CaptureClusterStart("nonesuch0", "", 1, 0, "tester"); err != nil {
 		t.Fatal(err)
 	}
 	j = waitJob(t, a.mg)
@@ -601,7 +601,7 @@ func TestClusterCaptureRefusals(t *testing.T) {
 		secs          int
 		want          string
 	}{{"lo", "", 0, "1 to 60"}, {"lo", "", 61, "1 to 60"}, {"", "", 5, "interface"}, {"lo", "port x", 5, "filter"}} {
-		if _, err := e.mg.CaptureClusterStart(c.iface, c.filter, c.secs, "t"); err == nil || !strings.Contains(err.Error(), c.want) {
+		if _, err := e.mg.CaptureClusterStart(c.iface, c.filter, c.secs, 0, "t"); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%+v: %v", c, err)
 		}
 	}
@@ -681,7 +681,7 @@ func TestClusterCaptureOutlastsTheFailoverTimeout(t *testing.T) {
 	l, _ := net.ListenPacket("udp", "127.0.0.1:0")
 	defer l.Close()
 	port := l.LocalAddr().(*net.UDPAddr).Port
-	if _, err := a.mg.CaptureClusterStart("lo", "udp and dst port "+itoa(port), 8, "tester"); err != nil {
+	if _, err := a.mg.CaptureClusterStart("lo", "udp and dst port "+itoa(port), 8, 0, "tester"); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(time.Second)

@@ -314,7 +314,14 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 	case "capture.job.get":
 		return m.CaptureJobGet(a.ID)
 	case "capture.cluster.start":
-		return m.CaptureClusterStart(a.Iface, a.Filter, a.Seconds, actor)
+		gid := 0
+		if strings.TrimSpace(a.QGW) != "" {
+			var err error
+			if gid, err = strconv.Atoi(strings.TrimSpace(a.QGW)); err != nil || gid < 1 {
+				return nil, errors.New("bad gateway number")
+			}
+		}
+		return m.CaptureClusterStart(a.Iface, a.Filter, a.Seconds, gid, actor)
 	case "capture.cluster.bundle":
 		b, err := m.CaptureClusterBundle()
 		return map[string]any{"tgz": b}, err

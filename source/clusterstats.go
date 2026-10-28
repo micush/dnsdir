@@ -50,7 +50,10 @@ type clusterTarget struct {
 
 // clusterTargets lists the cluster's nodes, this node first as the cluster view has it, named by host name (or by
 // address when two nodes share a name, as the Node menu does).  Not clustered: this node alone.
-func clusterTargets(m *Mgmt) []clusterTarget {
+func clusterTargets(m *Mgmt) []clusterTarget { return clusterTargetsSel(m, nil) }
+
+// clusterTargetsSel is clusterTargets with only the nodes keep accepts (nil: all).
+func clusterTargetsSel(m *Mgmt, keep func(PeerView) bool) []clusterTarget {
 	var peers []PeerView
 	if m.cl != nil && m.cl.Enabled() {
 		peers = m.cl.View().Peers
@@ -64,6 +67,9 @@ func clusterTargets(m *Mgmt) []clusterTarget {
 	}
 	var out []clusterTarget
 	for _, p := range peers {
+		if keep != nil && !keep(p) {
+			continue
+		}
 		t := clusterTarget{Name: p.Hostname, Addr: p.Addr, Self: p.Self}
 		if t.Name == "" || same[p.Hostname] > 1 {
 			t.Name = p.Addr

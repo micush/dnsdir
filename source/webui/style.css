@@ -143,17 +143,22 @@ td.wrap { white-space: normal; word-break: break-word; max-width: 28rem; }
 
 .bar-wrap { display: inline-block; width: 90px; height: 6px; border-radius: 3px; background: var(--surface-2); vertical-align: middle; margin-right: .6rem; overflow: hidden; }
 /* the same column widths in every gateway's table, so the cards line up */
-table.dns { table-layout: fixed; min-width: 62rem; }
-table.dns th:nth-child(1) { width: 3rem; }
+table.dns { table-layout: fixed; min-width: 64rem; }   /* narrower screens scroll it sideways */
+table.dns th:nth-child(1) { width: 3.5rem; }
 table.dns th:nth-child(2) { width: 10rem; }
-table.dns th:nth-child(3) { width: 11rem; }
-table.dns th:nth-child(4) { width: 4.5rem; }
+table.dns th:nth-child(3) { width: auto; }   /* the address takes what is left, and wraps */
+table.dns th:nth-child(4) { width: 5rem; }
 table.dns th:nth-child(5) { width: 9rem; }
-table.dns th:nth-child(6) { width: 5rem; }
-table.dns th:nth-child(7), table.dns th:nth-child(8) { width: 3rem; }
-table.dns th:nth-child(9) { width: 5rem; }
-table.dns td:nth-child(3) { overflow-wrap: anywhere; }
+table.dns th:nth-child(6) { width: 5.5rem; }
+table.dns th:nth-child(7), table.dns th:nth-child(8) { width: 3.5rem; }
+table.dns th:nth-child(9) { width: 5.5rem; }
+table.dns td:nth-child(3) { white-space: normal; overflow-wrap: anywhere; }
 table.dns td.sname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.dns tr.has-err td { border-bottom: 0; }
+table.dns tr.err td { padding-top: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.answering { white-space: normal; overflow-wrap: anywhere; }
+table.alerts .subj { white-space: normal; overflow-wrap: anywhere; }   /* a long server address wraps rather than pushing the State column off */
+table.alerts td:nth-last-child(2) { white-space: normal; min-width: 9rem; }   /* State: "acknowledged by …" wraps too */
 .bar-fill { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
 
 .notice { padding: 0; margin: 0 0 .5rem; font-size: .85rem; background: none; border: 0; }
@@ -391,6 +396,8 @@ td input[type=date] { width: 11rem; }
 .logbox { height: calc(100vh - 20rem); min-height: 16rem; overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-family: var(--mono); font-size: .78rem; }
 .logline { display: grid; grid-template-columns: 9.5rem 3.6rem 1fr; gap: .6rem; padding: .12rem .6rem; border-bottom: 1px solid var(--border); }
 .logline .lt { color: var(--muted); white-space: nowrap; }
+.logbox.nodes .logline { grid-template-columns: 9.5rem 12rem 3.6rem 1fr; }   /* Cluster or a gateway: the node after the time */
+.logline .ln { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .logline .lm { white-space: pre-wrap; overflow-wrap: anywhere; }
 .logline.lv-warn { background: var(--warn-bg); }
 .logline.lv-error { background: var(--bad-bg); }
@@ -400,7 +407,7 @@ td input[type=date] { width: 11rem; }
 .logbox mark { background: var(--info-bg); color: inherit; border-radius: 2px; }
 .toolbar.logbar select, .toolbar.logbar .btn { width: auto; flex: 0 0 auto; }
 .toolbar.logbar input.grow { width: auto; flex: 1 1 8rem; min-width: 8rem; }
-@media (max-width: 640px) { .logline { grid-template-columns: 8rem 1fr; gap: .1rem .6rem; } .logline .lm { grid-column: 1 / -1; } }
+@media (max-width: 640px) { .logline, .logbox.nodes .logline { grid-template-columns: 8rem 1fr; gap: .1rem .6rem; } .logline .lm { grid-column: 1 / -1; } }
 
 /* Monitor → Statistics.  Colours are fixed per entity (validated for both themes). */
 :root {

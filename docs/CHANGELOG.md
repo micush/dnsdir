@@ -1,5 +1,59 @@
 # Changelog
 
+## [v603] - 2026-10-28 — Gateways in the Node menu for Alerts, Capture and Log; Cluster for Log
+
+### Added
+- **The Node menu offers each gateway on Monitor ▸ Alerts, Capture and Log**, as it already did on Statistics and Host. A gateway means the nodes that serve it.
+  - **Alerts:** the alerts of those nodes that are about this gateway (its servers, pool, listener, election), plus the ones about the node itself (CPU, memory, disk, certificate, backup). Another gateway's alerts are left out.
+    - Each alert now records `gateways`, the group numbers it is about. It is set when the alert opens and kept up to date while it is open, so alerts opened by v602 get it on their next check.
+  - **Capture:** runs only on those nodes, on the gateway's interface, and keeps only the packets to and from its addresses (VIPs, further shared addresses, anycast addresses). A filter you type narrows that further: `(host … or host …) and (filter)`.
+    - API: `POST /api/clustercapture/start` takes `gw` instead of `iface`.
+    - The bundle's `summary.txt` names the gateway.
+  - **Log:** the logs of those nodes merged by time, with the node after the time. Lines are not split by gateway.
+- **Monitor ▸ Log ▸ Node ▸ Cluster:** every node's log merged the same way.
+  - The line count is for all nodes together, and **Download** puts the node at the start of each line.
+  - A node that does not answer is named in red under the list.
+
+### Changed
+- The cluster Capture page lost its explanatory line (it is in the help).
+
+### Verified
+- `gofmt -l .` (empty), `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64.
+- New tests:
+  - `TestAlertCarriesItsGateways`: an alert opens with its gateways and follows a change while open.
+  - `TestGatewayCaptureFilter`: the address filter, with prefixes stripped and duplicates dropped, compiles alone and combined.
+  - `TestClusterCaptureOfAGateway`: the gateway's interface and filter are used, and an unknown gateway is refused.
+- Live, with a two-node cluster on 127.0.0.1 and two gateways (7 on both nodes, "lab" on node b only), in headless Chromium, light and dark:
+  - **Node menu:** both nodes, both gateways, then Cluster.
+  - **Alerts:** gateway 7 showed node a's gateway-7 alert and node b's gateway-7 and CPU alerts, without b's lab alert. Lab showed b's lab and CPU alerts only. Cluster showed all of them.
+  - **Log:** gateway 7 merged both nodes' lines with the node shown on each.
+  - **Capture:** lab ran on node b only, on `lo`, with the filter `(host 127.0.0.20) and (udp)`. Of 308 packets seen while UDP was sent to .20 and .21, it kept 31: the 30 sent to .20, plus one.
+
+### Not verified
+- Gateways whose interface has a different name on different nodes. The gateway interface is shared, so this cannot happen today.
+
+## [v602] - 2026-10-28 — Alerts for the whole cluster; Monitor ▸ DNS no longer cramped by long addresses
+
+### Added
+- **Monitor ▸ Alerts ▸ Node ▸ Cluster:** every node's alerts in one list, open ones first and then newest first, with a **Node** column. The Silences table gets a Node column too. Acknowledge, Silence, Mark resolved and Fix go to the node that raised the alert. **Go to** opens that page on that node. A node that does not answer is named in red above the list, and the others are still shown.
+
+### Fixed
+- **Monitor ▸ DNS:** a long server address (`https://[2001:4860:4860::8888]:443/dns-query`) ran over the State pill, and **Last error** was squeezed into a narrow, very tall column.
+  - The address column now takes the space left over and wraps.
+  - The last error is on its own line under the server's row, the full width of the table, cut to one line (point at it for the whole text).
+  - The "answering on …" list in the card header wraps.
+  - Below about 1100 px the table scrolls sideways instead of squeezing.
+- **Monitor ▸ Alerts:** a long subject (a DoH URL) wraps, and so does "acknowledged by …", so the State column no longer gets pushed out of the card.
+
+### Verified
+- `gofmt -l .` (empty), `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64.
+- Live in headless Chromium, light and dark:
+  - **Monitor ▸ DNS:** a gateway with IPv6, DoT, DoH and a server given by name, at 1280 and 1000 px wide.
+  - **Alerts:** a two-node cluster on 127.0.0.1 with seeded alerts on each node. Cluster showed the three alerts with their nodes. Acknowledge and then Unacknowledge on node b's alert, done from node a's GUI, changed it on node b only (checked through b's API).
+
+### Not verified
+- Go to from the cluster list to another node's page (code path only).
+
 ## [v601] - 2026-10-28 — A gateway restart can no longer leave it without a DNS listener
 
 ### Fixed

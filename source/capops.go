@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -209,6 +211,7 @@ type CaptureJob struct {
 	Seconds int            `json:"seconds"`
 	Iface   string         `json:"iface"`
 	Filter  string         `json:"filter"`
+	Gateway int            `json:"gateway,omitempty"` // only the nodes of this gateway, only its addresses
 	Done    bool           `json:"done"`
 	Ready   bool           `json:"ready"` // there is a bundle to download
 	Error   string         `json:"error,omitempty"`
@@ -225,18 +228,46 @@ type capJobs struct {
 }
 
 // CaptureClusterStart starts a capture on every node and returns at once; the job is polled with CaptureClusterStatus.
-func (m *Mgmt) CaptureClusterStart(iface, filter string, seconds int, actor string) (*CaptureJob, error) {
+// With a gateway (gid > 0) it runs only on the nodes that serve it, on its interface, and keeps only the packets to and
+// from its addresses (and the filter, when there is one).
+func (m *Mgmt) CaptureClusterStart(iface, filter string, seconds, gid int, actor string) (*CaptureJob, error) {
 	if seconds < 1 || seconds > capRunMaxSeconds {
 		return nil, fmt.Errorf("the capture time must be 1 to %d seconds", capRunMaxSeconds)
 	}
-	if iface == "" {
-		return nil, errors.New("choose the interface to capture on")
+	if len(filter) > capFilterMax {
+		return nil, fmt.Errorf("the filter is too long (at most %d characters)", capFilterMax)
 	}
 	if _, err := compileCapFilter(filter); err != nil {
 		return nil, err
 	}
-	if len(filter) > capFilterMax {
-		return nil, fmt.Errorf("the filter is too long (at most %d characters)", capFilterMax)
+	var keep func(PeerView) bool
+	where := "every node"
+	if gid > 0 {
+		dc, _, err := m.LiveConfig()
+		if err != nil {
+			return nil, err
+		}
+		g, err := findGroup(dc, gid)
+		if err != nil {
+			return nil, err
+		}
+		keep, where = gatewayNodes(g), "the nodes of gateway "+strconv.Itoa(gid)
+		if iface == "" {
+			iface = g.Interface
+		}
+		if hosts := gatewayCapHosts(g); hosts != "" {
+			if strings.TrimSpace(filter) == "" {
+				filter = hosts
+			} else {
+				filter = "(" + hosts + ") and (" + filter + ")"
+			}
+		}
+		if _, err := compileCapFilter(filter); err != nil {
+			return nil, err
+		}
+	}
+	if iface == "" {
+		return nil, errors.New("choose the interface to capture on")
 	}
 	m.capjobs.mu.Lock()
 	if cur := m.capjobs.cur; cur != nil {
@@ -249,21 +280,37 @@ func (m *Mgmt) CaptureClusterStart(iface, filter string, seconds int, actor stri
 		}
 	}
 	m.capjobs.seq++
-	job := &CaptureJob{ID: m.capjobs.seq, Started: time.Now(), Seconds: seconds, Iface: iface, Filter: filter}
+	job := &CaptureJob{ID: m.capjobs.seq, Started: time.Now(), Seconds: seconds, Iface: iface, Filter: filter, Gateway: gid}
 	m.capjobs.cur = job
 	m.capjobs.mu.Unlock()
-	warnf("capture: %s started a %d s packet capture on every node, on %s (filter %q)", actor, seconds, iface, filter)
-	go job.run(m, actor)
+	warnf("capture: %s started a %d s packet capture on %s, on %s (filter %q)", actor, seconds, where, iface, filter)
+	go job.run(m, actor, keep)
 	return job, nil
+}
+
+// gatewayCapHosts is a capture filter for the addresses of a gateway: its VIPs, further shared addresses and anycast
+// addresses ("host A or host B ...", "" when it has none).
+func gatewayCapHosts(g *GroupConfig) string {
+	var hosts []string
+	seen := map[string]bool{}
+	for _, a := range append(append(append([]string{g.VIP4, g.VIP6}, g.MoreVIP4...), g.MoreVIP6...), g.ExtraVIPs...) {
+		a, _, _ = strings.Cut(strings.TrimSpace(a), "/")
+		if net.ParseIP(a) == nil || seen[a] {
+			continue
+		}
+		seen[a] = true
+		hosts = append(hosts, "host "+a)
+	}
+	return strings.Join(hosts, " or ")
 }
 
 var capNameRe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
 // run starts the capture on every node (this one directly, the others through the cluster relay), asks each node for
 // its result until the time is over, and bundles them.  Every request is a quick one.
-func (j *CaptureJob) run(m *Mgmt, actor string) {
+func (j *CaptureJob) run(m *Mgmt, actor string, keep func(PeerView) bool) {
 	token := randHex(8)
-	targets := clusterTargets(m)
+	targets := clusterTargetsSel(m, keep)
 	nodes := make([]*CaptureNode, len(targets))
 	for i, t := range targets {
 		nodes[i] = &CaptureNode{Name: t.Name, Addr: t.Addr, Self: t.Self, Iface: j.Iface, Status: "running"}
@@ -409,6 +456,12 @@ func (j *CaptureJob) bundle() {
 		}
 	}
 	summary := fmt.Sprintf("Capture on %s for %d s, filter %q, started %s\n", j.Iface, j.Seconds, j.Filter, j.Started.Format(time.RFC3339))
+	if j.Gateway > 0 {
+		summary = fmt.Sprintf("Gateway %d, its nodes only\n", j.Gateway) + summary
+	}
+	if j.Gateway > 0 {
+		summary = fmt.Sprintf("Gateway %d (its nodes only)\n", j.Gateway) + summary
+	}
 	for _, n := range nodes {
 		if n.Status == "done" {
 			summary += fmt.Sprintf("%s: %d packets kept (%d seen), %d bytes\n", n.Name, n.Kept, n.Seen, n.Bytes)

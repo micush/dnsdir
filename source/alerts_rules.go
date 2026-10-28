@@ -97,19 +97,19 @@ func (e *AlertEngine) sampleNode(now time.Time) []alertSample {
 			if sv.LastError != "" {
 				msg += ": " + sv.LastError
 			}
-			out = append(out, alertSample{Rule: "upstream_down", Subject: subj, Bad: !sv.Healthy, Message: msg})
+			out = append(out, alertSample{Rule: "upstream_down", Subject: subj, Bad: !sv.Healthy, Message: msg, Gateways: pi.Groups})
 		}
 		fb := pi.Pool.UsingFallback()
-		out = append(out, alertSample{Rule: "fallback_in_use", Subject: pl, Bad: fb, Message: "every normal server of " + pl + " is down, so only fallback servers answer"})
+		out = append(out, alertSample{Rule: "fallback_in_use", Subject: pl, Bad: fb, Message: "every normal server of " + pl + " is down, so only fallback servers answer", Gateways: pi.Groups})
 		q, f := pi.Pool.Queries.Load(), pi.Pool.Failed.Load()
 		dq, df, span := e.window(pl, now, q, f)
 		share := 0.0
 		if dq >= 20 {
 			share = 100 * float64(df) / float64(dq)
 		}
-		out = append(out, alertSample{Rule: "servfail_high", Subject: pl, Value: share, Bad: dq >= 20 && share > e.threshold("servfail_high"),
+		out = append(out, alertSample{Rule: "servfail_high", Subject: pl, Value: share, Gateways: pi.Groups, Bad: dq >= 20 && share > e.threshold("servfail_high"),
 			Message: fmt.Sprintf("%.1f%% of the queries of %s failed over the last %d minutes", share, pl, int(span.Minutes()+0.5))})
-		out = append(out, alertSample{Rule: "no_queries", Subject: pl, Bad: span >= alertCountWindow-30*time.Second && dq == 0,
+		out = append(out, alertSample{Rule: "no_queries", Subject: pl, Gateways: pi.Groups, Bad: span >= alertCountWindow-30*time.Second && dq == 0,
 			Message: pl + " has received no queries"})
 	}
 	type gk struct {
@@ -133,9 +133,9 @@ func (e *AlertEngine) sampleNode(now time.Time) []alertSample {
 	}
 	for k := range local {
 		subj := fmt.Sprintf("group %d %s", k.gid, k.af)
-		out = append(out, alertSample{Rule: "no_active_gateway", Subject: subj, Bad: !active[k], Message: "no node is the active gateway of " + subj})
+		out = append(out, alertSample{Rule: "no_active_gateway", Subject: subj, Bad: !active[k], Message: "no node is the active gateway of " + subj, Gateways: []int{k.gid}})
 		if serving[k] {
-			out = append(out, alertSample{Rule: "listener_down", Subject: subj, Bad: !up[k], Message: "this node serves " + subj + " but its DNS listener is not up"})
+			out = append(out, alertSample{Rule: "listener_down", Subject: subj, Bad: !up[k], Message: "this node serves " + subj + " but its DNS listener is not up", Gateways: []int{k.gid}})
 		}
 	}
 	if e.mg != nil {

@@ -108,14 +108,21 @@
   // Statistics also offers each gateway: the nodes that serve it, added together like Cluster.  (The numbers are kept per node,
   // so a node that serves several gateways counts all its traffic in each.)
   const GW = "*gw:";
-  const GW_TABS = ["stats", "host"];   // the pages that offer the gateways
+  const GW_TABS = ["stats", "host", "alerts", "capture", "log"];   // the pages that offer the gateways
   const isGw = () => typeof state.target === "string" && state.target.startsWith(GW);
+  const gwLabel = (g) => g.name || String(g.vip4 || g.vip6 || "").split("/")[0] || "gateway " + g.group_id;
+  const gwNodes = (g) => state.nodes.filter((p) => !(g.excluded_nodes || []).includes(p.node_id));   // the nodes that serve it
   const gwItems = () => (state.gws || []).map((g) => {
-    const n = state.nodes.filter((p) => !(g.excluded_nodes || []).includes(p.node_id)).length;
-    const label = g.name || String(g.vip4 || g.vip6 || "").split("/")[0] || "gateway " + g.group_id;
-    return n ? [GW + g.group_id, "Gateway " + label + " (" + n + ")", false] : null;
+    const n = gwNodes(g).length;
+    return n ? [GW + g.group_id, "Gateway " + gwLabel(g) + " (" + n + ")", false] : null;
   }).filter(Boolean);
-  const CLUSTER_TABS = ["stats", "host", "capture"];
+  const pickedGw = () => (isGw() ? (state.gws || []).find((g) => String(g.group_id) === state.target.slice(GW.length)) || null : null);
+  // the nodes a page about several nodes asks: every node for Cluster, a gateway's own for a gateway
+  const pickedNodes = () => (state.target === CLUSTER ? state.nodes : pickedGw() ? gwNodes(pickedGw()) : []);
+  const many = () => state.target === CLUSTER || isGw();
+  // a request to one given node (this one directly, another through the relay), whatever the Node menu says
+  const nodePath = (n, path) => (n.self ? path : "/api/proxy?node=" + encodeURIComponent(n.addr) + "&path=" + encodeURIComponent(path));
+  const CLUSTER_TABS = ["stats", "host", "capture", "alerts", "log"];
   const CLUSTER_API = [[/^\/api\/qstats(\?|$)/, "/api/clusterstats"], [/^\/api\/host(\?|$)/, "/api/clusterhost"], [/^\/api\/qstats\/clear$/, "/api/clusterstats"]];
   function route(path) {
     if (isGw()) { const to = /^\/api\/qstats(\?|$)/.test(path) ? "/api/clusterstats" : /^\/api\/host(\?|$)/.test(path) ? "/api/clusterhost" : ""; return to ? path.replace(/^\/api\/[a-z]+/, to) + (path.includes("?") ? "&" : "?") + "gw=" + encodeURIComponent(state.target.slice(GW.length)) : path; }
@@ -2278,11 +2285,12 @@
               h("span", { class: "spacer" }),
               (() => {
                 const on = (p.groups.length ? p.groups : [p.key]).flatMap((g) => addrsOf[g] || []);
-                return on.length ? h("span", { class: "mono small" }, "answering on " + on.join(" · ")) : h("span", { class: "muted small" }, "not answering on this node");
+                return on.length ? h("span", { class: "mono small answering" }, "answering on " + on.join(" · ")) : h("span", { class: "muted small" }, "not answering on this node");
               })()),
             h("div", { class: "scroll" }, h("table", { class: "dns" },
-              h("thead", {}, h("tr", {}, ["Rank", "Server name", "Server IP", "State", "Average (ms)", "Last (ms)", "OK", "Fail", "Served", "Last error"].map((t, i) => h("th", { class: i >= 4 && i <= 8 ? "num" : "", title: i === 4 ? "Average response time. Newer answers count more than older ones (Configure ▸ DNS ▸ Health & balancing ▸ Latency smoothing). Servers are ranked by it." : i === 5 ? "The latest single answer time" : null }, t)))),
-              h("tbody", {}, p.servers.map((s) => h("tr", {},
+              h("thead", {}, h("tr", {}, ["Rank", "Server name", "Server IP", "State", "Average (ms)", "Last (ms)", "OK", "Fail", "Served"].map((t, i) => h("th", { class: i >= 4 && i <= 8 ? "num" : "", title: i === 4 ? "Average response time. Newer answers count more than older ones (Configure ▸ DNS ▸ Health & balancing ▸ Latency smoothing). Servers are ranked by it." : i === 5 ? "The latest single answer time" : null }, t)))),
+              // a failing server's last error goes on a line of its own under its row, as wide as the table
+              h("tbody", {}, p.servers.flatMap((s) => [h("tr", { class: s.last_error ? "has-err" : "" },
                 h("td", {}, s.healthy && s.rank ? s.rank : "–"),
                 h("td", { class: "sname", title: s.name || null }, s.name || "–"),   // a long name is cut short; the whole is the tooltip
                 h("td", { class: "mono" }, s.addr, s.fallback ? [h("span", { class: "muted small fb-tag", title: "Used only while every other server is down" }, "fallback")] : null,
@@ -2292,8 +2300,7 @@
                 h("td", {}, pill(s.healthy ? "up" : "down", s.healthy ? "ok" : "bad")),
                 h("td", { class: "num" }, s.healthy ? h("span", { class: "bar-wrap" }, h("span", { class: "bar-fill" })) : null, s.healthy ? fmtMs(s.ewma_ms) : "–"),
                 h("td", { class: "num" }, s.last_ms > 0 ? fmtMs(s.last_ms) : "–"),
-                h("td", { class: "num" }, s.successes), h("td", { class: "num" }, s.failures), h("td", { class: "num" }, s.served),
-                h("td", { class: "wrap muted" }, s.last_error || ""))))))));
+                h("td", { class: "num" }, s.successes), h("td", { class: "num" }, s.failures), h("td", { class: "num" }, s.served)              ), s.last_error ? h("tr", { class: "err" }, h("td", { colspan: "9", class: "muted small", title: s.last_error }, s.last_error)) : null].filter(Boolean)))))));
           for (const s of p.servers) if (s.healthy) fills.push([s, maxE]);
         }
         morph(body, out);
@@ -5802,20 +5809,37 @@
       shown = r.lines;
       clear(box);
       if (!r.lines.length) box.append(h("div", { class: "empty" }, r.scanned ? "No log line matches these filters." : "The log is empty."));
+      box.classList.toggle("nodes", !!r.many);
       for (const l of r.lines) {
         box.append(h("div", { class: "logline lv-" + l.level.toLowerCase() },
-          h("span", { class: "lt" }, stamp(l.time)), h("span", { class: "ll" }, l.level), h("span", { class: "lm" }, marked(l.msg))));
+          h("span", { class: "lt" }, stamp(l.time)), r.many ? h("span", { class: "ln", title: l._node }, l._node) : null, h("span", { class: "ll" }, l.level), h("span", { class: "lm" }, marked(l.msg))));
       }
       if (stick || first) box.scrollTop = box.scrollHeight;
       clear(info).append(r.matched + " matching line" + (r.matched === 1 ? "" : "s") + " of " + r.scanned + " on disk" +
         (r.truncated ? "; showing the newest " + r.lines.length + " (older ones are cut: narrow the filters or raise the line count)" : "") +
         (r.oldest ? ". The log reaches back to " + when(r.oldest) + "." : "."));
+      if ((r.unreached || []).length) info.append(" ", h("span", { class: "bad-text" }, "Not reached: " + r.unreached.join(", ")));
+    }
+    // Cluster or a gateway: each node's log, asked for with the same filters, merged by time with the node on each line
+    async function loadMany(q) {
+      const res = await Promise.all(pickedNodes().map((n) => api("GET", nodePath(n, "/api/log?" + q), undefined, true).then((r) => ({ n, v: r.data }), (e) => ({ n, err: e.message }))));
+      const ok = res.filter((x) => x.v);
+      if (!ok.length) throw new Error(res.map((x) => nodeLabel(x.n) + ": " + x.err).join("; ") || "no node to ask");
+      const t = (l) => { const v = Date.parse(l.time); return isNaN(v) ? 0 : v; };
+      let lines = [];
+      for (const { n, v } of ok) for (const l of v.lines || []) lines.push({ ...l, _node: nodeLabel(n), _t: t(l) });
+      lines.sort((a, b) => a._t - b._t);
+      const max = Number(count.value), cut = lines.length > max;
+      if (cut) lines = lines.slice(lines.length - max);
+      const oldest = ok.map((x) => x.v.oldest).filter(Boolean).sort((a, b) => Date.parse(a) - Date.parse(b))[0] || "";
+      return { many: true, lines, matched: ok.reduce((a, x) => a + x.v.matched, 0), scanned: ok.reduce((a, x) => a + x.v.scanned, 0),
+        truncated: cut || ok.some((x) => x.v.truncated), oldest, unreached: res.filter((x) => !x.v).map((x) => nodeLabel(x.n) + " (" + x.err + ")") };
     }
     async function load() {
       const my = ++seq;
       const q = new URLSearchParams({ level: level.value, q: search.value.trim(), since: span.value, n: count.value });
       try {
-        const r = (await api("GET", "/api/log?" + q.toString())).data;
+        const r = many() ? await loadMany(q.toString()) : (await api("GET", "/api/log?" + q.toString())).data;
         if (my !== seq) return; // a newer request is on its way
         if (Date.now() > tsHold) clear(status);   // not while the troubleshooting bundle is saying something
         draw(r);
@@ -5833,7 +5857,7 @@
       tsBtn.disabled = false; tsHold = Date.now() + 20000;
     }
     function download() {
-      const text = shown.map((l) => l.raw).join("\n") + "\n";
+      const text = shown.map((l) => (l._node ? l._node + " " : "") + l.raw).join("\n") + "\n";
       const a = h("a", { href: URL.createObjectURL(new Blob([text], { type: "text/plain" })), download: "dnsdir-log.txt" });
       document.body.append(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -5853,7 +5877,8 @@
         tsBtn = h("button", { class: "btn", type: "button", onclick: tshoot }, "tshoot");
         info = h("div", { class: "hint nomargin" });
         box = h("div", { class: "logbox", tabindex: "0", role: "log", "aria-label": "Log lines" });
-        main.append(status, section("Log",
+        const gw = pickedGw();
+        main.append(status, section(gw ? "Log of gateway " + gwLabel(gw) : state.target === CLUSTER ? "Log of the cluster" : "Log",
           h("div", { class: "toolbar tight logbar" }, search, level, span, count,
             h("label", { class: "opt" }, live, " Live")),
           h("div", { class: "toolbar tight" },
@@ -5872,12 +5897,13 @@
   // ── Capture, Monitor  (CLI: --capture, --capture-interfaces) ────────────────────
   // One node: a tcpdump-like capture on the node picked in the Node menu, shown live and downloadable as a .tgz (one .pcap in it).
   // Cluster: the same capture on every node at once for a chosen time, one .pcap per node in a .tgz.
+  // A gateway: the same on the nodes that serve it, on its interface, only the packets to and from its addresses.
   VIEWS.capture = (() => {
     let keptFilter = "";   // the filter text survives a change of node (the page is built again for each)
     let status, iface, filter, info, box, startBtn, dlBtn, ifs = null, cursor = 0, shown = 0, last = null, running = false;
     let job = null, jobBox, durSel, goBtn, dlJob;
     const ROWS = 1500;
-    const cluster = () => state.target === CLUSTER;
+    const cluster = many;
     const sizeText = (n) => (n < 1024 ? n + " bytes" : n < 1048576 ? Math.round(n / 1024) + " KB" : (n / 1048576).toFixed(1) + " MB");
 
     const ifaceSelect = () => h("select", { "aria-label": "Interface", class: "capif" });
@@ -5962,7 +5988,8 @@
     }
     async function goAll() {
       try {
-        await api("POST", "/api/clustercapture/start", { iface: iface.value, filter: filter.value.trim(), seconds: Number(durSel.value) });
+        const gw = pickedGw();
+        await api("POST", "/api/clustercapture/start", gw ? { gw: String(gw.group_id), filter: filter.value.trim(), seconds: Number(durSel.value) } : { iface: iface.value, filter: filter.value.trim(), seconds: Number(durSel.value) });
         say(status, "ok");
         await pollJob();
       } catch (e) { fail(status)(e); }
@@ -5985,10 +6012,11 @@
           goBtn = h("button", { class: "btn primary", type: "button", onclick: goAll }, "Capture on all nodes");
           dlJob = h("button", { class: "btn", type: "button", disabled: true, onclick: () => apiDownload("/api/clustercapture/download", "dnsdir-cluster-capture.tgz").catch(fail(status)) }, "Download .tgz");
           jobBox = h("div", {});
-          main.append(status, section("Capture on every node",
-            h("div", { class: "hint nomargin" }, "Runs the same capture on every node of the cluster at the same time, for the time you choose, and bundles one .pcap per node in a .tgz. Each node keeps its newest packets (about 4 MB). The capture only listens."),
-            h("div", { class: "toolbar tight logbar" }, iface, filter, durSel, goBtn, dlJob), jobBox));
-          await loadIfaces().catch(fail(status));
+          const gw = pickedGw();
+          if (gw) goBtn.textContent = "Capture on its nodes";
+          main.append(status, section(gw ? "Capture on gateway " + gwLabel(gw) : "Capture on every node",
+            h("div", { class: "toolbar tight logbar" }, gw ? h("span", { class: "mono small" }, gw.interface) : iface, filter, durSel, goBtn, dlJob), jobBox));
+          if (!gw) await loadIfaces().catch(fail(status));
           await pollJob().catch(fail(status));
           return;
         }
@@ -6501,8 +6529,28 @@
     const dur = (s) => { s = Math.max(0, Math.round(s)); const d = Math.floor(s / 86400), hh = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
       return d ? d + "d " + hh + "h" : hh ? hh + "h " + m + "m" : m ? m + "m" : s + "s"; };
     const say2 = (t) => { note.textContent = t; setTimeout(() => { if (note.textContent === t) note.textContent = ""; }, 6000); };
-    async function call(path, body, done) {
-      try { const r = await api("POST", "/api/alerts/" + path, body); if (r.data && r.data.message) say2(r.data.message); clear(status); await VIEWS.alerts.poll(true); refreshAlertMark(); if (done) done(); } catch (e) { fail(status)(e); }
+    // Cluster (the Node menu): every node is asked for its alerts and the lists are put together; an action on an
+    // alert goes to the node that raised it.  n is a node of state.nodes, or undefined for the node the menu picked.
+    const ask = (n, method, path, body) => (n ? api(method, nodePath(n, path), body, true) : api(method, path, body));
+    async function call(path, body, done, n) {
+      try { const r = await ask(n, "POST", "/api/alerts/" + path, body); if (r.data && r.data.message) say2(r.data.message); clear(status); await VIEWS.alerts.poll(true); refreshAlertMark(); if (done) done(); } catch (e) { fail(status)(e); }
+    }
+    async function load() {
+      if (!many()) return (await api("GET", "/api/alerts")).data;
+      const gw = pickedGw();
+      const res = await Promise.all(pickedNodes().map((n) => ask(n, "GET", "/api/alerts").then((r) => ({ n, v: r.data }), (e) => ({ n, err: e.message }))));
+      const ok = res.filter((r) => r.v);
+      if (!ok.length) throw new Error(res.map((r) => nodeLabel(r.n) + ": " + r.err).join("; "));
+      const out = { node: gw ? "gateway " + gwLabel(gw) : "the cluster", cluster: true, now: Math.max(...ok.map((r) => r.v.now || 0)), rules: ok[0].v.rules || [], alerts: [], silences: [],
+        unreached: res.filter((r) => !r.v).map((r) => nodeLabel(r.n) + " (" + r.err + ")") };
+      for (const { n, v } of ok) {
+        // a gateway's: its own alerts and the ones about the node itself (CPU, disk, …), not another gateway's
+        for (const a of v.alerts || []) if (!gw || !(a.gateways || []).length || a.gateways.includes(gw.group_id)) out.alerts.push({ ...a, _n: n, _node: nodeLabel(n) });
+        for (const x of v.silences || []) out.silences.push({ ...x, _node: nodeLabel(n) });
+      }
+      // newest first, open before closed, as each node lists them
+      out.alerts.sort((a, b) => (!a.closed - !b.closed) * -1 || (b.opened - a.opened));
+      return out;
     }
     const copy = async (text) => { try { await navigator.clipboard.writeText(text); } catch (_) { /* no permission */ } };
     function draw(v) {
@@ -6518,14 +6566,15 @@
         const menu = (a) => {
           const d = rules[a.rule] || {};
           const more = [];
-          if (!a.closed) for (const f of d.fix || []) more.push([ALERT_FIX[f] || f, () => call("fix", { id: a.id, action: f })]);
-          if (d.go) more.push(["Go to " + (TABS.find((t) => t[0] === d.go) || [0, d.go])[1], () => selectTab(d.go)]);
+          if (!a.closed) for (const f of d.fix || []) more.push([ALERT_FIX[f] || f, () => call("fix", { id: a.id, action: f }, null, a._n)]);
+          // from the cluster's list: to that page of the node that raised it
+          if (d.go) more.push(["Go to " + (TABS.find((t) => t[0] === d.go) || [0, d.go])[1], () => { if (a._n) { state.tab = d.go; setTarget(a._n.self ? null : a._n.addr); } else selectTab(d.go); }]);
           more.push(["Edit rule…", () => { state.alertRule = a.rule; selectTab("cfg_alerts"); }]);
           const items = a.closed ? [["Copy", () => copy(text(a))], "-", ["More", more]] : [
-            a.acked ? ["Unacknowledge", () => call("ack", { id: a.id, ack: false })] : ["Acknowledge", () => call("ack", { id: a.id, ack: true })],
-            ["Silence…", [["15 minutes", 15], ["1 hour", 60], ["4 hours", 240], ["1 day", 1440], ["7 days", 10080]].map(([l, m]) => [l, () => call("silence", { id: a.id, minutes: m })])],
-            a.silenced_until ? ["Unsilence", () => call("silence", { id: a.id, minutes: 0 })] : null,
-            ["Mark resolved", () => call("resolve", { id: a.id })],
+            a.acked ? ["Unacknowledge", () => call("ack", { id: a.id, ack: false }, null, a._n)] : ["Acknowledge", () => call("ack", { id: a.id, ack: true }, null, a._n)],
+            ["Silence…", [["15 minutes", 15], ["1 hour", 60], ["4 hours", 240], ["1 day", 1440], ["7 days", 10080]].map(([l, m]) => [l, () => call("silence", { id: a.id, minutes: m }, null, a._n)])],
+            a.silenced_until ? ["Unsilence", () => call("silence", { id: a.id, minutes: 0 }, null, a._n)] : null,
+            ["Mark resolved", () => call("resolve", { id: a.id }, null, a._n)],
             ["Copy", () => copy(text(a))], "-", ["More", more]].filter(Boolean);
           return rowMenu(items);
         };
@@ -6539,8 +6588,9 @@
           return out;
         };
         const row = (a) => h("tr", { tabindex: "0", class: a.closed ? "paused" : "", oncontextmenu: menu(a) },
+          v.cluster ? h("td", {}, a._node) : null,
           h("td", {}, pill(a.severity, SEV[a.severity] || "")),
-          h("td", {}, a.title, a.subject ? h("div", { class: "mono small muted" }, a.subject) : null),
+          h("td", {}, a.title, a.subject ? h("div", { class: "mono small muted subj" }, a.subject) : null),
           h("td", { class: "wrap" }, a.message),
           h("td", { title: a.closed ? "closed " + at(a.closed) : "" }, at(a.opened), h("div", { class: "small muted" }, a.closed ? "lasted " + dur(a.closed - a.opened) : "for " + dur(v.now - a.opened))),
           h("td", {}, stateCell(a)),
@@ -6548,25 +6598,27 @@
         const closedBox = h("input", { type: "checkbox", checked: showClosed });
         closedBox.addEventListener("change", () => { showClosed = closedBox.checked; draw(v); });
         const crit = open.filter((a) => a.severity === "critical" && !a.silenced_until && !a.acked).length;
+        const heads = [...(v.cluster ? ["Node"] : []), "Severity", "Alert", "What is wrong", "Since", "State", ""];
         box.append(section("Alerts of " + v.node,
           h("div", { class: "toolbar" }, h("label", { class: "nt-opt" }, closedBox, " Show closed"),
-            h("span", { class: "muted small" }, open.length ? open.length + " open" + (crit ? ", " + crit + " critical" : "") : "Nothing is open.")),
+            h("span", { class: "muted small" }, open.length ? open.length + " open" + (crit ? ", " + crit + " critical" : "") : "Nothing is open."),
+            (v.unreached || []).length ? h("span", { class: "bad-text small" }, "Not reached: " + v.unreached.join(", ")) : null),
           h("div", { class: "scroll" }, h("table", { class: "tight alerts" },
-            h("thead", {}, h("tr", {}, ["Severity", "Alert", "What is wrong", "Since", "State", ""].map((x) => h("th", {}, x)))),
-            h("tbody", {}, list.length ? list.map(row) : h("tr", {}, h("td", { colspan: 6, class: "empty" }, showClosed ? "No alerts yet." : "No open alerts.")))))));
+            h("thead", {}, h("tr", {}, heads.map((x) => h("th", {}, x)))),
+            h("tbody", {}, list.length ? list.map(row) : h("tr", {}, h("td", { colspan: heads.length, class: "empty" }, showClosed ? "No alerts yet." : "No open alerts.")))))));
         if (v.silences.length) box.append(section("Silences",
           h("div", { class: "scroll" }, h("table", { class: "tight" },
-            h("thead", {}, h("tr", {}, ["Alert", "Subject", "Until", "By"].map((x) => h("th", {}, x)))),
-            h("tbody", {}, v.silences.map((s) => h("tr", {}, h("td", {}, (rules[s.rule] || { title: s.rule || "any" }).title), h("td", { class: "mono" }, s.subject || "any"), h("td", {}, at(s.until)), h("td", {}, s.by || ""))))))));
+            h("thead", {}, h("tr", {}, [...(v.cluster ? ["Node"] : []), "Alert", "Subject", "Until", "By"].map((x) => h("th", {}, x)))),
+            h("tbody", {}, v.silences.map((s) => h("tr", {}, v.cluster ? h("td", {}, s._node) : null, h("td", {}, (rules[s.rule] || { title: s.rule || "any" }).title), h("td", { class: "mono" }, s.subject || "any"), h("td", {}, at(s.until)), h("td", {}, s.by || ""))))))));
       } finally { morph(real, box); box = real; }
     }
     return {
       async mount(main) {
         status = h("div", { "aria-live": "polite" }); note = h("div", { class: "hint", "aria-live": "polite" }); box = h("div", {}); last = "";
         main.append(status, note, box);
-        try { draw((await api("GET", "/api/alerts")).data); } catch (e) { fail(status)(e); }
+        try { draw(await load()); } catch (e) { fail(status)(e); }
       },
-      async poll(force) { if (force) last = ""; draw((await api("GET", "/api/alerts")).data); },
+      async poll(force) { if (force) last = ""; draw(await load()); },
       poll_ms: 5000,
     };
   })();

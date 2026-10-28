@@ -222,6 +222,7 @@ type Alert struct {
 	ResolvedBy string  `json:"resolved_by,omitempty"`
 	Notified   int64   `json:"notified,omitempty"` // when somebody was last told (webhook)
 	Silenced   int64   `json:"silenced_until,omitempty"`
+	Gateways   []int   `json:"gateways,omitempty"` // the gateways (group numbers) it is about; none for an alert about the node itself
 }
 
 // Silence keeps the alerts that match quiet until it runs out.  An empty Rule or Subject matches any.
@@ -242,6 +243,7 @@ type alertSample struct {
 	Rule, Subject, Message string
 	Bad                    bool
 	Value                  float64
+	Gateways               []int
 }
 
 type alertTrack struct {
@@ -465,6 +467,9 @@ func (e *AlertEngine) feedLocked(now time.Time, key string, s alertSample, r rul
 		if s.Message != "" {
 			open.Message = s.Message
 		}
+		if s.Gateways != nil { // also fills in an alert opened by an older version
+			open.Gateways = s.Gateways
+		}
 		open.Severity = r.Severity
 		return notes
 	}
@@ -530,7 +535,7 @@ func (e *AlertEngine) openLocked(now time.Time, key string, s alertSample, r rul
 	a.Count++
 	e.opened++
 	a.Opened, a.Closed = now.Unix(), 0
-	a.Severity, a.Message, a.Value = r.Severity, s.Message, s.Value
+	a.Severity, a.Message, a.Value, a.Gateways = r.Severity, s.Message, s.Value, s.Gateways
 	a.Recovering, a.Acked, a.AckedBy, a.AckedAt, a.Resolution, a.ResolvedBy = false, false, "", 0, "", ""
 	if !e.silencedLocked(a, now) {
 		a.Notified = now.Unix()

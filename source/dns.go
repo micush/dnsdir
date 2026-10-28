@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"math/rand/v2"
 	"net"
 	"net/netip"
@@ -182,60 +180,20 @@ func exchangeOptID(ctx context.Context, addr string, query []byte, tcp bool, tim
 	if !tcp && !strings.HasPrefix(addr, dotScheme) {
 		return exchangeUDP(ctx, addr, query, deadline)
 	}
-	var d net.Dialer
-	network := "udp"
-	if tcp {
-		network = "tcp"
-	}
-	var conn net.Conn
-	var err error
 	if hp, ok := strings.CutPrefix(addr, dotScheme); ok {
-		// DNS over TLS: a TCP connection, a handshake that checks the server's certificate against its
-		// name (or IP), then the same length-prefixed messages as DNS over TCP.
-		tcp = true
-		host, _, _ := net.SplitHostPort(hp)
-		tc, derr := dialUpstream(ctx, &d, "tcp", hp) // a name is looked up as in bootstrap.go
-		if derr != nil {
-			return nil, 0, derr
-		}
-		tc.SetDeadline(deadline)
-		tl := tls.Client(tc, &tls.Config{ServerName: host, RootCAs: dotRootCAs, MinVersion: tls.VersionTLS12, InsecureSkipVerify: insecure})
-		if herr := tl.HandshakeContext(ctx); herr != nil {
-			tc.Close()
-			return nil, 0, herr
-		}
-		conn = tl
-	} else if conn, err = dialUpstream(ctx, &d, network, addr); err != nil {
+		// DNS over TLS: the same length-prefixed messages as DNS over TCP, inside TLS, on a kept connection when
+		// there is one (upstreamconn.go)
+		return exchangeDoT(ctx, hp, query, deadline, insecure)
+	}
+	// plain DNS over TCP: a connection per query
+	var d net.Dialer
+	conn, err := dialUpstream(ctx, &d, "tcp", addr)
+	if err != nil {
 		return nil, 0, err
 	}
 	defer conn.Close()
 	conn.SetDeadline(deadline)
-	id := binary.BigEndian.Uint16(query)
-
-	start := time.Now()
-	if tcp {
-		msg := make([]byte, 2+len(query))
-		binary.BigEndian.PutUint16(msg, uint16(len(query)))
-		copy(msg[2:], query)
-		if _, err := conn.Write(msg); err != nil {
-			return nil, 0, err
-		}
-		var lb [2]byte
-		if _, err := io.ReadFull(conn, lb[:]); err != nil {
-			return nil, 0, err
-		}
-		resp := make([]byte, binary.BigEndian.Uint16(lb[:]))
-		if _, err := io.ReadFull(conn, resp); err != nil {
-			return nil, 0, err
-		}
-		rtt := time.Since(start)
-		if h, ok := parseHeader(resp); !ok || h.id != id || !h.qr {
-			return nil, 0, errors.New("malformed or mismatched response")
-		}
-		return resp, rtt, nil
-	}
-
-	return nil, 0, errors.New("unreachable")
+	return tcpRoundTrip(conn, query)
 }
 
 // ── Server pool ──────────────────────────────────────────────────────────────

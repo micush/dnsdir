@@ -1,5 +1,33 @@
 # Changelog
 
+## [v597] - 2026-10-27 — Kept connections to DoT/DoH servers; DoT/TCP clients answered side by side
+
+### Changed
+- **DoT and DoH upstreams keep their connections** (`upstreamconn.go`). Until now every probe and every client query to a `tls://` or `https://` server opened a new TCP connection and did a full TLS handshake (DoH even had keep-alive switched off), so each cache miss paid one or two extra round trips. Probes also brushed against the probe timeout ("context deadline exceeded").
+  - **DoT:** a connection carries one query at a time and goes back to a small idle list after its answer, up to 4 per server.
+  - **DoH:** each server has one kept HTTP client, whose HTTP/2 connection carries many queries at once.
+  - **Idle and closed connections:** a connection idle for 30 s is closed. A query that fails on a kept connection the server has closed (but not one that ran out of time) is sent once more on a new connection before it counts as failed.
+  - **Certificate rules:** a connection is reused only under the same certificate rules (`tls_insecure`, trusted authorities) it was made with.
+  - **Latency:** the latency shown is now the answer time on a warm connection. Plain DNS over TCP to an upstream still uses a connection per query.
+- **Clients of the DoT listener (and of plain DNS over TCP) are answered side by side.** A client that sends several queries down one connection used to get them answered strictly one after another, so one slow name held up the rest. Now up to 32 queries per connection are worked on at once and each answer goes out as soon as it is ready (RFC 7766 6.2.1.1; clients match answers by ID). Connections were already kept for 10 s of idleness.
+- The DoH listener already served HTTP/2 with kept connections; a test now checks it.
+- README updated.
+
+### Verified
+- `gofmt -l .` (empty), `go vet ./...`, `go test -race -count=1 ./...` (three full runs, all passing), `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64.
+- New tests, repeated 15 times under `-race`:
+  - DoT: 5 queries use 1 connection; a server that closes after 2 answers costs new connections, not failed queries; the reuse key follows `tls_insecure` and the trusted authorities.
+  - DoH: 5 queries use 1 HTTP/2 connection, and recovery after the connection is dropped.
+  - DoT listener: 5 pipelined queries of 200 ms each are answered in about 200 ms, not 1 s.
+  - DoH listener: 3 queries over 1 HTTP/2 connection.
+- The existing DoT test server answers one query per connection, so the existing DoT tests now also exercise the retry path.
+- Live: two daemons on `lo`. Daemon A served DoT (18853) and DoH (18443) with a UDP+TCP stub upstream. Daemon B had only A's `tls://127.0.0.10:18853` and `https://127.0.0.10:18443/dns-query` as upstreams, with a probe every second.
+  - Over 10 s with 200 client queries to B (all answered), B held exactly 1 TCP connection to each of A's ports (2 for a moment on DoT when A closed an idle one).
+  - The old code opened a new connection for each of those.
+
+### Not verified
+- A real public DoT/DoH server (only dnsdir's own listeners and Go test servers were used).
+
 ## [v596] - 2026-10-27 — Upstreams given by name are looked up by dnsdir, not through the host (no more VIP loop)
 
 ### Fixed

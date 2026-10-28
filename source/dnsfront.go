@@ -27,6 +27,7 @@ const (
 	udpReaders   = 4    // goroutines reading the UDP socket
 	udpWorkers   = 64   // goroutines that stay alive to answer UDP queries (see readUDP)
 	tcpIdle      = 10 * time.Second
+	tcpPipeline  = 32 // queries of one TCP/DoT connection answered at the same time
 
 	// Stream connections (TCP and DoT) are limited in number: each costs a goroutine and whatever it is in the
 	// middle of reading, and unlike UDP the client's address cannot be forged.  Over the limit the connection is
@@ -642,7 +643,18 @@ func (f *DNSFrontend) handleTCP(c net.Conn) {
 	if _, secure := c.(*tls.Conn); secure {
 		via = viaDoT
 	}
-	for {
+	// The queries of one connection are answered as they come, several at a time, each answer as soon as it is ready
+	// (RFC 7766 6.2.1.1; RFC 7858 asks the same of DNS over TLS): a client that sends several questions down a kept
+	// connection is not held up by a slow one.  The client matches answers to questions by their IDs.
+	var (
+		wmu      sync.Mutex
+		inflight sync.WaitGroup
+		sem      = make(chan struct{}, tcpPipeline)
+		dead     atomic.Bool
+	)
+	defer inflight.Wait() // the answers still on their way are written (or dropped) before the connection closes
+	client := addrOf(c.RemoteAddr())
+	for !dead.Load() {
 		c.SetReadDeadline(time.Now().Add(tcpIdle))
 		var lb [2]byte
 		if _, err := io.ReadFull(c, lb[:]); err != nil {
@@ -656,27 +668,39 @@ func (f *DNSFrontend) handleTCP(c net.Conn) {
 		if err != nil {
 			return
 		}
-		resp := f.resolveVia(q, true, via, addrOf(c.RemoteAddr()))
-		if qbp != nil {
-			queryBufs.Put(qbp) // nothing keeps the query once resolve has returned
-		}
-		if resp == nil {
-			return
-		}
-		// the length prefix and the answer go out in one write (one TLS record for DoT), from a pooled buffer
-		bp := respBufs.Get().(*[]byte)
-		out := append((*bp)[:0], 0, 0)
-		binary.BigEndian.PutUint16(out, uint16(len(resp)))
-		out = append(out, resp...)
-		c.SetWriteDeadline(time.Now().Add(tcpIdle))
-		_, err = c.Write(out)
-		if cap(out) <= 16<<10 { // do not keep a buffer that one huge answer grew
-			*bp = out[:0]
-			respBufs.Put(bp)
-		}
-		if err != nil {
-			return
-		}
+		sem <- struct{}{}
+		inflight.Add(1)
+		go func() {
+			defer inflight.Done()
+			defer func() { <-sem }()
+			defer recoverPanic("a TCP query from " + c.RemoteAddr().String())
+			resp := f.resolveVia(q, true, via, client)
+			if qbp != nil {
+				queryBufs.Put(qbp) // nothing keeps the query once resolve has returned
+			}
+			if resp == nil {
+				dead.Store(true)
+				c.Close()
+				return
+			}
+			// the length prefix and the answer go out in one write (one TLS record for DoT), from a pooled buffer
+			bp := respBufs.Get().(*[]byte)
+			out := append((*bp)[:0], 0, 0)
+			binary.BigEndian.PutUint16(out, uint16(len(resp)))
+			out = append(out, resp...)
+			wmu.Lock()
+			c.SetWriteDeadline(time.Now().Add(tcpIdle))
+			_, werr := c.Write(out)
+			wmu.Unlock()
+			if cap(out) <= 16<<10 { // do not keep a buffer that one huge answer grew
+				*bp = out[:0]
+				respBufs.Put(bp)
+			}
+			if werr != nil {
+				dead.Store(true)
+				c.Close()
+			}
+		}()
 	}
 }
 

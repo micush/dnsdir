@@ -160,7 +160,7 @@ func TestBackupRestoreReplacesAndKeepsWhatWasThere(t *testing.T) {
 }
 
 func TestBackupRestoreRefusesBadPaths(t *testing.T) {
-	for _, name := range []string{"../evil", "/etc/evil", "a/../../evil"} {
+	for _, name := range []string{"../evil", "/etc/evil", "a/../../evil", "a/b/../../../evil", "./../evil", `..\\evil`, ".."} {
 		var raw bytes.Buffer
 		sw, _ := newSealWriter(&raw, "pw-12345678")
 		gz := gzip.NewWriter(sw)

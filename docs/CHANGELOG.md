@@ -1,5 +1,20 @@
 # Changelog
 
+## [v598] - 2026-10-27 — Backup restore: explicit containment check (CodeQL "Zip Slip")
+
+### Fixed
+- **CodeQL alert #7, "Arbitrary file access during archive extraction" (`backup.go`, `readBackupArchive`).** The entry names in a backup were already refused when absolute, starting with `..` after cleaning, holding a backslash, or not plain files. That stopped the escape, but not in a form CodeQL recognises. Each entry must now also pass `filepath.IsLocal`, and the joined destination must start with the staging directory followed by a path separator, before anything is written.
+
+### Not changed
+- **CodeQL alert #6, "Disabled TLS certificate check" (`ldap.go`)** is the LDAP setting "Do not check the server's certificate". It is the administrator's own choice, off by default, and logs a warning while on. It stays, by the owner's decision; dismiss the alert in GitHub as "won't fix".
+
+### Verified
+- `gofmt -l .` (empty), `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64.
+- `TestBackupRestoreRefusesBadPaths` now also tries `a/b/../../../evil`, `./../evil`, a backslash path and a bare `..`. All are refused and nothing is written outside the directory.
+
+### Not verified
+- CodeQL itself was not run here (no CodeQL CLI in the sandbox): the alert should close on the next scan of `main`.
+
 ## [v597] - 2026-10-27 — Kept connections to DoT/DoH servers; DoT/TCP clients answered side by side
 
 ### Changed

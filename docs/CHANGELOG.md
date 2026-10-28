@@ -1,5 +1,20 @@
 # Changelog
 
+## [v605] - 2026-10-28 — The Topology colour key no longer moves with the zoom
+
+### Fixed
+- **The colour key moved when the drawing was zoomed.** In v604 it stuck to the bottom of the window only while the drawing was taller than the window. Zoomed out, it sat right under the drawing, part-way up. Between the two it jumped by the page's bottom margin.
+- **Now it is always in one place, at the bottom of the window.** This holds at every zoom, however far the page is scrolled, and after the window is resized.
+  - The drawing's area is now at least as tall as the room above the key, worked out again on each redraw.
+  - The key is the last thing on the page and has no margin below it, so where it stops scrolling is where it sticks.
+
+### Verified
+- `gofmt -l .` (empty), `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64.
+  - The first `-race` run reported a failure that was not captured. The next two runs passed.
+- Headless Chromium, dark at 800 px tall and light at 420 px, measured at the start, zoomed out with the mouse wheel, zoomed in, zoomed in and scrolled to the end, and after a resize.
+  - The key was at the same height every time, flush with the bottom of the window.
+  - Zoomed out, the page did not scroll.
+
 ## [v604] - 2026-10-28 — The Topology colour key is always on screen
 
 ### Fixed

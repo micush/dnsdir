@@ -298,7 +298,8 @@ svg.cv text.proto { font-weight: 600; font-size: 10.5px; letter-spacing: .02em; 
 .dot { display: inline-block; width: .7rem; height: .7rem; border-radius: 50%; background: var(--muted); margin: 0 .3rem 0 .6rem; }
 .dot.st-ok { background: var(--ok); } .dot.st-warn { background: var(--amber); } .dot.st-bad { background: var(--bad); } .dot.st-idle { background: var(--muted); } .dot.st-paused { background: transparent; border: 2px dashed var(--muted); box-sizing: border-box; }
 /* kept on screen under a drawing taller than the window, rather than below it where only scrolling finds it */
-.cv-legend { position: sticky; bottom: 0; z-index: 1; background: var(--bg); padding: .45rem 0; margin-bottom: .55rem; }
+.cv-legend { position: sticky; bottom: 0; z-index: 1; background: var(--bg); padding: .45rem 0 .9rem; margin: 0; }
+main:has(> .cv-legend) { padding-bottom: 0; }   /* the key is the last thing: where it stops scrolling is where it sticks, so it never moves */
 .tsc h3 { font-size: .95rem; margin: .9rem 0 .25rem; }
 .dot.line-spread { background: var(--accent); }
 .cv-legend .dot:first-child { margin-left: 0; }

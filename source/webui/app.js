@@ -952,6 +952,10 @@
           let top = 0;   // where the card is on the page, not on the screen: scrolling the page (it scrolls when zoomed in) must not move the layout
           for (let el = svgHost; el; el = el.offsetParent) top += el.offsetTop;
           const room = window.innerHeight - top - (after ? after.offsetHeight + 24 : 0) - 16;
+          // the colour key stays at the bottom of the window at every zoom: the card is at least as tall as the room above it
+          // (a taller drawing makes the card taller, and the key then sticks to the bottom as the page scrolls)
+          const cardGap = parseFloat(getComputedStyle(svgHost).marginBottom) || 0;
+          svgHost.style.minHeight = Math.max(0, Math.floor(window.innerHeight - top - cardGap - (after ? after.offsetHeight : 0))) + "px";
           const extra = Math.min(room / s0 - lay.H, lay.H, 600);
           if (extra > 20) { const taller = layout(lay.PER, extra); if (!taller.clash) lay = taller; }
         }

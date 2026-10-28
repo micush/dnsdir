@@ -69,7 +69,8 @@ func (r *udpReplier) sockaddr(to net.Addr) syscall.Sockaddr {
 		if ip4 == nil {
 			return nil
 		}
-		sa := &syscall.SockaddrInet4{Port: ua.Port}
+		sa := sa4Pool.Get().(*syscall.SockaddrInet4)
+		sa.Port = ua.Port
 		copy(sa.Addr[:], ip4)
 		return sa
 	}
@@ -77,9 +78,26 @@ func (r *udpReplier) sockaddr(to net.Addr) syscall.Sockaddr {
 	if ip16 == nil {
 		return nil
 	}
-	sa := &syscall.SockaddrInet6{Port: ua.Port}
+	sa := sa6Pool.Get().(*syscall.SockaddrInet6)
+	sa.Port, sa.ZoneId = ua.Port, 0
 	copy(sa.Addr[:], ip16)
 	return sa
+}
+
+// The address structures a reply is sent to come from pools: one was allocated for every answer.  Sendto does not
+// keep them.
+var (
+	sa4Pool = sync.Pool{New: func() any { return new(syscall.SockaddrInet4) }}
+	sa6Pool = sync.Pool{New: func() any { return new(syscall.SockaddrInet6) }}
+)
+
+func putSockaddr(sa syscall.Sockaddr) {
+	switch v := sa.(type) {
+	case *syscall.SockaddrInet4:
+		sa4Pool.Put(v)
+	case *syscall.SockaddrInet6:
+		sa6Pool.Put(v)
+	}
 }
 
 // WriteTo sends b to the client.
@@ -90,6 +108,7 @@ func (r *udpReplier) WriteTo(b []byte, to net.Addr) {
 			for {
 				err := syscall.Sendto(r.fd, b, 0, sa)
 				if err == nil {
+					putSockaddr(sa)
 					r.mu.RUnlock()
 					return
 				}
@@ -98,6 +117,7 @@ func (r *udpReplier) WriteTo(b []byte, to net.Addr) {
 				}
 				break // EAGAIN (buffer full) or anything else: let the ordinary path decide
 			}
+			putSockaddr(sa)
 		}
 	}
 	r.mu.RUnlock()

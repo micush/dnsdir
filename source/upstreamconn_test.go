@@ -248,3 +248,58 @@ func mustURL(t *testing.T, s string) *url.URL {
 }
 
 func bytesReader(b []byte) io.Reader { return bytes.NewReader(b) }
+
+// Plain DNS over TCP to an upstream keeps its connection too.
+func TestTCPUpstreamReusesTheConnection(t *testing.T) {
+	f := newFakeDNS(t)
+	l, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	var accepted atomic.Int64
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			accepted.Add(1)
+			go func() {
+				defer c.Close()
+				for {
+					var lb [2]byte
+					if _, err := io.ReadFull(c, lb[:]); err != nil {
+						return
+					}
+					q := make([]byte, binary.BigEndian.Uint16(lb[:]))
+					io.ReadFull(c, q)
+					if r := f.answer(q); r != nil {
+						c.Write(append([]byte{byte(len(r) >> 8), byte(len(r))}, r...))
+					}
+				}
+			}()
+		}
+	}()
+	for i := 0; i < 5; i++ {
+		q, _ := buildQuery(uint16(i+1), "a.example", "A")
+		if _, _, err := exchange(context.Background(), l.Addr().String(), q, true, time.Second); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if accepted.Load() != 1 {
+		t.Fatalf("%d connections for 5 queries over TCP, want 1", accepted.Load())
+	}
+}
+
+// A panic in a query is still caught and counted when the peer's name is only made then.
+func TestRecoverPanicFromCatches(t *testing.T) {
+	before := panicCount.Load()
+	func() {
+		defer recoverPanicFrom("a test query from ", &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1), Port: 53})
+		panic("boom")
+	}()
+	if panicCount.Load() != before+1 {
+		t.Fatal("the panic was not counted")
+	}
+}

@@ -32,7 +32,7 @@ const (
 // ── DNS over TLS ─────────────────────────────────────────────────────────────
 
 type idleTLS struct {
-	c    *tls.Conn
+	c    net.Conn // a *tls.Conn for DoT, a plain TCP connection for DNS over TCP
 	idle time.Time
 }
 
@@ -50,7 +50,7 @@ func dotKey(hp string, insecure bool) string {
 }
 
 // take returns the most recently used idle connection to key, closing the ones idle too long.
-func (p *dotConnPool) take(key string) *tls.Conn {
+func (p *dotConnPool) take(key string) net.Conn {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	l := p.idle[key]
@@ -67,7 +67,7 @@ func (p *dotConnPool) take(key string) *tls.Conn {
 	return nil
 }
 
-func (p *dotConnPool) give(key string, c *tls.Conn) {
+func (p *dotConnPool) give(key string, c net.Conn) {
 	c.SetDeadline(time.Time{})
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -133,6 +133,34 @@ func exchangeDoT(ctx context.Context, hp string, query []byte, deadline time.Tim
 		c.Close()
 		if reused && attempt == 0 && retryable(ctx, err) {
 			continue // the server had closed the kept connection: once more on a new one
+		}
+		return nil, 0, err
+	}
+}
+
+// exchangeTCP sends one query to a plain DNS server over TCP (a client that asked over TCP, or an answer too large for
+// UDP), on a kept connection when there is one: the same pool as DoT, under its own key.
+func exchangeTCP(ctx context.Context, addr string, query []byte, deadline time.Time) ([]byte, time.Duration, error) {
+	key := "tcp|" + addr
+	for attempt := 0; ; attempt++ {
+		c := dotConns.take(key)
+		reused := c != nil
+		if !reused {
+			var d net.Dialer
+			var err error
+			if c, err = dialUpstream(ctx, &d, "tcp", addr); err != nil {
+				return nil, 0, err
+			}
+		}
+		c.SetDeadline(deadline)
+		resp, rtt, err := tcpRoundTrip(c, query)
+		if err == nil {
+			dotConns.give(key, c)
+			return resp, rtt, nil
+		}
+		c.Close()
+		if reused && attempt == 0 && retryable(ctx, err) {
+			continue
 		}
 		return nil, 0, err
 	}

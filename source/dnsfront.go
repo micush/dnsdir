@@ -25,7 +25,7 @@ const (
 	ipv6Freebind = 78   // IPV6_FREEBIND
 	maxInflight  = 8192 // queries being worked on at once; a slow upstream must not make the proxy drop at 1024
 	udpReaders   = 4    // goroutines reading the UDP socket
-	udpWorkers   = 64   // goroutines that stay alive to answer UDP queries (see readUDP)
+	udpWorkers   = 256  // goroutines that stay alive to answer UDP queries (see readUDP)
 	tcpIdle      = 10 * time.Second
 	tcpPipeline  = 32 // queries of one TCP/DoT connection answered at the same time
 
@@ -479,7 +479,7 @@ func (f *DNSFrontend) answerUDP(j udpJob) {
 			queryBufs.Put(j.bp)
 		}
 	}()
-	defer recoverPanic("a UDP query from " + j.client.String())
+	defer recoverPanicFrom("a UDP query from ", j.client)
 	if resp := f.resolve(j.q, false, addrOf(j.client)); resp != nil {
 		j.rep.WriteTo(resp, j.client)
 	}
@@ -673,7 +673,7 @@ func (f *DNSFrontend) handleTCP(c net.Conn) {
 		go func() {
 			defer inflight.Done()
 			defer func() { <-sem }()
-			defer recoverPanic("a TCP query from " + c.RemoteAddr().String())
+			defer recoverPanicFrom("a TCP query from ", c.RemoteAddr())
 			resp := f.resolveVia(q, true, via, client)
 			if qbp != nil {
 				queryBufs.Put(qbp) // nothing keeps the query once resolve has returned

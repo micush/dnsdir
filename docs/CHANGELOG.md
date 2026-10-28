@@ -1,5 +1,44 @@
 # Changelog
 
+## [v599] - 2026-10-28 — Query path: kept TCP connections to upstreams, far fewer allocations
+
+### Changed
+- **Plain DNS over TCP to an upstream keeps its connections** (asked when a client asks over TCP, or when an answer is too big for UDP). It uses the same pool, idle limit and one-retry rule as DoT (v597), under its own key. It used to open a connection per query.
+- **Fewer allocations on every query.** Found by profiling the UDP path under load, as cache hits and as misses to a stub upstream:
+  - **Panic messages.** The deferred panic guard of every UDP query, every pipelined TCP/DoT query and every gateway packet built its text ("a UDP query from 1.2.3.4:5678") up front, on every call. It is now made only when there is a panic (`recoverPanicFrom`).
+  - **Policy check.** The policy and block-list check made a lower-cased copy of the name for every query even with no policy rows and no block list loaded. It now returns at once in that case.
+  - **Statistics batches.** The statistics queue grew a new slice for every batch; the slices are now recycled.
+  - **Reply addresses.** Every UDP reply allocated its destination address structure; these now come from a pool.
+  - **Idle sockets.** The pool of idle upstream UDP sockets dropped an upstream's list when it emptied and made a new one on the next return, many times a second; the list is kept.
+- **256 UDP workers** instead of 64. Queries beyond the waiting workers got a goroutine each, whose stack had to grow every time; with more workers that happens far less under load.
+- README updated.
+
+### Measured
+- An in-process load test (64 UDP clients for 8 s, a fake upstream, 2 CPUs shared by everything) compared v598 with this version:
+
+  | Case | v598 | v599 |
+  |---|---|---|
+  | Cache hits, allocated per query | about 760 bytes | about 200 bytes |
+  | Cache hits, throughput (q/s) | 129–130k | 133–148k |
+  | Misses, allocated per query | about 1270 bytes | about 820 bytes |
+  | Misses, throughput (q/s) | 61–64k | 64–66k |
+
+- Most of the remaining CPU is the system calls of sending and receiving. dnsdir's own code is now a small part of each query, so the gain shows mostly as less garbage collection on a busy node rather than in this test.
+- Mutex contention in the profile was negligible.
+- The load harness was a throwaway test and is not in the tree.
+
+### Verified
+- `gofmt -l .` (empty), `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64.
+- New tests: `TestTCPUpstreamReusesTheConnection` (5 TCP queries, 1 connection) and `TestRecoverPanicFromCatches`.
+- Live: a gateway on `lo` with two UDP+TCP stub upstreams.
+  - 50/50 UDP queries were answered.
+  - 5 pipelined TCP and 5 pipelined DoT queries to the VIP were all answered.
+  - Stopping one stub moved everything to the other with every query answered.
+  - A hot reload (atomic rename) to one server took effect.
+
+### Not verified
+- A many-core node under real traffic: the sandbox has 2 CPUs, which the load generator and the stub upstream shared with dnsdir.
+
 ## [v598] - 2026-10-27 — Backup restore: explicit containment check (CodeQL "Zip Slip")
 
 ### Fixed

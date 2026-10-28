@@ -104,7 +104,12 @@ func (sh *udpShard) takeLocked(addr string, now time.Time) (idleUDP, bool) {
 		}
 		e.c.Close()
 	}
-	delete(sh.idle, addr)
+	// keep the (now empty) slice: deleting it cost a new one on the next give, many times a second
+	if cap(l) == 0 {
+		delete(sh.idle, addr)
+	} else {
+		sh.idle[addr] = l
+	}
 	return idleUDP{}, false
 }
 

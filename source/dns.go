@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
-	"net"
 	"net/netip"
 	"sort"
 	"strconv"
@@ -185,15 +184,8 @@ func exchangeOptID(ctx context.Context, addr string, query []byte, tcp bool, tim
 		// there is one (upstreamconn.go)
 		return exchangeDoT(ctx, hp, query, deadline, insecure)
 	}
-	// plain DNS over TCP: a connection per query
-	var d net.Dialer
-	conn, err := dialUpstream(ctx, &d, "tcp", addr)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer conn.Close()
-	conn.SetDeadline(deadline)
-	return tcpRoundTrip(conn, query)
+	// plain DNS over TCP, on a kept connection when there is one (upstreamconn.go)
+	return exchangeTCP(ctx, addr, query, deadline)
 }
 
 // ── Server pool ──────────────────────────────────────────────────────────────

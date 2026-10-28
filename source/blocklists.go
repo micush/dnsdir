@@ -712,6 +712,16 @@ func (m *BlockManager) Hit(key string) {
 	}
 }
 
+// blocksLoaded says some block list has domains in use.
+func blocksLoaded() bool {
+	m := theBlocks.Load()
+	if m == nil {
+		return false
+	}
+	s := m.snap.Load()
+	return s != nil && len(s.names) > 0
+}
+
 // Lookup says which list (its key) has name, a lower case name without the final dot.
 func (m *BlockManager) Lookup(name string) (string, bool) {
 	s := m.snap.Load()

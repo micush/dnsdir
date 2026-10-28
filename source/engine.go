@@ -408,7 +408,7 @@ func (e *Engine) readLoop(conn net.PacketConn) {
 func (e *Engine) handlePacket(data []byte, addr net.Addr) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	defer recoverPanic("a gateway packet from " + addr.String())
+	defer recoverPanicFrom("a gateway packet from ", addr)
 	if e.running {
 		e.onPacketLocked(data, addr)
 	}

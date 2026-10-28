@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"runtime/debug"
 	"sync/atomic"
 	"time"
@@ -28,6 +29,20 @@ func recoverPanic(what string) {
 	if r == nil {
 		return
 	}
+	notePanic(what, r)
+}
+
+// recoverPanicFrom is recoverPanic for the hot paths (one call per query): the text naming the peer is only made when
+// there was a panic, not for every query (it was an allocation and a formatted address each time).
+func recoverPanicFrom(what string, peer fmt.Stringer) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	notePanic(what+peer.String(), r)
+}
+
+func notePanic(what string, r any) {
 	panicCount.Add(1)
 	now := time.Now().UnixNano()
 	last := panicLastLogAt.Load()

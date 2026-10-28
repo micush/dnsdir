@@ -423,6 +423,11 @@ func (s *QStats) enqueue(e qEvent) {
 		s.flush() // way behind: count what is waiting now rather than grow without bound
 		p.mu.Lock()
 	}
+	if p.ev == nil {
+		if b, _ := qsEvBufs.Get().(*[]qEvent); b != nil {
+			p.ev = (*b)[:0] // a batch's slice from before: growing a new one for every batch was a steady stream of garbage
+		}
+	}
 	p.ev = append(p.ev, e)
 	p.mu.Unlock()
 	if s.flushArmed.CompareAndSwap(false, true) {
@@ -455,8 +460,16 @@ func (s *QStats) flush() {
 				s.applyCache(e)
 			}
 		}
+		if cap(evs) <= qsShardMax {
+			clear(evs) // drop the names they hold
+			evs = evs[:0]
+			qsEvBufs.Put(&evs)
+		}
 	}
 }
+
+// qsEvBufs holds the slices of counted batches for the next ones.
+var qsEvBufs sync.Pool
 
 func bump(m map[string]uint32, k string, limit int) {
 	if _, ok := m[k]; !ok && len(m) >= limit {

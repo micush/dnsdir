@@ -396,6 +396,9 @@ func (p *Pool) lookup(client netip.Addr, qi *qinfo) *policyRule {
 	if !client.IsValid() || !qi.ok {
 		return nil
 	}
+	if len(p.policy) == 0 && !blocksLoaded() {
+		return nil // nothing could apply: the name is not even made (it was an allocation for every query)
+	}
 	client = client.Unmap()
 	name := strings.ToLower(strings.TrimSuffix(qi.name(), "."))
 	allowed := p.allow.has(name)

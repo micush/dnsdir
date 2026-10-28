@@ -1000,6 +1000,9 @@ func showCanvas(sock string) {
 			title = fmt.Sprintf("%s (gateway %d)", g.Name, g.GroupID)
 		}
 		fmt.Printf("%s (O) %s  %s  on %s — %s\n", canvasTag[g.Status], title, addr, g.Interface, g.Detail+upNote(g.Uptime))
+		if len(g.Protocols) > 0 {
+			fmt.Printf("      serves %s\n", strings.Join(g.Protocols, " · "))
+		}
 		if len(g.Families) > 1 {
 			for _, f := range g.Families {
 				fmt.Printf("      %s %s %s — %s\n", canvasTag[f.Status], map[string]string{"v4": "IPv4", "v6": "IPv6"}[f.AF], f.VIP, f.Detail)

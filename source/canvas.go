@@ -109,6 +109,9 @@ type CanvasGateway struct {
 	// FwdWarn are the problems with conditional forwarding on this gateway: zone lists no server here serves, so their zones
 	// go to the general servers.
 	FwdWarn []string `json:"fwd_warn,omitempty"`
+	// Protocols are what clients can ask this gateway over, with the port: "DNS 53" always (UDP and TCP), "DoT 853"
+	// and "DoH 443" when those ports are set.
+	Protocols []string `json:"protocols"`
 }
 
 // CanvasMember is one cluster node currently serving the gateway: it holds an
@@ -206,6 +209,18 @@ func mergeMembersByNode(groups []CanvasGateway, names map[string]string) {
 	}
 }
 
+// gatewayProtocols lists what clients can ask a gateway over (CanvasGateway.Protocols).
+func gatewayProtocols(c DNSConfig) []string {
+	out := []string{"DNS " + strconv.Itoa(c.ListenPort)}
+	if c.DoTPort > 0 {
+		out = append(out, "DoT "+strconv.Itoa(c.DoTPort))
+	}
+	if c.DoHPort > 0 {
+		out = append(out, "DoH "+strconv.Itoa(c.DoHPort))
+	}
+	return out
+}
+
 // buildCanvas combines the running configuration with what the engines and
 // the probe pools currently report.
 func buildCanvas(dc *DaemonConfig, rows []SnapshotRow, pools []poolInfo) []CanvasGateway {
@@ -220,6 +235,7 @@ func buildCanvas(dc *DaemonConfig, rows []SnapshotRow, pools []poolInfo) []Canva
 		{
 			var key int
 			key, cfg = dc.poolFor(g)
+			cg.Protocols = gatewayProtocols(cfg)
 			for _, p := range pools {
 				if p.Key == key {
 					for _, s := range p.Pool.Snapshot() {

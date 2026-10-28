@@ -1,5 +1,20 @@
 # Changelog
 
+## [v600] - 2026-10-28 — The gateway circle says which protocols it serves
+
+### Added
+- **Topology: the gateway circle shows what clients can ask over**, with the ports, under its addresses and above its name: *DNS 53* (UDP and TCP) always, and *DoT 853* and *DoH 443* when those ports are set. The circle grows to fit the line. The gateway's tooltip says "Serves …". The canvas data has `protocols`, built from the gateway's effective DNS settings (its own pool follows the shared DoT/DoH ports). `--canvas` prints a `serves DNS 53 · DoT 853 · DoH 443` line under each gateway.
+- Help (Topology) and README updated.
+
+### Verified
+- `gofmt -l .` (empty), `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64. After moving the line above the name (a page-only change), `go test ./...` and `node --check` were run again.
+- Live: a dual-stack gateway with DoT 853 and DoH 443.
+  - `--canvas` printed the serves line.
+  - Chromium, light and dark, showed the two addresses, then "DNS 53 · DoT 853 · DoH 443", then the name, all inside the circle.
+
+### Not verified
+- The ports show what is configured. A listener that could not be opened (port in use) is reported in the log, not on the circle.
+
 ## [v599] - 2026-10-28 — Query path: kept TCP connections to upstreams, far fewer allocations
 
 ### Changed

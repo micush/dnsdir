@@ -745,6 +745,7 @@
       return ["Gateway " + gwLabel(g), st.why && st.why !== together ? st.why : "", st.clusterUp > 0 ? "Online for " + spanText(st.clusterUp) : upText(st.uptime),
         ...(dual ? [["IPv4", "v4"], ["IPv6", "v6"]].map(([n, af]) => n + " — " + fam(af)) : []),
         (g.more_vip4 || []).length + (g.more_vip6 || []).length ? "Also answers on " + [...(g.more_vip4 || []), ...(g.more_vip6 || [])].join(", ") : "",
+        st.protocols.length ? "Serves " + st.protocols.join(", ") : "",
         membersText(st.members), st.vmac && st.vmac.verdict !== "off" && !(st.why || "").startsWith("Virtual MACs:") ? vmacLine(st.vmac) : ""].filter(Boolean).join("\n");
     };
     const gwAddr = (g) => bareIP(g.vip4) || bareIP(g.vip6) || "gateway " + g.group_id;
@@ -781,7 +782,7 @@
       if (gwPaused || nodePaused || removed) { circle = "paused"; why = g.paused_all ? "Paused on all nodes — nothing is serving it until resumed" : removed && !g.paused && !nodePaused ? "This node was removed from the gateway — it does not serve it; the other nodes carry on" : nodePaused && !g.paused ? "This node is paused (Operate ▸ Node) — it is not serving; the other nodes carry on" : "Paused on this node — it is not serving; the other nodes carry on"; }
       else if (!via && circle === "paused") { circle = "idle"; why = "Resuming…"; }
       if (via) why = "As " + v.via + " sees it (it serves the gateway; this node does not): " + why;
-      return { via: (v && v.via) || "", circle, why, servers, fams, members, anycast: v ? v.anycast || [] : [], nodes: v ? v.nodes || [] : [], vmac: v && !via ? v.vmac || null : null, uptime: v && !gwPaused && !nodePaused && !removed ? v.uptime : null, clusterUp: v && !gwPaused && !removed ? v.cluster_up_sec || 0 : 0 };
+      return { via: (v && v.via) || "", circle, why, servers, fams, members, protocols: (v && v.protocols) || [], anycast: v ? v.anycast || [] : [], nodes: v ? v.nodes || [] : [], vmac: v && !via ? v.vmac || null : null, uptime: v && !gwPaused && !nodePaused && !removed ? v.uptime : null, clusterUp: v && !gwPaused && !removed ? v.cluster_up_sec || 0 : 0 };
     }
     // Where a server / domain is paused: "all" (shared, every node), "node" (this node's own settings) or "".
     const srvPausedScope = (g, addr) => (((g.dns || cv.cfg.dns || {}).paused_servers || []).includes(addr) ? "all" : (cv.cfg.paused_servers_here || []).includes(addr) ? "node" : "");
@@ -872,7 +873,10 @@
       const ip4 = (g.vip4 || "").split("/")[0], ip6 = (g.vip6 || "").split("/")[0];
       const dual = !!(ip4 && ip6);
       const textW = Math.max(ip4.length, ip6.length, 9) * 7.3;
-      const R = Math.max(50, Math.ceil(Math.hypot((textW + 22) / 2, dual ? 24 : 14)));
+      const protos = (st.protocols || []).join(" · ");   // what clients can ask over: "DNS 53 · DoT 853 · DoH 443"
+      // the protocols sit below the centre, where the circle is narrower: they need the room of a wider chord
+      const R = Math.max(50, Math.ceil(Math.hypot((textW + 22) / 2, (dual ? 24 : 14) + (protos ? 10 : 0))),
+        protos ? Math.ceil(Math.hypot((protos.length * 6.4 + 16) / 2, dual ? 33 : 23)) : 0);
       const anys = g.extra_vips || [], AH = 40, AG = 8;      // anycast pills sit to the right of the circle, the cluster's nodes to the left
       const AW = Math.max(170, Math.ceil(Math.max(0, ...anys.map((a) => a.length)) * 7.3 + 28));  // wide enough for the longest address in full (monospace 12px)
       const waiting = cv.nodeWait || {};
@@ -1013,9 +1017,14 @@
         onkeydown: (e) => { if (e.key === "Enter") pick("gw")(e); } },
         sv("title", {}, gwTip(g, st, dual)),
         sv("circle", { cx, cy: CY, r: R }),
-        ...(dual
-          ? [label(cx, CY - 14, ip4, "ip"), label(cx, CY + 4, ip6, "ip"), label(cx, CY + 24, g.name ? g.name.slice(0, 22) : g.interface + " · group " + g.group_id, "t2")]
-          : [label(cx, CY - 2, ip4 || ip6, "ip"), label(cx, CY + 18, g.name ? g.name.slice(0, 22) : g.interface + " · group " + g.group_id, "t2")])));
+        ...(() => {
+          // the addresses, the protocols, then the name; the block is centred on the circle
+          const rows = [...(dual ? [[ip4, "ip"], [ip6, "ip"]] : [[ip4 || ip6, "ip"]]), ...(protos ? [[protos, "t2 proto"]] : []), [g.name ? g.name.slice(0, 22) : g.interface + " · group " + g.group_id, "t2"]];
+          const gaps = rows.map((r, i) => (i === 0 ? 0 : r[1] === "ip" ? 18 : 20));
+          const total = gaps.reduce((a, b) => a + b, 0);
+          let y = CY + 4 - total / 2;
+          return rows.map((r, i) => { y += gaps[i]; return label(cx, y, r[0], r[1]); });
+        })()));
       anys.forEach((addr, i) => {
         const at = anyAt(i), x = cx + at.x, y = at.y;
         const a = st.anycast.find((z) => z.addr === addr);

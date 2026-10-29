@@ -25,6 +25,7 @@ func (w *WebServer) mgmtRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/backup/restore/prepare", w.authed(w.op("backup.restore.prepare", nil)))
 	mux.HandleFunc("POST /api/backup/restore/apply", w.authed(w.op("backup.restore.apply", nil)))
 	mux.HandleFunc("POST /api/backup/restore/cancel", w.authed(w.op("backup.restore.cancel", nil)))
+	mux.HandleFunc("POST /api/canvas/edit", w.authed(w.op("canvas.edit", nil))) // as --canvas-*: used by the MCP tools (mcp.go)
 	mux.HandleFunc("GET /api/alerts", w.authed(w.op("alerts.list", nil)))
 	mux.HandleFunc("POST /api/alerts/ack", w.authed(w.op("alerts.ack", nil)))
 	mux.HandleFunc("POST /api/alerts/silence", w.authed(w.op("alerts.silence", nil)))

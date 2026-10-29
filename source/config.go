@@ -567,6 +567,9 @@ type DNSConfig struct {
 	// means nobody.  Shared by the cluster; neither is read by the pools.  See snmp.go and metrics.go.
 	SNMPACL    []string `json:"snmp_acl,omitempty"`
 	MetricsACL []string `json:"metrics_acl,omitempty"`
+	// MCPACL is who may use the MCP endpoint (/mcp on the web GUI port, mcp.go): "10.1.0.0/24" reads, "10.1.1.50 rw" may
+	// also change things (a single address only).  Empty = nobody.  Shared by the cluster; not read by the pools.
+	MCPACL []string `json:"mcp_acl,omitempty"`
 	// Alerts are the rules, thresholds and the webhook of Configure ▸ Alerts (alerts.go).  Shared by the cluster.
 	Alerts *AlertsConfig `json:"alerts,omitempty"`
 	// Backup is the automatic off-host backup of Configure ▸ Backup (backup.go).  Shared by the cluster; the pools do not read it.
@@ -1310,6 +1313,9 @@ func (dc *DaemonConfig) Validate() error {
 			return err
 		}
 		dc.DNS.MetricsACL = acl
+		if dc.DNS.MCPACL, err = normMCPACL(dc.DNS.MCPACL); err != nil {
+			return err
+		}
 		if dc.DNS.Backup != nil {
 			if err := dc.DNS.Backup.Validate(); err != nil {
 				return err
@@ -1678,10 +1684,10 @@ func keepQueries(l []string, valid map[string]bool) []string {
 
 // live is the configuration the probe pool runs with: paused servers left out.
 func (d DNSConfig) live() DNSConfig {
-	d.SNMPACL, d.MetricsACL, d.Alerts, d.Backup = nil, nil, nil, nil // monitoring settings, read by snmp.go and metrics.go
-	d.ListenLocal = false                                            // read by the node's own listeners (locallisten.go), not by the pool: a change must not restart it
-	d.Schedule = nil                                                 // the scheduler's tasks are not the pool's: a change must not restart it
-	d.ServerNames = nil                                              // labels only: a rename must not restart the pool
+	d.SNMPACL, d.MetricsACL, d.MCPACL, d.Alerts, d.Backup = nil, nil, nil, nil, nil // monitoring settings, read by snmp.go, metrics.go and mcp.go
+	d.ListenLocal = false                                                           // read by the node's own listeners (locallisten.go), not by the pool: a change must not restart it
+	d.Schedule = nil                                                                // the scheduler's tasks are not the pool's: a change must not restart it
+	d.ServerNames = nil                                                             // labels only: a rename must not restart the pool
 	if len(d.PausedServers) != 0 || len(d.PausedServersHere) != 0 {
 		var up []string
 		for _, s := range d.Servers {

@@ -520,7 +520,7 @@
       case "anycastop": return "anycastop_" + (state.anycastOpTab === 1 ? "ospf" : "bgp");
       case "cfg_alerts": return "config_alerts";
       case "cfg_backup": return "config_backup";
-      case "cfg_monitoring": return state.monTab === 1 ? "config_metrics" : "config_snmp";
+      case "cfg_monitoring": return state.monTab === 2 ? "config_mcp" : state.monTab === 1 ? "config_metrics" : "config_snmp";
       case "cfg_dns": return "config_dns" + (state.dnsTab >= 0 ? state.dnsTab : 0) + (state.dnsTab === 3 ? "_" + (state.resTab >= 0 ? state.resTab : 0) : "");
       case "users": return state.usersTab === 1 ? "users_ldap" : state.usersTab === 2 ? "users_sso" + (state.ssoTab >= 0 ? state.ssoTab : 0) : "users_local";
       default: return state.tab;
@@ -2508,6 +2508,9 @@
   const PROM_FIELDS = [
     { shared: true, k: "metrics_acl", l: "Allowed sources", t: "rows", rows: "metricsacl", wide: true },
   ];
+  const MCP_FIELDS = [
+    { shared: true, k: "mcp_acl", l: "Allowed sources", t: "rows", rows: "mcpacl", wide: true },
+  ];
   const CLUSTER_FIELDS = [
     { k: "listen", l: "Binding address", t: "port" },
     { k: "self", l: "Advertised address", t: "text" },
@@ -2899,7 +2902,7 @@
   // not complete (outlined and not saved), empty: text for no rows}.
   const rowClips = {};
   // the short lists (a handful of rows) have no filter box and no paging; the long ones (clients, domains, users) do
-  const SMALL_TABLES = new Set(["ldapservers", "servers", "fallback", "neighbors", "morevip4", "morevip6", "community", "snmpacl", "metricsacl", "queries", "exempt"]);
+  const SMALL_TABLES = new Set(["ldapservers", "servers", "fallback", "neighbors", "morevip4", "morevip6", "community", "snmpacl", "metricsacl", "mcpacl", "queries", "exempt"]);
   function rowTable(spec, lines) {
     const N = spec.cols.length;
     const small = SMALL_TABLES.has(spec.key);
@@ -3129,6 +3132,14 @@
       cols: [{ name: "Name", ph: "example.com" }, { name: "Type", opts: ["A", "AAAA", "SOA", "NS", "MX", "TXT", "CNAME", "PTR", "SRV"] }],
       parse: (q) => (typeof q === "object" ? [q.name || "", (q.type || "A").toUpperCase()] : (() => { const f = String(q).trim().split(/\s+/); return [f[0] || "", (f[1] || "A").toUpperCase()]; })()),
       obj: (c) => ({ name: c[0], type: c[1] || "A" }),
+      mark: (c) => !c[0],
+    },
+    // MCP access: "10.1.0.0/24" (read-only) or "10.1.1.50 rw"
+    mcpacl: {
+      key: "mcpacl", empty: "Nobody may use /mcp.",
+      cols: [{ name: "Address or network", ph: "10.1.1.50, 10.1.0.0/24" }, { name: "Access", opts: ["ro", "rw"] }],
+      parse: (line) => { const f = String(line).trim().split(/\s+/); return [f[0] || "", (f[1] || "").toLowerCase() === "rw" ? "rw" : "ro"]; },
+      format: (c) => c[0].split(/[\s,]+/).filter(Boolean).map((a) => a + (c[1] === "rw" ? " rw" : "")),
       mark: (c) => !c[0],
     },
     // single sign-on users: "alice@example.com rw"
@@ -3869,12 +3880,13 @@
       const dns = fieldset(DNS_FIELDS, cfg.dns, true);
       const snmp = fieldset(SNMP_FIELDS, { snmp_communities: cfg.dns.snmp_communities, snmp_acl: cfg.dns.snmp_acl, snmp_contact: cfg.dns.snmp_contact, location: (cfg.snmp || {}).location });
       const prom = fieldset(PROM_FIELDS, { metrics_acl: cfg.dns.metrics_acl });
+      const mcp = fieldset(MCP_FIELDS, { mcp_acl: cfg.dns.mcp_acl });
       const alerts = alertsForm(cfg.dns.alerts);
       const alertsShared = () => { const a = alerts.get(); return a ? { alerts: a } : {}; };
       const backup = backupForm(cfg.dns.backup, (sch) => { cfg.dns.schedule = sch; if (state.cfg && state.cfg.dns) state.cfg.dns.schedule = sch; });
       const backupShared = () => { const b = backup.get(); return b ? { backup: b } : {}; };
       // what snmpd is doing, under the form (refreshed after every save)
-      const snmpShared = () => { const v = snmp.get(), m = prom.get(); return { snmp_communities: v.snmp_communities, snmp_acl: v.snmp_acl, snmp_contact: v.snmp_contact, metrics_acl: m.metrics_acl }; };
+      const snmpShared = () => { const v = snmp.get(), m = prom.get(); return { snmp_communities: v.snmp_communities, snmp_acl: v.snmp_acl, snmp_contact: v.snmp_contact, metrics_acl: m.metrics_acl, mcp_acl: mcp.get().mcp_acl }; };
       const snmpLocal = () => { const v = snmp.get(); return { location: v.location }; };
       const snmpPill = h("span");   // ACTIVE beside the heading while snmpd is running
       refreshSNMP = async () => {
@@ -4044,13 +4056,14 @@
         show(state.webTab >= 0 && state.webTab < TABS.length ? state.webTab : 0);
         return h("div", {}, strip, ...panes);
       };
-      // the Monitoring page is two tabs: SNMP and Metrics (every card stays in the page, so a save reads both)
+      // the Monitoring page is three tabs: SNMP, Metrics and MCP (every card stays in the page, so a save reads both)
       const monitoringTabs = () => {
         const TABS = [
           ["SNMP", (() => { const c = section("SNMP", snmp.el); c.querySelector("h2").append(snmpPill); return c; })()],
           ["Metrics", section("Metrics", prom.el, h("p", { class: "muted small" },
             h("a", { href: "/api/metrics/dashboard.json", download: "dnsdir-grafana-dashboard.json" }, "Grafana dashboard example"), "\u00a0\u00a0-\u00a0\u00a0",
             h("a", { href: "/api/metrics/alerts.yml", download: "dnsdir-prometheus-alerts.yml" }, "Prometheus alert rules example")))],
+          ["MCP", section("MCP", mcp.el, h("p", { class: "muted small mono" }, location.origin + "/mcp"))],
         ];
         const panes = TABS.map(([, el]) => h("div", { role: "tabpanel" }, el));
         const buttons = TABS.map(([name], i) => h("button", { type: "button", role: "tab", class: "dtab", onclick: () => show(i) }, name));

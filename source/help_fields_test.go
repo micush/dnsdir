@@ -38,6 +38,7 @@ func TestHelpCoversEveryField(t *testing.T) {
 		{"LDAP_FIELDS", "users_ldap"},
 		{"SNMP_FIELDS", "config_snmp"},
 		{"PROM_FIELDS", "config_metrics"},
+		{"MCP_FIELDS", "config_mcp"},
 		{"CLUSTER_FIELDS", "config_cluster"},
 		{"LOG_FIELDS", "config_logs"},
 		{"SYSLOG_FIELDS", "config_logs"},

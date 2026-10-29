@@ -470,6 +470,25 @@ const DNSDIR_HELP = {
       ["ul", ["The metrics are counts and states only: queries, answers, SERVFAILs, refused and rate-limited queries, cache hits and misses, each upstream server's health, answer time and use, whether this node is the active gateway, when the certificates run out, and the host: CPU, load, memory, swap, disk I/O, each filesystem and each network interface. No client addresses or domain names are in them, so Top Clients and Top Domains stay on Statistics.", "The source is the address of the connection. If Prometheus reaches AnyName through a proxy or NAT, allow the address AnyName sees.", "`/metrics` is on the same port and certificate as the web GUI and needs no new port."]],
     ],
   },
+  config_mcp: {
+    title: "Configure: MCP",
+    body: [
+      "Serves the Model Context Protocol at `/mcp` on the web GUI port, so an assistant such as Claude can look at the cluster and, from an address you allow, change some of it. Any node answers for the whole cluster.",
+      ["h", "What you can do here"],
+      ["ul", ["Choose which addresses and networks may use `/mcp`, and which single addresses may also change things (**rw**). There is no login: the address the request comes from is what counts. An empty list is nobody."]],
+      ["h", "Step by step: use it from Claude Desktop"],
+      ["ol", ["Add your computer's address under **Allowed sources** with access **rw** (or **ro** to look only). It is saved as you leave the row.", "Install Node.js on the computer. Claude Desktop starts local servers as programs, so `mcp-remote` relays to the URL.", "Add the server to Claude Desktop's `claude_desktop_config.json` (Settings ▸ Developer ▸ Edit Config), one entry per cluster, and restart Claude Desktop:\n`\"dnsdir\": { \"command\": \"npx\", \"args\": [\"mcp-remote\", \"https://NODE:PORT/mcp\"], \"env\": { \"NODE_TLS_REJECT_UNAUTHORIZED\": \"0\" } }`", "`NODE_TLS_REJECT_UNAUTHORIZED` `0` accepts the self-signed certificate without checking it. To check it instead, leave that out and set `NODE_EXTRA_CA_CERTS` to a file holding each node's `dnsdir-web.crt`, or install a real certificate.", "Ask, for example: *Which upstream servers are down?*, *Pause ns2*, *Upgrade every node*. Claude asks before each tool that changes something, unless you told it not to."]],
+      ["h", "Step by step: use it from Claude Code"],
+      ["ol", ["Allow the computer's address as above.", "Run `claude mcp add --transport http dnsdir https://NODE:PORT/mcp`. With the self-signed certificate, start Claude Code with `NODE_TLS_REJECT_UNAUTHORIZED=0`."]],
+      ["h", "Fields"],
+      "Each setting below says **Shared** or **This node only**. A *shared* setting is the same on every node: change it on any node and the cluster copies it everywhere. A setting marked *this node only* belongs to the node you are working on.",
+      ["fields", [["Allowed sources", "An address (`10.1.1.50`), a network (`10.1.0.0/24`) or a host name (`ops.example.com`, looked up again every minute), and the **Access**: **ro** may look, **rw** may also change things. **rw** is for a single address only: not a network, and not a host name, whose answer comes from DNS. Shared."]]],
+      ["h", "What it can do"],
+      ["ul", ["**Look (ro and rw):** the nodes, the gateways with their servers and domains, the DNS pools, the gateway election, alerts (one node or every node), the log, query statistics (a node, the cluster or a gateway), host load, an upstream server's history, the scheduler and upgrades.", "**Change (rw only):** pause and resume a node, a gateway, a server, a domain or an anycast address; acknowledge, silence, resolve or fix an alert; empty the answer cache; add, change, delete and run scheduler tasks; download a release and upgrade one node or several.", "**Never:** users, joining or leaving the cluster, restore, deleting gateways or servers, other configuration changes, and anything that runs a shell command: shell tasks of the scheduler can be seen, not made, changed or run.", "Every request runs as the user `mcp@ADDRESS` through the same checks as the GUI: the last node in service cannot be paused, and so on. Changes are logged and kept in the configuration history under that name."]],
+      ["h", "Good to know"],
+      ["ul", ["The assistant reads text others control: domain names, upstream errors, log lines. Such text could try to tell it what to do, so keep the confirmation of changes on in your client.", "A web page cannot use it: a request from a browser page of another site is refused.", "Claude's connectors on claude.ai and in Cowork connect from Anthropic's servers, not from your computer, so they cannot reach it; use Claude Desktop's local servers or Claude Code.", "The source is the address of the connection. Behind a proxy or NAT, allow the address AnyName sees."]],
+    ],
+  },
   config_alerts: {
     title: "Configure: Alerts",
     body: [

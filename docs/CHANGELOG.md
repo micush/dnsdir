@@ -1,5 +1,53 @@
 # Changelog
 
+## [v606] - 2026-10-29 — MCP: drive the cluster from Claude
+
+### Added
+- **The Model Context Protocol (MCP) at `POST /mcp` on the web GUI port** (`mcp.go`), so an assistant such as Claude can look at the cluster and change some of it. It uses streamable HTTP with JSON answers and no event stream, and accepts protocol versions 2024-11-05 to 2025-11-25 (batches too).
+- **Configure ▸ Monitoring ▸ MCP** (`mcp_acl` in the shared `dns` block) sets who may use it, the same way `/metrics` works.
+  - There is no login: the address of the connection decides, and an empty list means nobody.
+  - Each row is an address, a network or a host name, with **Access** `ro` or `rw`.
+  - `rw` is refused for a network or a host name (a host name's answer comes from DNS).
+  - Under the list is the endpoint's URL. The tab has its own help page.
+- **Read tools:** `list_nodes`, `get_topology`, `get_dns`, `get_gateways`, `get_alerts` (one node, or `all`), `get_log`, `get_query_stats` (a node, the cluster, or one gateway), `get_host_stats`, `get_server_stats`, `get_schedule`, `get_updates`, `get_node_status`.
+- **Write tools (`rw` only):**
+  - `set_node_paused`, and `set_paused` for a gateway, server, domain or anycast address, on one node or all.
+  - `alert_action` (ack, unack, silence, resolve, fix) and `clear_cache`.
+  - `schedule_set`, `schedule_delete`, `schedule_run`.
+  - `update_fetch`, `update_apply`, `update_push`, `update_cancel`.
+- **How a tool runs:** each one is a fixed request to the GUI's own API, made in-process as the user `mcp@ADDRESS`. That user is read-only unless the address is `rw`. So:
+  - The GUI's rules apply, for example the last node in service cannot be paused.
+  - Another node is reached through the cluster relay.
+  - Changes are logged and kept in the configuration history under that name.
+  - Each call is logged; a call that changes something is logged as a warning with its arguments.
+  - The tools that change things are marked as such, so clients ask before running them.
+- **Never reachable over MCP:**
+  - Users, cluster membership, restore, deleting gateways or servers, and other configuration changes.
+  - Anything that runs a shell command. Shell tasks of the scheduler are shown, but cannot be made, changed or run.
+  - Changing the update repository.
+- **A web page cannot use it:** a request whose `Origin` is another site is refused (DNS rebinding). `GET /mcp` answers 405.
+- `POST /api/canvas/edit`: the `--canvas-*` edits over the web API, used by `set_paused`. Pausing a server on all nodes gives the gateway its own pool, as the drawing's Pause does.
+
+### Verified
+- `gofmt -l .` (empty), `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64.
+- New tests:
+  - `TestMCPACLNormalised`: the list's forms and refusals.
+  - `TestMCPNobodyUntilListed`: an empty list, or an address not on it, gets 403.
+  - `TestMCPReadOnly`: no write tools are listed, a write is refused, notifications get 202.
+  - `TestMCPReadWriteGoesThroughTheGUIRules`: a shell task is refused; a backup task is made and recorded as `mcp@127.0.0.1`; the GUI refuses to pause the only node; an unknown node is named as such.
+  - `TestMCPRefusesBrowsersAndGET`: a foreign `Origin` gets 403, `GET` gets 405, and a batch is answered.
+- The help-coverage tests now include the MCP tab.
+- Live, against a daemon on 127.0.0.1, in headless Chromium, light and dark:
+  - `10.1.0.0/24 rw` was refused next to the row with the reason. `127.0.0.1 rw` was saved.
+- Live, with the real `mcp-remote` client (npm) and `NODE_TLS_REJECT_UNAUTHORIZED=0`, as Claude Desktop would run it:
+  - `initialize` and the 23 tools listed.
+  - `list_nodes`, `get_dns`, `get_log` and `get_alerts` (all nodes) answered.
+  - `set_paused` paused an upstream server on all nodes, `get_topology` showed it paused, and it was resumed. Both changes are in the history as `mcp@127.0.0.1`.
+  - `schedule_run` of an unknown task was refused.
+
+### Not verified
+- Claude Desktop itself, and a cluster of more than one node over MCP. The relay is the one the Node menu uses.
+
 ## [v605] - 2026-10-28 — The Topology colour key no longer moves with the zoom
 
 ### Fixed

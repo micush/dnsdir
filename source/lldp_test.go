@@ -11,9 +11,9 @@ import (
 
 // lldpFake replaces systemctl, the lldpd check, lldpcli and the sibling check for one test, and records what was run.
 type lldpFake struct {
-	active, installed, deferred bool
-	calls                       []string
-	cli                         []byte
+	active, enabled, installed, deferred bool
+	calls                                []string
+	cli                                  []byte
 }
 
 func newLLDPFake(t *testing.T) *lldpFake {
@@ -24,15 +24,15 @@ func newLLDPFake(t *testing.T) *lldpFake {
 	lldpDir = filepath.Join(t.TempDir(), "lldpd.d")
 	lldpRun = func(args ...string) ([]byte, error) {
 		switch args[0] {
-		case "is-active":
-			if f.active {
+		case "is-active", "is-enabled":
+			if (args[0] == "is-active" && f.active) || (args[0] == "is-enabled" && f.enabled) {
 				return nil, nil
 			}
-			return nil, errors.New("inactive")
+			return nil, errors.New("no")
 		case "enable":
-			f.active = true
+			f.active, f.enabled = true, true
 		case "disable":
-			f.active = false
+			f.active, f.enabled = false, false
 		}
 		f.calls = append(f.calls, strings.Join(args, " "))
 		return nil, nil
@@ -45,70 +45,74 @@ func newLLDPFake(t *testing.T) *lldpFake {
 
 func (f *lldpFake) did() string { s := strings.Join(f.calls, "; "); f.calls = nil; return s }
 
-func TestApplyLLDPStartsAndStopsOnlyItsOwn(t *testing.T) {
+// The setting decides, whoever started lldpd.
+func TestApplyLLDPFollowsTheSetting(t *testing.T) {
 	f := newLLDPFake(t)
-	// on: lldpd is started and marked as dnsdir's
+	// off and lldpd stopped: nothing to do
+	applyLLDP(false)
+	if d := f.did(); d != "" {
+		t.Fatalf("off, stopped: %q", d)
+	}
+	// on: enabled, started, and the file for the uninstaller written
 	applyLLDP(true)
 	if d := f.did(); d != "enable --now lldpd" || !fileExists(lldpOwnPath()) {
-		t.Fatalf("on: %q, marker %v", d, fileExists(lldpOwnPath()))
+		t.Fatalf("on: %q, file %v", d, fileExists(lldpOwnPath()))
 	}
-	if b, _ := os.ReadFile(lldpOwnPath()); !strings.HasPrefix(string(b), "# Managed by dnsdir") {
-		t.Fatalf("marker: %q", b)
+	if b, _ := os.ReadFile(lldpOwnPath()); !strings.HasPrefix(string(b), "# Managed by dnsdir (Configure") {
+		t.Fatalf("file: %q", b)
 	}
-	// on again: nothing to do
 	applyLLDP(true)
 	if d := f.did(); d != "" {
 		t.Fatalf("on twice: %q", d)
 	}
-	// off: stopped, marker gone
+	// running but not enabled at boot (someone ran systemctl start): enabled too
+	f.enabled = false
+	applyLLDP(true)
+	if d := f.did(); d != "enable --now lldpd" {
+		t.Fatalf("not enabled: %q", d)
+	}
+	// off: stopped and disabled, the file removed
 	applyLLDP(false)
 	if d := f.did(); d != "disable --now lldpd" || fileExists(lldpOwnPath()) {
 		t.Fatalf("off: %q", d)
 	}
-	// someone else's lldpd: never stopped, never marked
+	// started behind dnsdir's back (a package that starts it on install, or by hand): stopped again
 	f.active = true
+	applyLLDP(false)
+	if d := f.did(); d != "disable --now lldpd" || f.active {
+		t.Fatalf("started outside: %q", d)
+	}
+	// only enabled at boot, not running: disabled
+	f.enabled = true
+	applyLLDP(false)
+	if d := f.did(); d != "disable --now lldpd" || f.enabled {
+		t.Fatalf("enabled only: %q", d)
+	}
+	// not installed: nothing run
+	f.installed = false
 	applyLLDP(true)
 	applyLLDP(false)
-	if d := f.did(); d != "" || fileExists(lldpOwnPath()) || !f.active {
-		t.Fatalf("not ours: %q", d)
-	}
-	// not installed: nothing
-	f.active, f.installed = false, false
-	applyLLDP(true)
-	if d := f.did(); d != "" || fileExists(lldpOwnPath()) {
+	if d := f.did(); d != "" {
 		t.Fatalf("not installed: %q", d)
 	}
 }
 
-// dnsdir decides about lldpd on a host that has ntpdir too: it takes over an lldpd ntpdir started, and leaves the
-// stopping of it to ntpdir when its own LLDP is off.
-func TestApplyLLDPTakesOverFromNtpdir(t *testing.T) {
+// dnsdir decides on a host that has ntpdir too: it never defers, and the setting rules whatever ntpdir's file says.
+func TestApplyLLDPNeverDefers(t *testing.T) {
 	f := newLLDPFake(t)
-	// ntpdir started lldpd (its file is there): with LLDP on, dnsdir adds its own file and starts nothing
-	f.active = true
+	if lldpDefer() {
+		t.Fatal("dnsdir defers")
+	}
+	f.active, f.enabled = true, true
 	if err := os.MkdirAll(lldpDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(lldpSiblingPath(), []byte("# Managed by ntpdir\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	applyLLDP(true)
-	if d := f.did(); d != "" || !fileExists(lldpOwnPath()) {
-		t.Fatalf("take-over: %q", d)
-	}
-	// switched off while ntpdir's file is still there: dnsdir drops its own and leaves lldpd to ntpdir
 	applyLLDP(false)
-	if d := f.did(); d != "" || fileExists(lldpOwnPath()) || !f.active {
+	if d := f.did(); d != "disable --now lldpd" {
 		t.Fatalf("off with ntpdir's file: %q", d)
-	}
-	// with LLDP off and ntpdir's file there, dnsdir does not touch lldpd at all
-	applyLLDP(false)
-	if d := f.did(); d != "" {
-		t.Fatalf("off, not ours: %q", d)
-	}
-	// dnsdir never defers
-	if lldpDefer() {
-		t.Fatal("dnsdir defers")
 	}
 }
 
@@ -149,22 +153,18 @@ func TestParseLLDPJSON0(t *testing.T) {
 func TestLLDPStatusAndText(t *testing.T) {
 	f := newLLDPFake(t)
 	f.cli, _ = os.ReadFile("testdata/lldp_neighbors_json0.json")
-	if st := lldpStatus(false); st.Running || st.ManagedBy != "" || len(st.Neighbors) != 0 || st.Neighbors == nil {
+	if st := lldpStatus(false); st.Running || st.ManagedBy != "dnsdir" || len(st.Neighbors) != 0 || st.Neighbors == nil {
 		t.Fatalf("stopped: %+v", st)
 	}
-	f.active = true
-	st := lldpStatus(false)
-	if st.ManagedBy != "other" || len(st.Neighbors) != 2 {
-		t.Fatalf("someone else's: %+v", st)
+	applyLLDP(true)
+	st := lldpStatus(true)
+	if st.ManagedBy != "dnsdir" || !st.Running || len(st.Neighbors) != 2 {
+		t.Fatalf("on: %+v", st)
 	}
-	if txt := lldpStatusText(st); !strings.Contains(txt, "started outside dnsdir") || !strings.Contains(txt, "GigabitEthernet1/0/7 (") || !strings.Contains(txt, "5 (untagged), 20") {
+	if txt := lldpStatusText(st); !strings.Contains(txt, "lldpd on this node: running") || !strings.Contains(txt, "GigabitEthernet1/0/7 (") || !strings.Contains(txt, "5 (untagged), 20") {
 		t.Fatalf("text:\n%s", txt)
 	}
-	f.active = false
-	applyLLDP(true)
-	if st := lldpStatus(true); st.ManagedBy != "dnsdir" || !st.Running {
-		t.Fatalf("ours: %+v", st)
-	}
+
 	f.installed = false
 	if txt := lldpStatusText(lldpStatus(true)); !strings.Contains(txt, "not installed") || strings.Contains(txt, "INTERFACE") {
 		t.Fatalf("not installed:\n%s", txt)

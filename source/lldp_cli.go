@@ -71,10 +71,6 @@ func lldpStateWords(st LLDPStatus) string {
 	switch {
 	case !st.Installed:
 		return "not installed (install the lldpd package; on RHEL, Rocky and Alma it is in EPEL)"
-	case st.Running && st.ManagedBy == "other":
-		return "running, started outside dnsdir (left alone: switching LLDP off here does not stop it)"
-	case st.Running && st.ManagedBy == "ntpdir":
-		return "running, started by AnyTime (ntpdir) on this host (dnsdir decides here)"
 	case st.Running:
 		return "running"
 	case st.Enabled:

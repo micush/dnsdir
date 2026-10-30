@@ -368,10 +368,10 @@ install_snmpd() {
   return 0
 }
 
-# lldpd runs LLDP while it is switched on (Configure ▸ Settings ▸ General ▸ Neighbor discovery); dnsdir starts and stops the service
-# itself, and only one it started.  Optional: on RHEL and its rebuilds lldpd is in EPEL, which is never switched on for it.
-# A package that starts lldpd as soon as it is installed (Debian) must not leave it running before LLDP is switched on, so an
-# lldpd installed here is stopped; one that was already on the system is left exactly as it was.
+# lldpd runs LLDP while it is switched on (Configure ▸ Settings ▸ General ▸ Neighbor discovery); dnsdir starts and stops the
+# service itself, whoever started it: on, enabled and running; off, stopped and disabled (within a minute of dnsdir starting).
+# Optional: on RHEL and its rebuilds lldpd is in EPEL, which is never switched on for it.  A package that starts lldpd as soon
+# as it is installed (Debian) is stopped here at once, so it does not run until dnsdir is up and decides.
 have_lldpd() { ! assumed_missing lldpd && { have lldpd || [ -x /usr/sbin/lldpd ]; }; }
 install_lldpd() {
   if have_lldpd; then

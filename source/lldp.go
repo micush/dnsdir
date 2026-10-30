@@ -14,27 +14,26 @@ import (
 	"time"
 )
 
-// LLDP (Configure ▸ Settings ▸ General ▸ Neighbor discovery).  When dns.lldp is on, every node runs lldpd: the switches see the nodes
-// (host name, port, management address) and each node sees which switch and port each of its interfaces is plugged into,
-// shown on Monitor ▸ Node and by --lldp.  It is a shared setting, off by default, because LLDP tells everything on the
-// segment the host's name, OS and addresses.
+// LLDP (Configure ▸ Settings ▸ General ▸ Neighbor discovery).  When dns.lldp is on, every node runs lldpd: the switches
+// see the nodes (host name, port, management address) and each node sees which switch and port each of its interfaces is
+// plugged into, shown on Monitor ▸ Node and by --lldp.  It is a shared setting, off by default, because LLDP tells
+// everything on the segment the host's name, OS and addresses.
 //
-// lldpd is optional: the installer adds it when the distribution has it (on RHEL and its rebuilds it is in EPEL, which is
-// never switched on for it) and leaves it stopped.  dnsdir only ever stops an lldpd it started itself.  The proof is
-// lldpOwnPath, a file in lldpd's own snippet directory (lldpd reads /etc/lldpd.d/*.conf as lldpcli commands; this one has
-// only comments): dnsdir writes it when it starts lldpd and removes it when it stops it.  An lldpd that was already
-// running without that file is someone else's: it is left alone (its neighbors are still shown) and switching LLDP off
-// here does not stop it.  The uninstaller follows the same rule.
+// The setting decides, whoever started lldpd: on, lldpd is enabled and running; off, it is stopped and disabled, also one
+// started by hand or by its package (Debian starts lldpd as soon as it is installed).  lldpWatch checks once a minute, so
+// an lldpd installed, started or stopped behind dnsdir's back follows the setting again within a minute.  lldpd is optional:
+// the installer adds it when the distribution has it (on RHEL and its rebuilds it is in EPEL, which is never switched on
+// for it); a node without it says so.
+//
+// lldpOwnPath, a comments-only file in lldpd's snippet directory (lldpd reads /etc/lldpd.d/*.conf as lldpcli commands), is
+// there while dnsdir has LLDP on.  The uninstaller reads it: with it, lldpd is stopped when dnsdir goes.
 //
 // dnsdir and ntpdir on one host share one lldpd, and dnsdir decides (as it does for the gateways ntpdir piggybacks on):
-// while dnsdir is installed, ntpdir does not start or stop lldpd.  An lldpd that ntpdir started (its own file) is taken
-// over here when LLDP is on: dnsdir adds its file, and ntpdir drops its own within a minute without stopping lldpd.  With
-// LLDP off here, ntpdir stops the lldpd it had started.  lldpWatch checks once a minute, so an lldpd stopped by hand is
-// started again without a configuration change.
+// while dnsdir is installed, ntpdir neither starts nor stops lldpd.  lldpDefer is therefore always false here.
 
 const (
 	lldpUnit         = "lldpd"
-	lldpHeader       = "# Managed by dnsdir (Configure ▸ Settings ▸ General ▸ Neighbor discovery): dnsdir started lldpd and stops it when LLDP is\n# switched off there.  Delete this file to keep lldpd running outside dnsdir's control.\n"
+	lldpHeader       = "# Managed by dnsdir (Configure ▸ Settings ▸ General ▸ Neighbor discovery): LLDP is on there, so dnsdir keeps lldpd\n# running.  Switched off there, dnsdir stops lldpd and removes this file; the uninstaller stops lldpd when this file is here.\n"
 	lldpNotInstalled = "lldpd is not installed, so LLDP cannot run: install the lldpd package (on RHEL, Rocky and Alma it is in EPEL) or run the installer again"
 	lldpCliTimeout   = 5 * time.Second
 	lldpSelf         = "dnsdir"
@@ -71,73 +70,56 @@ var (
 func lldpOwnPath() string     { return filepath.Join(lldpDir, lldpSelf+".conf") }
 func lldpSiblingPath() string { return filepath.Join(lldpDir, lldpSibling+".conf") }
 
-func lldpActive() bool { _, err := lldpRun("is-active", "--quiet", lldpUnit); return err == nil }
+func lldpActive() bool  { _, err := lldpRun("is-active", "--quiet", lldpUnit); return err == nil }
+func lldpEnabled() bool { _, err := lldpRun("is-enabled", "--quiet", lldpUnit); return err == nil }
 
-// lldpStop switches lldpd off now and at boot.
-func lldpStop(why string) {
-	if out, err := lldpRun("disable", "--now", lldpUnit); err != nil {
-		warnf("lldp: could not stop lldpd: %v %s", err, strings.TrimSpace(string(out)))
-		return
-	}
-	infof("lldp: lldpd stopped (%s)", why)
-}
-
-// applyLLDP makes lldpd follow the setting.  It is cheap when nothing changes, so it runs at start, after every
-// configuration change and once a minute (lldpWatch).
+// applyLLDP makes lldpd follow the setting: on, enabled and running; off, stopped and disabled, whoever had started it.
+// It is cheap when nothing changes, so it runs at start, after every configuration change and once a minute (lldpWatch).
 func applyLLDP(on bool) {
 	lldpMu.Lock()
 	defer lldpMu.Unlock()
-	owned := fileExists(lldpOwnPath())
-	if lldpDefer() {
-		if owned {
+	if lldpDefer() { // the sibling decides on this host
+		if fileExists(lldpOwnPath()) {
 			_ = os.Remove(lldpOwnPath())
-			if fileExists(lldpSiblingPath()) {
-				infof("lldp: %s is installed and runs lldpd now; dnsdir no longer manages it", lldpSibling)
-			} else {
-				lldpStop(lldpSibling + " is installed and decides about LLDP on this host; it has LLDP off")
-			}
+			infof("lldp: %s is installed and decides about LLDP on this host; dnsdir leaves lldpd to it", lldpSibling)
 		}
 		return
 	}
 	if !on {
-		if owned {
-			_ = os.Remove(lldpOwnPath())
-			if fileExists(lldpSiblingPath()) {
-				return // the sibling runs it too: not ours to stop
-			}
-			lldpStop("LLDP is switched off")
-		}
-		return
+		_ = os.Remove(lldpOwnPath())
 	}
 	if !lldpInstalled() {
-		if time.Since(lldpWarned) > time.Hour {
+		if on && time.Since(lldpWarned) > time.Hour {
 			lldpWarned = time.Now()
 			warnf("lldp: %s", lldpNotInstalled)
 		}
 		return
 	}
-	active := lldpActive()
-	if !owned {
-		if active && !fileExists(lldpSiblingPath()) {
-			return // started outside dnsdir: it already does LLDP, and it is not ours to manage
-		}
-		if err := os.MkdirAll(lldpDir, 0o755); err != nil {
-			warnf("lldp: %v", err)
+	active, enabled := lldpActive(), lldpEnabled()
+	if !on {
+		if !active && !enabled {
 			return
 		}
-		if err := os.WriteFile(lldpOwnPath(), []byte(lldpHeader), 0o644); err != nil {
-			warnf("lldp: could not write %s: %v", lldpOwnPath(), err)
+		if out, err := lldpRun("disable", "--now", lldpUnit); err != nil {
+			warnf("lldp: could not stop lldpd: %v %s", err, strings.TrimSpace(string(out)))
 			return
+		}
+		infof("lldp: lldpd stopped and disabled (LLDP is off)")
+		return
+	}
+	if !fileExists(lldpOwnPath()) { // for the uninstaller: LLDP is on here
+		if err := os.MkdirAll(lldpDir, 0o755); err != nil || os.WriteFile(lldpOwnPath(), []byte(lldpHeader), 0o644) != nil {
+			warnf("lldp: could not write %s", lldpOwnPath())
 		}
 	}
-	if active {
+	if active && enabled {
 		return
 	}
 	if out, err := lldpRun("enable", "--now", lldpUnit); err != nil {
 		warnf("lldp: could not start lldpd: %v %s", err, strings.TrimSpace(string(out)))
 		return
 	}
-	infof("lldp: lldpd started (LLDP is on)")
+	infof("lldp: lldpd enabled and started (LLDP is on)")
 }
 
 // lldpWatch applies the setting once a minute, so a sibling installed or removed, or an lldpd stopped by hand, is noticed.
@@ -178,8 +160,8 @@ type LLDPStatus struct {
 	Enabled   bool           `json:"enabled"`    // the shared setting
 	Installed bool           `json:"installed"`  // lldpd is on this node
 	Running   bool           `json:"running"`    // lldpd is running
-	ManagedBy string         `json:"managed_by"` // "dnsdir", "ntpdir", "other" (running, started outside both) or "" (not running)
-	Deferred  bool           `json:"deferred"`   // the sibling decides here (never, for dnsdir)
+	ManagedBy string         `json:"managed_by"` // who decides about lldpd here: always "dnsdir"
+	Deferred  bool           `json:"deferred"`   // dnsdir is installed here and decides
 	Neighbors []LLDPNeighbor `json:"neighbors"`
 	Error     string         `json:"error,omitempty"` // lldpcli could not be asked
 }
@@ -187,13 +169,9 @@ type LLDPStatus struct {
 func lldpStatus(on bool) LLDPStatus {
 	st := LLDPStatus{Enabled: on, Installed: lldpInstalled(), Deferred: lldpDefer(), Neighbors: []LLDPNeighbor{}}
 	st.Running = st.Installed && lldpActive()
-	switch {
-	case fileExists(lldpOwnPath()):
-		st.ManagedBy = lldpSelf
-	case fileExists(lldpSiblingPath()):
+	st.ManagedBy = lldpSelf
+	if st.Deferred {
 		st.ManagedBy = lldpSibling
-	case st.Running:
-		st.ManagedBy = "other"
 	}
 	if !st.Running {
 		return st

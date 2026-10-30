@@ -87,8 +87,6 @@
   const pill = (text, kind) => h("span", { class: "pill " + (kind || "") }, text);
   // what lldpd is doing on a node (GET /api/lldp), in a few words; the same as `dnsdir --lldp`
   const lldpWords = (st) => !st.installed ? "lldpd is not installed on this node"
-    : st.running && st.managed_by === "other" ? "Running, started outside AnyName (left alone)"
-    : st.running && st.managed_by === "ntpdir" ? "Running, started by AnyTime on this host"
     : st.running ? "Running" : st.enabled ? "Stopped: see the log" : "Stopped";
   const fmtMs = (n) => (n == null ? "–" : Number(n).toFixed(2));
 

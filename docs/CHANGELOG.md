@@ -1,5 +1,26 @@
 # Changelog
 
+## [v610] - 2026-10-30 — MCP: no caller is shown a secret, rw included; "(hidden)" sent back keeps the current value
+
+### Changed
+- **MCP answers never carry a secret, whatever the address's access** (`mcpsecrets.go`, the same change as ntpdir v191). Until now an `rw` address was shown the whole configuration, gateway keys, BGP passwords and all, and those values went into the assistant's conversation. Every tool answer now goes through `mcpRedact`: the values of the keys a read-only GUI account is not shown (`secretKeys`), plus `keys`, `snmp_communities`/`communities`, `key_pem`/`private_key`, `eab_key`/`account_key` (ACME), `token`/`tokens`, `code` (join codes), `server_password`, `psk`, `csrf` and `cookie`, read `"(hidden)"` however deep they are. Numbers, booleans and empty values are left (a pool's numeric `key`; an empty secret shows that none is set).
+- **The log line of an MCP change** (`mcp: ADDRESS calls TOOL {...}`) shows its arguments redacted the same way, so a new secret sent through MCP does not land in the log either.
+- **`api_get`/`api_request` refuse `/api/versions/get`, `/api/versions/diff` and `/api/versions/download`** over MCP: they answer with whole configuration files, secrets included (a read-only GUI account is refused them too). `api_get /api/versions` (the list) still answers.
+- Tool descriptions, the server's `instructions`, the MCP help page and the README say so.
+
+### Added
+- **`"(hidden)"` sent back means "keep the current value"** in `edit_config` and `api_request`, so what an assistant read can be sent back whole (the `groups` list, which is replaced whole, carries each gateway's key). The current value is put back from the configuration (for `edit_config`) or from a GET of the same route (for `api_request`; `/api/config` answers `{"config": ...}`, the shape its PUT takes). List entries are matched by an identity field (`group_id`, `id`, `peer`, `name`, `host`, `addr`, `address`, `url`, the first that picks out exactly one entry), by position only when an entry has none of them and the list kept its length, so a reordered list keeps each secret with its own entry. A `"(hidden)"` that matches nothing (a new gateway, a new BGP neighbor) or sits under a key that is no secret is refused with its path, and nothing is saved. To set or rotate a secret, send the real value.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, cross-builds for linux/amd64, arm64, arm, 386 and riscv64. Only the native amd64 build is verified with PAM; the cross-builds use the fail-closed stub. `node --check webui/help.js`. One race run failed once in `TestUpdateInflightDuplicateAndLoop` on "address already in use" (a test port taken by another test); it passed alone, with and without this change, and the next full run passed.
+- **New tests:** `TestMCPRedactHidesEverySecretKind` (ACME keys included), `TestMCPRestoreHiddenMatchesByIdentity` (a reordered list, a new entry, a shorter list without identity fields, `"(hidden)"` under a key that is no secret), `TestMCPNeverShowsSecretsEvenToRW` (an rw address: two gateway keys set, absent from the answer and the log line; hidden in `get_config`, `api_get /api/config` and an `edit_config` dry run; the three versions routes refused; the groups list sent back reordered and renamed keeps both keys; a hidden key for a new gateway refused and nothing saved; the whole configuration PUT back through `api_request` keeps the keys; one key rotated with a real value while the other is sent hidden). The new test fails with the redaction taken out.
+- **Live, a daemon in a scratch directory** (a gateway on `lo`, an SNMP community, `127.0.0.1 rw`), over `/mcp` with curl: `get_config` showed `"(hidden)"` for the gateway key and `snmp_communities`; `api_get /api/versions/get` was refused; `edit_config` renaming the gateway with both sent as `"(hidden)"` saved the rename and kept both secrets in the file; a real new key was saved and appeared in neither the answer nor the log; a hidden key for a new gateway was refused (`groups[1].key`).
+
+### Not verified
+- A cluster of more than one node: a tool for another node goes through the cluster relay, and the redaction and restoring happen on the node that serves `/mcp`, so a node still on v609 answering through the relay is covered too; not run here.
+- Claude Desktop and `mcp-remote` against this version (the protocol is unchanged).
+- Secrets in free text (an FRR configuration a route returns as text, a log line that quotes one) are not looked for; the support bundle does that for itself (`tshoot.go`).
+
 ## [v609] - 2026-10-29 — Alerts: rows no longer swap places on every refresh
 
 ### Fixed

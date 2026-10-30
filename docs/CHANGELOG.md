@@ -1,5 +1,20 @@
 # Changelog
 
+## [v614] - 2026-10-30 — Neighbor discovery: the lldpd state beside the box keeps itself up to date; the box reads "Run LLDP on every node"
+
+### Fixed
+- **The state beside "Run LLDP on every node" only changed on a page reload.** It was read once when the page was drawn and once 1.5 s after a save, which is often before lldpd has started (the daemon applies the setting when it reloads the configuration), so it could say *Stopped: see the log* for good. It is now asked again every 3 s while the card is on screen (its tab shown and the window visible); the timer ends when the page is drawn again or left. Changes made elsewhere (the command line, another node, an lldpd started or stopped by hand) show within seconds too. The same fix is in ntpdir v195.
+
+### Changed
+- The box is labelled **Run LLDP on every node**: "(lldpd)" said nothing the card does not already say. The help panel's field entry follows.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...`, `go test -race -count=1 ./...`, `node --check` on `app.js` and `help.js`; the help tests (`TestHelpCoversEveryField` matches the new label).
+- Live (in ntpdir v195; the page code is the same), headless Chromium against a daemon with a real lldpd behind a `systemctl` shim and a real PAM user: ticking the box showed **ACTIVE** within 1.5 s with no reload; `--lldp-disable` and then `--lldp-enable` from the command line turned it to *Stopped* and back to **ACTIVE** within 4 s each, on a page left open.
+
+### Not verified
+- The tick box itself still shows the value from when the page was drawn when the setting is changed elsewhere (as every other field on Configure); only the state beside it follows.
+
 ## [v613] - 2026-10-30 — LLDP: the setting now controls lldpd, whoever started it
 
 ### Changed

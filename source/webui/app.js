@@ -2513,7 +2513,7 @@
   ];
   // Configure ▸ Settings ▸ General ▸ Neighbor discovery (lldp.go)
   const LLDP_FIELDS = [
-    { shared: true, k: "lldp", l: "Run LLDP (lldpd) on every node", t: "bool" },
+    { shared: true, k: "lldp", l: "Run LLDP on every node", t: "bool" },
   ];
   const MCP_FIELDS = [
     { shared: true, k: "mcp_acl", l: "Allowed sources", t: "rows", rows: "mcpacl", wide: true },
@@ -3900,6 +3900,12 @@
         } catch (_) { clear(lldpState); }
       };
       refreshLLDP();
+      // lldpd starts or stops a moment after a save, and can be changed behind the page's back: ask again every few seconds
+      // while the card is on screen (the tab shown, the window visible); the timer ends once the page is drawn again or left
+      const lldpTimer = setInterval(() => {
+        if (!lldpState.isConnected) { clearInterval(lldpTimer); return; }
+        if (lldpState.offsetParent !== null && !document.hidden) refreshLLDP();
+      }, 3000);
       const alerts = alertsForm(cfg.dns.alerts);
       const alertsShared = () => { const a = alerts.get(); return a ? { alerts: a } : {}; };
       const backup = backupForm(cfg.dns.backup, (sch) => { cfg.dns.schedule = sch; if (state.cfg && state.cfg.dns) state.cfg.dns.schedule = sch; });

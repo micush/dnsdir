@@ -622,9 +622,22 @@ type canvasEdit struct {
 	Lists      string `json:"lists"`
 	// Node names a cluster node for --canvas-add|del node: its address, host name or node ID.  CanvasEdit turns it into
 	// nodeID and lists the cluster's node IDs in members, so the last member cannot be removed.
-	Node    string `json:"node"`
+	Node string `json:"node"`
+	// NewName and NewType are what a domain test becomes ("set domain"): the name, the record type, or both.
+	NewName string `json:"new_name"`
+	NewType string `json:"new_type"`
 	nodeID  string
 	members string // the cluster's node IDs, comma separated (a slice would make canvasEdit incomparable)
+}
+
+// errNoChange: the edit asks for what is already so; nothing is saved.
+var errNoChange = errors.New("nothing to change")
+
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
 }
 
 // lastServerInService reports whether addr is the only server of d that is not paused (on every node or on this one).
@@ -1039,6 +1052,37 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 			return fmt.Sprintf("deleted gateway %d with all its DNS servers and domains", e.Group), nil
 		}
 	case "node":
+		if e.Action == "prune" { // the entries of nodes that have left the cluster, from one gateway (group) or all (0)
+			if e.members == "" {
+				return "", errors.New("the cluster's nodes are not known here, so nothing is taken as having left")
+			}
+			members := strings.Split(e.members, ",")
+			var did []string
+			for i := range dc.Groups {
+				g := &dc.Groups[i]
+				if e.Group != 0 && g.GroupID != e.Group {
+					continue
+				}
+				var kept []string
+				for _, id := range g.ExcludedNodes {
+					if containsStr(members, id) {
+						kept = append(kept, id)
+					} else {
+						did = append(did, fmt.Sprintf("%s from gateway %d", shortID(id), g.GroupID))
+					}
+				}
+				g.ExcludedNodes = kept
+			}
+			if e.Group != 0 {
+				if _, err := findGroup(dc, e.Group); err != nil {
+					return "", err
+				}
+			}
+			if len(did) == 0 {
+				return "", errNoChange
+			}
+			return "cleared the entries of nodes that left the cluster: " + strings.Join(did, ", "), nil
+		}
 		g, err := findGroup(dc, e.Group)
 		if err != nil {
 			return "", err
@@ -1388,6 +1432,42 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 			}
 			*pl = kept
 			return fmt.Sprintf("%s resumed on %s for server %s", q.Name, where, addr), nil
+		case "set": // a test renamed or given another record type, in its place; its pauses follow it
+			at := -1
+			for i, q := range list {
+				if strings.EqualFold(q.Name, e.Name) && (e.Type == "" || q.Type == typ) {
+					at = i
+					break
+				}
+			}
+			if at < 0 {
+				return "", fmt.Errorf("%s is not tested on %s", e.Name, addr)
+			}
+			old := list[at]
+			nu := DNSQuery{Name: orDefault(strings.TrimSpace(e.NewName), old.Name), Type: strings.ToUpper(orDefault(strings.TrimSpace(e.NewType), old.Type))}
+			if _, ok := qtypes[nu.Type]; !ok {
+				return "", fmt.Errorf("record type %q: use A, AAAA, NS, MX, TXT, SOA, CNAME, PTR or SRV", nu.Type)
+			}
+			if nu == old {
+				return "", errNoChange
+			}
+			for i, q := range list {
+				if i != at && strings.EqualFold(q.Name, nu.Name) && q.Type == nu.Type {
+					return "", fmt.Errorf("%s/%s is already tested on %s", nu.Name, nu.Type, addr)
+				}
+			}
+			list = append([]DNSQuery(nil), list...)
+			list[at] = nu
+			d.ServerQueries[addr] = list
+			ok, nk := queryKey(addr, old.Name, old.Type), queryKey(addr, nu.Name, nu.Type)
+			for _, pl := range []*[]string{&d.PausedQueries, &dc.PausedQueriesHere} {
+				for i, k := range *pl {
+					if k == ok {
+						(*pl)[i] = nk
+					}
+				}
+			}
+			return fmt.Sprintf("server %s: the %s/%s test is now %s/%s", addr, old.Name, old.Type, nu.Name, nu.Type), nil
 		case "add":
 			for _, q := range list {
 				if strings.EqualFold(q.Name, e.Name) && q.Type == typ {
@@ -1441,13 +1521,26 @@ func (m *Mgmt) CanvasEdit(e canvasEdit, actor string) (string, error) {
 	if e.Action == "add" && e.Kind == "server" && e.Name == "" {
 		return "", errors.New("a DNS server needs at least one domain to test it with: add --name example.com")
 	}
-	if e.Kind == "node" {
+	if e.Kind == "node" && e.Action == "prune" {
+		var ids []string
+		if m.cl != nil {
+			for _, p := range m.cl.View().Peers {
+				if p.NodeID != "" {
+					ids = append(ids, p.NodeID)
+				}
+			}
+		}
+		e.members = strings.Join(ids, ",")
+	} else if e.Kind == "node" {
 		if err := m.resolveNode(dc, &e); err != nil {
 			return "", err
 		}
 	}
 	reg := planServerRegistration(dc, e)
 	msg, err := applyCanvasEdit(dc, e)
+	if errors.Is(err, errNoChange) {
+		return "nothing to change", nil
+	}
 	if err != nil {
 		return "", err
 	}

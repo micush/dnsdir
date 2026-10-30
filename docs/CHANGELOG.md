@@ -1,5 +1,63 @@
 # Changelog
 
+## [v608] - 2026-10-29 — MCP: an rw address can do everything the GUI can
+
+### Changed
+- **rw MCP access is now full access.** Before, users, the cluster, restore, other settings and shell tasks were out of reach. Now an rw address reaches everything the GUI's API offers.
+- **Shell tasks:** `schedule_set` and `schedule_run` take and run `shell` tasks like the GUI. They run as root on the nodes the task is for.
+- **Unchanged:** who may connect. `rw` is still for single addresses only, and a foreign browser `Origin` is still refused.
+- A read-only address still sees only what a read-only GUI account sees, with secrets hidden.
+
+### Added
+- **MCP tools:**
+  - `edit_config` (rw): `set` is merged into the current configuration and saved as Configure does, into the history with the note given. Objects are merged key by key, lists and values are replaced, and `null` removes a key. `dry_run` checks the change without saving.
+  - `api_request` (rw): any method and route of the GUI's API with a JSON body, on any node. A file answer comes back as type, size and base64 when it is under 100 KB.
+  - `api_get` and `get_config` (ro and rw): read any route, and the whole configuration.
+  - `list_api`: every route with its method and query parameters.
+- **`apiroutes.go`:** the route list behind `list_api`, generated from the source. `TestAPIRoutesListed` fails when it is out of date; `DNSDIR_UPDATE_ROUTES=1` writes it again. Login, logout, the session and the SSO routes are left out and refused.
+
+### Verified
+- `gofmt -l .` (empty), `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64.
+- MCP tests:
+  - rw: a shell task is accepted.
+  - `edit_config`: the dry run answers the change, a real one is saved (`log_level`), and an invalid value is refused.
+  - `api_get /api/versions` shows the change under `mcp@127.0.0.1`; `/api/login` is refused.
+  - `list_api` lists `/api/config` but not the login routes.
+  - Read-only addresses get neither `api_request` nor `edit_config`.
+- Live, through `mcp-remote`:
+  - `list_api`, `api_get /api/cluster` and `get_config` answered.
+  - `edit_config` with an unknown key was refused ("unknown field"), and a change with `null` was saved.
+  - A `shell` scheduler task was made.
+
+## [v607] - 2026-10-29 — MCP: rename and relabel; forget nodes that left
+
+### Added
+- **MCP write tools (rw only):**
+  - `rename_node`: a node's host name, as Operate ▸ Node does.
+  - `set_label`: a gateway's or upstream server's label, shared by every node. A full host name on a server is registered in DNS, as the drawing's Edit does.
+  - `edit_domain`: a test domain's name, record type, or both, in its place under the server. Its pauses on all nodes and on the node asked go with it.
+  - `set_gateway_node`: remove a node from a gateway or add it back. A node that has left the cluster is named by its node ID, from `excluded_nodes` in `get_topology`.
+  - `clear_left_nodes`: drop, from one gateway or every gateway, the removed-node entries whose node is no longer in the cluster. Nodes still in the cluster stay as they are, and it refuses to act when the cluster's nodes are not known.
+- `POST /api/canvas/edit` gains two edits:
+  - `set domain`, with `new_name` and `new_type`.
+  - `prune node`, with `group` 0 meaning every gateway.
+  - An edit that changes nothing answers "nothing to change" and saves no new version.
+
+### Verified
+- `gofmt -l .` (empty), `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64.
+- New tests:
+  - `TestCanvasSetDomain`: renamed and retyped in place, the pause follows, and duplicate, unknown, bad-type and no-change cases are handled.
+  - `TestCanvasPruneLeftNodes`: one gateway, then all of them; members are kept; refused with no member list.
+- The MCP tools test now checks the new tools are listed for rw.
+- Live, through `mcp-remote` against a daemon on 127.0.0.1, all confirmed in `get_topology` afterwards:
+  - `set_label` named a server and the gateway.
+  - `edit_domain` turned `example.com` into `example.net`.
+  - `set_gateway_node` with an unknown node was refused.
+  - `clear_left_nodes` dropped a planted entry `deadbeef…`.
+
+### Not verified
+- `rename_node`. It renames the host, so it was not run in the sandbox; it is the same request as Operate ▸ Node ▸ Rename.
+
 ## [v606] - 2026-10-29 — MCP: drive the cluster from Claude
 
 ### Added

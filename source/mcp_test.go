@@ -96,7 +96,7 @@ func TestMCPReadOnly(t *testing.T) {
 	}
 	_, m = post(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 	names := strings.Join(toolNames(t, m), " ")
-	if !strings.Contains(names, "get_log") || strings.Contains(names, "set_node_paused") || strings.Contains(names, "schedule_set") {
+	if !strings.Contains(names, "get_log") || !strings.Contains(names, "api_get") || strings.Contains(names, "set_node_paused") || strings.Contains(names, "schedule_set") || strings.Contains(names, "api_request") || strings.Contains(names, "edit_config") {
 		t.Fatalf("read-only tools: %s", names)
 	}
 	if txt, isErr := toolResult(t, func() map[string]any { _, m := post(mcpCall("list_nodes", `{}`)); return m }()); isErr || !strings.Contains(txt, `"this_node":true`) {
@@ -119,13 +119,42 @@ func TestMCPReadOnly(t *testing.T) {
 func TestMCPReadWriteGoesThroughTheGUIRules(t *testing.T) {
 	e, post := mcpEnv(t, "127.0.0.1 rw")
 	_, m := post(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
-	if names := strings.Join(toolNames(t, m), " "); !strings.Contains(names, "set_node_paused") || !strings.Contains(names, "update_push") {
+	if names := strings.Join(toolNames(t, m), " "); !strings.Contains(names, "set_node_paused") || !strings.Contains(names, "update_push") || !strings.Contains(names, "clear_left_nodes") || !strings.Contains(names, "edit_domain") {
 		t.Fatalf("read-write tools: %s", names)
 	}
-	// shell tasks: never made, changed or run here
-	_, m = post(mcpCall("schedule_set", `{"task":{"name":"x","action":"shell","command":"id","freq":"daily","at":"03:00"}}`))
-	if txt, isErr := toolResult(t, m); !isErr || !strings.Contains(txt, "shell") {
+	// rw is everything the GUI can do: a shell task too
+	_, m = post(mcpCall("schedule_set", `{"task":{"name":"x","action":"shell","command":"true","freq":"daily","at":"03:00"}}`))
+	if txt, isErr := toolResult(t, m); isErr {
 		t.Fatalf("shell task: %s", txt)
+	}
+	// any setting, merged into the configuration; a dry run saves nothing
+	_, m = post(mcpCall("edit_config", `{"set":{"log_level":"debug"},"dry_run":true}`))
+	if txt, isErr := toolResult(t, m); isErr || !strings.Contains(txt, `"log_level":"debug"`) {
+		t.Fatalf("dry run: %s", txt)
+	}
+	_, m = post(mcpCall("edit_config", `{"set":{"log_level":"warning"},"note":"quieter"}`))
+	if txt, isErr := toolResult(t, m); isErr {
+		t.Fatalf("edit_config: %s", txt)
+	}
+	if dc, err := loadConfig(e.conf); err != nil || dc.LogLevel != "warning" {
+		t.Fatalf("not saved: %v %v", err, dc)
+	}
+	_, m = post(mcpCall("edit_config", `{"set":{"log_level":"shouting"}}`))
+	if _, isErr := toolResult(t, m); !isErr {
+		t.Fatal("an invalid setting was saved")
+	}
+	// any route
+	_, m = post(mcpCall("api_get", `{"path":"/api/versions"}`))
+	if txt, isErr := toolResult(t, m); isErr || !strings.Contains(txt, "mcp@127.0.0.1") {
+		t.Fatalf("api_get: %s", txt)
+	}
+	_, m = post(mcpCall("api_request", `{"method":"POST","path":"/api/login","body":{}}`))
+	if txt, isErr := toolResult(t, m); !isErr || !strings.Contains(txt, "list_api") {
+		t.Fatalf("login route: %s", txt)
+	}
+	_, m = post(mcpCall("list_api", `{}`))
+	if txt, _ := toolResult(t, m); !strings.Contains(txt, `"/api/config"`) || strings.Contains(txt, "/api/login") {
+		t.Fatalf("list_api: %.300s", txt)
 	}
 	// a built-in one is made, under the caller's name
 	_, m = post(mcpCall("schedule_set", `{"task":{"name":"Nightly backup","action":"backup","freq":"daily","at":"02:30"}}`))

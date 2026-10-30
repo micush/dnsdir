@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// Cluster-wide statistics and host load: the Monitor ▸ Statistics and Monitor ▸ Host pages can show the cluster as one,
+// Cluster-wide statistics and host load: the Monitor ▸ Statistics and Monitor ▸ Node pages can show the cluster as one,
 // with every node's numbers added together (the "Cluster" entry of the Node menu, `--stats --cluster`, `--host --cluster`).
 //
 // Each node answers for itself as always; the node asked fans out (itself directly, the others through the cluster relay

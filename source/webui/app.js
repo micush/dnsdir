@@ -101,7 +101,7 @@
     t.title = t.scrollWidth > t.clientWidth ? t.value : "";
   });
   const LOCAL_API = /^\/api\/(login|logout|session|proxy|tshoot\/download|cache\/flush|cache\/clear)(\/|\?|$)/;
-  // The Node menu's "Cluster" entry: Monitor ▸ Statistics and Monitor ▸ Host show every node's numbers added together
+  // The Node menu's "Cluster" entry: Monitor ▸ Statistics and Monitor ▸ Node show every node's numbers added together
   // (the node you are logged in to asks the others).  Only those two pages offer it, and only their two requests change;
   // anything else a page asks goes to this node as before.
   const CLUSTER = "*cluster";
@@ -276,7 +276,7 @@
   const NAV_GROUPS = [
     ["Configure", [["cfg_general", "Settings"], ["cfg_groups", "Gateways"], ["cfg_dns", "DNS"], ["cfg_web", "Web GUI"], ["cfg_monitoring", "Monitoring"], ["cfg_alerts", "Alerts"], ["cfg_backup", "Backup"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
     ["Operate", [["node", "Node"], ["cluster", "Cluster"], ["anycastop", "Anycast"], ["scheduler", "Scheduler"], ["updates", "Upgrade"]]],
-    ["Monitor", [["stats", "Statistics"], ["host", "Host"], ["gateways", "Gateways"], ["nodes", "Cluster"], ["dns", "DNS"], ["anycaststatus", "Anycast"], ["alerts", "Alerts"], ["capture", "Capture"], ["log", "Log"]]],
+    ["Monitor", [["stats", "Statistics"], ["host", "Node"], ["gateways", "Gateways"], ["nodes", "Cluster"], ["dns", "DNS"], ["anycaststatus", "Anycast"], ["alerts", "Alerts"], ["capture", "Capture"], ["log", "Log"]]],
   ];
   const TABS = [["topology", TOPO]].concat(NAV_GROUPS.flatMap(([, items]) => items));
   const groupOf = (id) => (id === "topology" ? TOPO : (NAV_GROUPS.find(([, items]) => items.some(([i]) => i === id)) || [null])[0]);
@@ -396,7 +396,7 @@
     state.tab = id;
     if (state.target === CLUSTER && !CLUSTER_TABS.includes(id)) state.target = null;   // the other pages are about one node: back to this one
     if (isGw() && !GW_TABS.includes(id)) state.target = null;
-    renderTopbar();   // the Cluster entry is on the menu for Statistics and Host only
+    renderTopbar();   // the Cluster entry is on the menu for Statistics and Monitor ▸ Node only
     history.replaceState(null, "", "#" + id);
     for (const b of root.querySelectorAll("nav.side .nav-item[data-tab]")) {
       if (b.dataset.tab === id) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
@@ -5623,7 +5623,7 @@
     };
   })();
 
-  // ── Host, Monitor  (CLI: --host) ─────────────────────────────────────────────
+  // ── Node, Monitor  (CLI: --host) ─────────────────────────────────────────────
   // CPU, memory, disk and network use of the machine, sampled every 10 s by the daemon and
   // kept in memory for 30 days.  The picked node (top-bar Node menu) is the one shown.
   VIEWS.host = (() => {

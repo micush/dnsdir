@@ -1,5 +1,17 @@
 # Changelog
 
+## [v611] - 2026-10-30 — Monitor ▸ Host is now Monitor ▸ Node, matching Operate ▸ Node
+
+### Changed
+- **The Monitor menu's Host page is called Node.** The menus pair the same word under Operate and Monitor (Cluster and Cluster, Anycast and Anycast); Operate ▸ Node and Monitor ▸ Host were the exception for the same thing, a node. Only the label changes: the page's key (`#host`), the API route (`/api/host`), the CLI flags (`--host`, `--host-range`), the MCP tool (`get_host_stats`) and the **Host** section of Operate ▸ Node (restart or shut down the machine) are as before, so links, scripts and dashboards keep working. Its help topic is now **Monitor: Node**; the README and code comments that named the page follow. The same change is in ntpdir v192.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, cross-builds for linux/amd64, arm64, arm, 386 and riscv64 (only the native amd64 build is verified with PAM; the cross-builds use the fail-closed stub). `node --check` on `app.js` and `help.js`.
+- Live, a daemon in a scratch directory with a real PAM user, in headless Chromium, light and dark: the Monitor menu lists Statistics, **Node**, Gateways, …; clicking Node opens the page at `#host` with its charts; its "?" panel is titled **Monitor: Node**. The PAM user, groups and `/etc/pam.d` file were removed afterwards.
+
+### Not verified
+- Nothing beyond the label was changed, so no cluster run was made.
+
 ## [v610] - 2026-10-30 — MCP: no caller is shown a secret, rw included; "(hidden)" sent back keeps the current value
 
 ### Changed

@@ -386,7 +386,7 @@ Each node of the cluster (or just this node, when it is alone) is a **parallelog
 - dashed *paused* (the node is paused on the Operate page, or the gateway is paused or absent there), and
 - red dashed *not answering*.
 
-A node whose **CPU, memory or fullest disk is over 85%** is **solid yellow** (degraded), whatever else it is doing, even paused. It names what is over ("CPU 91% · disk 88%"; the tooltip names the mount) until every one is back at 85% or below. The figures are the Monitor ▸ Host numbers: the last 10-second CPU sample, memory in use, and the fullest of the tracked filesystems. The log records it too: a warning when a node goes over (naming CPU, memory and/or disk) and an info line when it is back at or under, for this node and every reachable member, checked each sync interval. A reading that only moves while still over is not logged again.
+A node whose **CPU, memory or fullest disk is over 85%** is **solid yellow** (degraded), whatever else it is doing, even paused. It names what is over ("CPU 91% · disk 88%"; the tooltip names the mount) until every one is back at 85% or below. The figures are the Monitor ▸ Node numbers: the last 10-second CPU sample, memory in use, and the fullest of the tracked filesystems. The log records it too: a warning when a node goes over (naming CPU, memory and/or disk) and an info line when it is back at or under, for this node and every reachable member, checked each sync interval. A reading that only moves while still over is not logged again.
 
 Hover a node for its address, role, last-seen time, version, whether it has caught up with the primary's settings, and any update under way. Right-click a reachable node for:
 
@@ -789,7 +789,7 @@ A directory account keeps its password and expiry date in the directory. **Add a
 | `--update-cancel` | command line only (the Upgrade tab shows what is queued) |
 | `--stats-clear` `[--all-nodes]`, `--scan ADDR`, `--ping ADDR\|NAME`, `--traceroute ADDR\|NAME`, `--lookup ADDR\|NAME`, `--cache-flush NAME`, `--cache-clear` | Statistics page: **Clear**; right-click a client ▸ **Scan** (prints the report); right-click a client or domain ▸ **Ping**, **Traceroute**, **Lookup** (the popup's output, printed when done); right-click a domain ▸ **Flush** (every node); `--cache-clear` is the **Clear** button of the **Cache** box on the DNS page (every node); a client's **Limit** is the `client_limits` setting, **Copy** has no command |
 | `--stats` `[--stats-range now\|1h\|1d\|7d\|30d] [--stats-rcode KIND] [--stats-client ADDR \| --stats-domain NAME] [--all-nodes]`, `--whois NAME`, `--dns-updates` | Statistics page (Monitor); `--whois` is right-click ▸ **Whois**; the last is its **Recent dynamic updates** card |
-| `--host` `[--host-range 1h\|1d\|7d\|30d] [--all-nodes]` | Host page (Monitor); `--all-nodes` is the Node menu's **Cluster** entry (also on Statistics) |
+| `--host` `[--host-range 1h\|1d\|7d\|30d] [--all-nodes]` | Monitor ▸ Node page; `--all-nodes` is the Node menu's **Cluster** entry (also on Statistics) |
 | `--capture IFACE` `[--capture-seconds N] [--capture-filter EXPR] [--capture-file FILE] [--all-nodes]`, `--capture-interfaces` | Capture page (Monitor); `--all-nodes` is the Node menu's **Cluster** entry there |
 | `--tshoot` `[--all-nodes] [--tshoot-file F]` | Log page ▸ tshoot |
 | `--log` `[--log-min LEVEL] [--log-grep WORDS] [--log-since 6h] [--log-lines N]` | Log page (Monitor) |
@@ -1362,7 +1362,7 @@ A directory account keeps its password and expiry date in the directory. **Add a
 | `--update-cancel` | command line only (the Upgrade tab shows what is queued) |
 | `--stats-clear` `[--all-nodes]`, `--scan ADDR`, `--ping ADDR\|NAME`, `--traceroute ADDR\|NAME`, `--lookup ADDR\|NAME`, `--cache-flush NAME`, `--cache-clear` | Statistics page: **Clear**; right-click a client ▸ **Scan** (prints the report); right-click a client or domain ▸ **Ping**, **Traceroute**, **Lookup** (the popup's output, printed when done); right-click a domain ▸ **Flush** (every node); `--cache-clear` is the **Clear** button of the **Cache** box on the DNS page (every node); a client's **Limit** is the `client_limits` setting, **Copy** has no command |
 | `--stats` `[--stats-range now\|1h\|1d\|7d\|30d] [--stats-rcode KIND] [--stats-client ADDR \| --stats-domain NAME] [--all-nodes]`, `--whois NAME`, `--dns-updates` | Statistics page (Monitor); `--whois` is right-click ▸ **Whois**; the last is its **Recent dynamic updates** card |
-| `--host` `[--host-range 1h\|1d\|7d\|30d] [--all-nodes]` | Host page (Monitor); `--all-nodes` is the Node menu's **Cluster** entry (also on Statistics) |
+| `--host` `[--host-range 1h\|1d\|7d\|30d] [--all-nodes]` | Monitor ▸ Node page; `--all-nodes` is the Node menu's **Cluster** entry (also on Statistics) |
 | `--capture IFACE` `[--capture-seconds N] [--capture-filter EXPR] [--capture-file FILE] [--all-nodes]`, `--capture-interfaces` | Capture page (Monitor); `--all-nodes` is the Node menu's **Cluster** entry there |
 | `--tshoot` `[--all-nodes] [--tshoot-file F]` | Log page ▸ tshoot |
 | `--log` `[--log-min LEVEL] [--log-grep WORDS] [--log-since 6h] [--log-lines N]` | Log page (Monitor) |
@@ -1635,21 +1635,21 @@ dnsdir --stats --all-nodes                     (every cluster node's numbers add
 
 ### The memory guard
 
-The statistics, the host history and the answer cache all live in memory. Every 30 seconds AnyName looks at how much memory the machine is using. That is the figure the Host page shows: what programs hold, caches excluded; in a container with a memory limit, the container's use against its limit, whichever is higher.
+The statistics, the host history and the answer cache all live in memory. Every 30 seconds AnyName looks at how much memory the machine is using. That is the figure Monitor ▸ Node shows: what programs hold, caches excluded; in a container with a memory limit, the container's use against its limit, whichever is higher.
 
 At **85%** or more it drops the **oldest data**. Each round removes the oldest tenth of the time span the statistics and the host history cover (top lists, per-minute counters and host minutes alike, so they stay consistent) and a tenth of the answer cache (the least recently used answers). It then hands the memory back to the system and measures again, up to 5 rounds per check, until use is below the limit. If it is still above, the next check carries on.
 
 Newer data always outlives older data, and the newest hour of statistics and host history is never dropped. That hour is tiny, and a machine short of memory for another reason should not lose its recent history too. Cuts are made at whole hours so the top lists and the counters go together.
 
-Each time it drops something, the log says so (WARN), and the Statistics and Host pages (and `dnsdir --stats`, `dnsdir --host`) show a line with the count, the time and what was dropped. What is dropped is gone from the saved file too after the next save.
+Each time it drops something, the log says so (WARN), and the Statistics and Monitor ▸ Node pages (and `dnsdir --stats`, `dnsdir --host`) show a line with the count, the time and what was dropped. What is dropped is gone from the saved file too after the next save.
 
 The limit is the environment variable `DNSDIR_MEMORY_LIMIT_PERCENT` of the daemon (1–99, default 85); there is no other switch. It can only drop what AnyName itself holds (at most about 100 MB), so if something else fills the machine, it will keep trimming and cannot fix that.
 
 ### Host
 
-Monitor ▸ Host (or `dnsdir --host`) shows how busy the machine is: **CPU**, **memory**, **disk** (space used per filesystem, and how busy the busiest disk was) and **network** (traffic in and out of the real interfaces, and each link's use when the driver reports its speed).
+Monitor ▸ Node (or `dnsdir --host`) shows how busy the machine is: **CPU**, **memory**, **disk** (space used per filesystem, and how busy the busiest disk was) and **network** (traffic in and out of the real interfaces, and each link's use when the driver reports its speed).
 
-![Monitor ▸ Host: CPU, memory, disk and network over time, with the filesystems and interfaces below](snaps/host.png)
+![Monitor ▸ Node: CPU, memory, disk and network over time, with the filesystems and interfaces below](snaps/host.png)
 
 The daemon samples `/proc` and `/sys` every 10 seconds and keeps per-minute averages and peaks for **30 days** (about 4 MB in memory; saved with the Statistics file, so a restart keeps them). Tiles show the latest sample, four charts follow the range (Last Hour, Day, Week, Month or custom; hover for value and peak), and two tables list the filesystems and network interfaces. In a cluster the Node menu picks the member. Loopback, dnsdir's own `dnsdirN.M` links, container and bridge plumbing, and bridge or bond ports are left out of the network totals.
 

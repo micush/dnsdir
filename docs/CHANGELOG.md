@@ -1,5 +1,24 @@
 # Changelog
 
+## [v609] - 2026-10-29 — Alerts: rows no longer swap places on every refresh
+
+### Fixed
+- **Alerts page, closed alerts reshuffling.** Alerts that opened in the same second (for example the three idot1 "Upstream server down" alerts of one outage) came back in a different order on each poll. The rows have different heights, so the table jumped and looked as if values were changing. Two causes:
+  - `AlertEngine.View` built the list from a map and sorted it only by `opened`, so ties kept the map's random order. It now sorts with `alertBefore`: newest first, then node, rule, subject and ID.
+  - The cluster view (`VIEWS.alerts` in `webui/app.js`) merged the nodes' lists and sorted them by open/closed and `opened` only. It now breaks ties the same way: node, rule, subject, ID.
+- No value, filter or action changed; only the order of alerts with the same open time is now fixed.
+
+### Added
+- `TestAlertViewOrderStableForSameSecond` (`alerts_test.go`): five alerts, four opened in the same second (two with the same subject), must come out in one fixed order on 200 calls of `View`. It fails on v608's sort.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and cross-builds for linux/amd64, arm64, arm, 386 and riscv64. Only the native amd64 build is verified with PAM; the cross-builds use the fail-closed stub.
+- The new test fails with the old one-key sort and passes with `alertBefore`.
+- `node --check webui/app.js`. The cluster merge's sort, taken from `app.js` as shipped, gave the same order for all 720 input orders of six alerts (the five closed alerts of the reported page plus one open alert): open first, newest first, the three same-second ns1 rows in one fixed order.
+
+### Not verified
+- The page in Chromium against live daemons. The layout, styles and auth are unchanged, so the PAM login check and the light/dark look were not repeated.
+
 ## [v608] - 2026-10-29 — MCP: an rw address can do everything the GUI can
 
 ### Changed

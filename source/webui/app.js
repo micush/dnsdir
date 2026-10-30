@@ -6565,8 +6565,11 @@
         for (const a of v.alerts || []) if (!gw || !(a.gateways || []).length || a.gateways.includes(gw.group_id)) out.alerts.push({ ...a, _n: n, _node: nodeLabel(n) });
         for (const x of v.silences || []) out.silences.push({ ...x, _node: nodeLabel(n) });
       }
-      // newest first, open before closed, as each node lists them
-      out.alerts.sort((a, b) => (!a.closed - !b.closed) * -1 || (b.opened - a.opened));
+      // open before closed, newest first, then a fixed order for alerts opened in the same second
+      // (node, rule, subject, id) so the rows do not swap places from one poll to the next
+      const cmp = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
+      out.alerts.sort((a, b) => (!a.closed - !b.closed) * -1 || (b.opened - a.opened) ||
+        cmp(a._node, b._node) || cmp(a.rule || "", b.rule || "") || cmp(a.subject || "", b.subject || "") || cmp(a.id, b.id));
       return out;
     }
     const copy = async (text) => { try { await navigator.clipboard.writeText(text); } catch (_) { /* no permission */ } };

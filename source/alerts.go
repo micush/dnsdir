@@ -656,6 +656,24 @@ func postWebhook(u string, body []byte) error {
 
 // ── what the pages ask for ───────────────────────────────────────────────────
 
+// alertBefore is the order of the Alerts page: newest first, and alerts opened in the same second by
+// node, rule, subject and ID, so that the list comes out the same on every poll (e.alerts is a map).
+func alertBefore(a, b Alert) bool {
+	if a.Opened != b.Opened {
+		return a.Opened > b.Opened
+	}
+	if a.Node != b.Node {
+		return a.Node < b.Node
+	}
+	if a.Rule != b.Rule {
+		return a.Rule < b.Rule
+	}
+	if a.Subject != b.Subject {
+		return a.Subject < b.Subject
+	}
+	return a.ID < b.ID
+}
+
 // AlertView is the Monitor ▸ Alerts page's data.
 type AlertView struct {
 	Node     string     `json:"node"`
@@ -682,7 +700,7 @@ func (e *AlertEngine) View() AlertView {
 		}
 		v.Alerts = append(v.Alerts, c)
 	}
-	sort.Slice(v.Alerts, func(i, j int) bool { return v.Alerts[i].Opened > v.Alerts[j].Opened })
+	sort.Slice(v.Alerts, func(i, j int) bool { return alertBefore(v.Alerts[i], v.Alerts[j]) })
 	for _, s := range e.silences {
 		if s.Until > now.Unix() {
 			v.Silences = append(v.Silences, s)

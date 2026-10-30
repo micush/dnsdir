@@ -708,6 +708,9 @@ func init() {
 				}
 				return trimStats(b, max(1, c.num("top", 20))), nil
 			}},
+		{name: "get_lldp", title: "LLDP neighbors",
+			desc: "Neighbor discovery on a node: whether LLDP is on (a shared setting), whether lldpd runs and who manages it, and for each interface the switch it is plugged into (name, port, VLANs, management address, how long ago it was heard).",
+			run:  func(c *mcpCtx) (any, error) { b, err := c.get("/api/lldp"); return asAny(b), err }},
 		{name: "get_host_stats", title: "Host load",
 			desc:  "CPU, load, memory, swap, disk I/O, filesystems and network interfaces of a node over time.",
 			props: []mcpProp{mcpRange},

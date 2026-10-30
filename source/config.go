@@ -562,6 +562,10 @@ type DNSConfig struct {
 	// lives in DaemonConfig.SNMP.  See snmp.go.
 	SNMPCommunities []string `json:"snmp_communities,omitempty"`
 	SNMPContact     string   `json:"snmp_contact,omitempty"`
+	// LLDP turns on neighbor discovery (Configure ▸ Settings ▸ General ▸ Neighbor discovery): every node runs lldpd, so the
+	// switches see the nodes and each node sees which switch port it is on.  Off by default, and omitted while off so the
+	// shared hash of a cluster that never used it is unchanged.  See lldp.go.
+	LLDP bool `json:"lldp,omitempty"`
 	// SNMPACL is the sources snmpd answers to ("10.1.1.50", "10.1.0.0/24"); empty = nobody.  MetricsACL is who may
 	// read /metrics on the web GUI port (Configure ▸ Monitoring ▸ Metrics); the page is always there, and an empty list
 	// means nobody.  Shared by the cluster; neither is read by the pools.  See snmp.go and metrics.go.

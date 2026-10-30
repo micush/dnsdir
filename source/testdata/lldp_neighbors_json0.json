@@ -1,0 +1,163 @@
+{
+  "lldp": [
+    {
+      "interface": [
+        {
+          "name": "eth1",
+          "via": "LLDP",
+          "rid": "2",
+          "age": "0 day, 00:01:10",
+          "chassis": [
+            {
+              "id": [
+                {
+                  "type": "mac",
+                  "value": "00:11:22:33:44:55"
+                }
+              ],
+              "name": [
+                {
+                  "value": "core-a"
+                }
+              ],
+              "descr": [
+                {
+                  "value": "Arista EOS"
+                }
+              ],
+              "mgmt-ip": [
+                {
+                  "value": "10.0.0.2"
+                },
+                {
+                  "value": "fd00::2"
+                }
+              ],
+              "capability": [
+                {
+                  "type": "Bridge",
+                  "enabled": true
+                },
+                {
+                  "type": "Router",
+                  "enabled": true
+                }
+              ]
+            }
+          ],
+          "port": [
+            {
+              "id": [
+                {
+                  "type": "ifname",
+                  "value": "Ethernet12"
+                }
+              ],
+              "ttl": [
+                {
+                  "value": "120"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "v0",
+          "via": "LLDP",
+          "rid": "1",
+          "age": "0 day, 00:00:03",
+          "chassis": [
+            {
+              "id": [
+                {
+                  "type": "mac",
+                  "value": "ba:7f:b9:1c:92:fd"
+                }
+              ],
+              "name": [
+                {
+                  "value": "sw1"
+                }
+              ],
+              "descr": [
+                {
+                  "value": "Edge switch sw1"
+                }
+              ],
+              "mgmt-ip": [
+                {
+                  "value": "192.0.2.1"
+                }
+              ],
+              "mgmt-iface": [
+                {
+                  "value": "5"
+                }
+              ],
+              "capability": [
+                {
+                  "type": "Bridge",
+                  "enabled": false
+                },
+                {
+                  "type": "Router",
+                  "enabled": false
+                },
+                {
+                  "type": "Wlan",
+                  "enabled": false
+                },
+                {
+                  "type": "Station",
+                  "enabled": true
+                }
+              ]
+            }
+          ],
+          "port": [
+            {
+              "id": [
+                {
+                  "type": "mac",
+                  "value": "ba:7f:b9:1c:92:fd"
+                }
+              ],
+              "descr": [
+                {
+                  "value": "GigabitEthernet1/0/7"
+                }
+              ],
+              "ttl": [
+                {
+                  "value": "120"
+                }
+              ],
+              "auto-negotiation": [
+                {
+                  "supported": false,
+                  "enabled": false,
+                  "current": [
+                    {
+                      "value": "10GbaseT - Four-pair Category 6A or better, full duplex mode only"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "vlan": [
+            {
+              "vlan-id": "5",
+              "pvid": true,
+              "value": "vlan5"
+            },
+            {
+              "vlan-id": "20",
+              "value": "vlan20"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

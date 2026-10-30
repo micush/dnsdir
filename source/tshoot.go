@@ -367,6 +367,10 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 		}},
 		{"frr/running-config.txt", func() string { return tshootRun("vtysh", "-c", "show running-config") }},
 		{"frr/frr.conf.txt", func() string { return tshootFile("/etc/frr/frr.conf") }},
+		{"lldp/neighbors.txt", func() string { return tshootRun("lldpcli", "show", "neighbors", "details") }},
+		{"lldp/status.txt", func() string {
+			return tshootRun("lldpcli", "show", "interfaces") + tshootRun("lldpcli", "show", "statistics")
+		}},
 	}
 	for _, c := range cmds {
 		c := c

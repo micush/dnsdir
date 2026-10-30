@@ -74,6 +74,7 @@ func (w *WebServer) mgmtRoutes(mux *http.ServeMux) {
 	w.registerCapture(mux)
 	// updates
 	mux.HandleFunc("GET /api/snmp", w.authed(w.op("snmp.status", nil)))
+	mux.HandleFunc("GET /api/lldp", w.authed(w.op("lldp.status", nil)))
 	mux.HandleFunc("GET /api/bgp", w.authed(w.op("bgp.status", nil)))
 	mux.HandleFunc("PUT /api/bgp", w.authed(w.op("bgp.set", nil)))
 	mux.HandleFunc("POST /api/bgp/operate", w.authed(w.op("bgp.operate", nil)))

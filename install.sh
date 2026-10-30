@@ -368,6 +368,29 @@ install_snmpd() {
   return 0
 }
 
+# lldpd runs LLDP while it is switched on (Configure ▸ Settings ▸ General ▸ Neighbor discovery); dnsdir starts and stops the service
+# itself, and only one it started.  Optional: on RHEL and its rebuilds lldpd is in EPEL, which is never switched on for it.
+# A package that starts lldpd as soon as it is installed (Debian) must not leave it running before LLDP is switched on, so an
+# lldpd installed here is stopped; one that was already on the system is left exactly as it was.
+have_lldpd() { ! assumed_missing lldpd && { have lldpd || [ -x /usr/sbin/lldpd ]; }; }
+install_lldpd() {
+  if have_lldpd; then
+    info "lldpd already present"
+    return 0
+  fi
+  info "installing lldpd (Configure ▸ Settings ▸ General ▸ Neighbor discovery; stays off until LLDP is switched on)"
+  if ! (pkg_install lldpd); then
+    if [ "$FAMILY" = rhel ]; then
+      warn "lldpd could not be installed: on RHEL, Rocky and Alma it is in EPEL, which this installer does not switch on. Everything else works; to use LLDP: dnf install epel-release && dnf install lldpd"
+    else
+      warn "lldpd could not be installed. Everything else works; install the 'lldpd' package yourself before switching LLDP on."
+    fi
+    return 0
+  fi
+  if [ "$HAVE_SYSTEMD" = 1 ]; then run "$SYSTEMCTL" disable --now lldpd >/dev/null 2>&1 || true; fi
+  return 0
+}
+
 # ping and mtr run the "Ping" and "Traceroute" of a client on the Statistics page.  Only those need them, so a failure is a warning.
 install_nettools() {
   local want=() ping_pkg=iputils-ping
@@ -476,6 +499,7 @@ else
   install_nmap
   install_nettools
   install_snmpd
+  install_lldpd
 fi
 step "Go toolchain"
 if find_go; then info "using $GO ($("$GO" version | awk '{print $3}'))"

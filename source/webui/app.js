@@ -3169,7 +3169,7 @@
     },
     // MCP access: "10.1.0.0/24" (read-only) or "10.1.1.50 rw"
     mcpacl: {
-      key: "mcpacl", empty: "Nobody may use /mcp.",
+      key: "mcpacl", empty: "No sources allowed without a key.",
       cols: [{ name: "Address or network", ph: "10.1.1.50, 10.1.0.0/24" }, { name: "Access", opts: ["ro", "rw"] }],
       parse: (line) => { const f = String(line).trim().split(/\s+/); return [f[0] || "", (f[1] || "").toLowerCase() === "rw" ? "rw" : "ro"]; },
       format: (c) => c[0].split(/[\s,]+/).filter(Boolean).map((a) => a + (c[1] === "rw" ? " rw" : "")),

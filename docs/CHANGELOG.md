@@ -1,5 +1,17 @@
 # Changelog
 
+## [v620] - 2026-10-31 — The Log page stayed empty on a busy node or cluster
+
+### Fixed
+- **Monitor ▸ Log showed nothing at all** (no lines, no "The log is empty", no count) for the cluster, and for a single node whose log is large. Two causes together:
+  - **The page asked again before the answer came, and each new question made the previous answer stale.** Every page is polled every 2 s whether or not the last request has been answered, and the Log page ignores an answer once a newer request is out, so on a node where reading the log takes over 2 s no answer was ever drawn — while every node kept starting another full read of its log every 2 s. A poll is now skipped while the previous one is still waiting, on every page (Statistics over a long range had the same weakness), and the Log page says it is reading while the first answer is on its way.
+  - **Reading the log was slow.** It read all three files (up to 300 MB; the ptx nodes had 120 MB, mostly policy-row lines) with a regular expression on every line, whatever the time range. It now skips a rotated file last written before the range (only counting its lines for the "of N on disk" figure), stops parsing times once inside the range, reads the time and level without the regular expression, copies a line only when it matches, and parses only the lines it returns. On a 1-million-line, 140 MB log: 2.2–2.8 s before, 60–150 ms now (last hour, last 24 hours, all of it).
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...`, `go test -race -count=1 ./...`, `node --check webui/app.js`.
+- **New test** `TestReadLogSkipsFilesBeforeTheRange`: a rotated file before the range is counted but not searched, the oldest time still comes from it, and the newest lines come back in order; `TestReadLogFilters` unchanged and passing.
+- **Live:** a daemon with a 1-million-line log (10 days of lines like those of lptxns02's bundle), headless Chromium, real PAM user, Monitor ▸ Log, Last 24 hours, Live on, watched for 20 s. v619: 0 lines and no text below the box, as in the report. This version: the newest 1000 lines and "99871 matching lines of 1000052 on disk".
+
 ## [v619] - 2026-10-30 — Monitor ▸ Statistics: click a transport to see the clients that used it
 
 ### Added

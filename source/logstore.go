@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"log/slog"
@@ -160,6 +161,12 @@ func parseLogLine(raw string) LogLine {
 }
 
 // ReadLog returns the lines of the log files that match q, oldest first.
+//
+// The files hold up to 300 MB (a busy node with policy logging on fills one in a few days), and the Log page asks again
+// every few seconds, so the scan is kept cheap: a rotated file last written before the time range is not read line by
+// line (its lines are only counted), the time of a line is read only until the first one inside the range (the lines
+// are in time order), the level and time come from the line's start without the regular expression, a line is copied
+// only when it matches, and only the lines kept (the newest Limit) are parsed.
 func ReadLog(q LogQuery) (*LogResult, error) {
 	if logDir == "" {
 		return nil, fmt.Errorf("the log file is not available on this node (logging to stderr only)")
@@ -175,53 +182,126 @@ func ReadLog(q LogQuery) (*LogResult, error) {
 	if q.Since > 0 {
 		cutoff = time.Now().Add(-q.Since)
 	}
-	var keep []LogLine
+	// the newest matching lines, a ring of at most Limit (all of them when there is no limit)
+	var keep []string
+	head := 0
+	add := func(raw string) {
+		res.Matched++
+		if q.Limit <= 0 || len(keep) < q.Limit {
+			keep = append(keep, raw)
+			return
+		}
+		keep[head] = raw
+		head = (head + 1) % len(keep)
+		res.Truncated = true
+	}
 	paths := []string{}
 	for i := logFileKeep; i >= 1; i-- {
 		paths = append(paths, fmt.Sprintf("%s.%d", base, i))
 	}
 	paths = append(paths, base)
+	inRange := cutoff.IsZero() // once a line is inside the time range, so is every later one
 	for _, p := range paths {
 		f, err := os.Open(p)
 		if err != nil {
 			continue
 		}
+		if st, err := f.Stat(); err == nil && !inRange && st.ModTime().Before(cutoff) {
+			// written to last before the range began: nothing in it can match; count its lines, and take its first time
+			// for Oldest
+			n, first := countLines(f)
+			res.Scanned += n
+			if res.Oldest == "" {
+				res.Oldest = first
+			}
+			f.Close()
+			continue
+		}
 		sc := bufio.NewScanner(f)
 		sc.Buffer(make([]byte, 64<<10), 1<<20)
 		for sc.Scan() {
-			raw := sc.Text()
-			if raw == "" {
+			raw := sc.Bytes()
+			if len(raw) == 0 {
 				continue
 			}
 			res.Scanned++
-			ln := parseLogLine(raw)
-			if res.Oldest == "" && ln.Time != "" {
-				res.Oldest = ln.Time
+			ts, lvl := logHead(raw)
+			if res.Oldest == "" && ts != nil {
+				res.Oldest = string(ts)
 			}
-			if levelRank(ln.Level) < min {
+			if levelRankBytes(lvl) < min {
 				continue
 			}
-			if !cutoff.IsZero() {
-				if t, err := time.Parse(time.RFC3339Nano, ln.Time); err == nil && t.Before(cutoff) {
-					continue
+			if !inRange && ts != nil {
+				if t, err := time.Parse(time.RFC3339Nano, string(ts)); err == nil {
+					if t.Before(cutoff) {
+						continue
+					}
+					inRange = true
 				}
 			}
-			if len(expr) > 0 && !logMatches(expr, strings.ToLower(ln.Raw)) {
+			if len(expr) > 0 && !logMatches(expr, strings.ToLower(string(raw))) {
 				continue
 			}
-			res.Matched++
-			keep = append(keep, ln)
-			if q.Limit > 0 && len(keep) > q.Limit {
-				keep = keep[1:]
-				res.Truncated = true
-			}
+			add(string(raw))
 		}
 		f.Close()
 	}
-	if keep != nil {
-		res.Lines = keep
+	if len(keep) > 0 {
+		res.Lines = make([]LogLine, 0, len(keep))
+		for i := range keep {
+			res.Lines = append(res.Lines, parseLogLine(keep[(head+i)%len(keep)]))
+		}
 	}
 	return res, nil
+}
+
+// logHead reads the time and level at the start of a slog text line ("time=T level=L msg=..."); nil for a line in another
+// format (its level counts as INFO, and it has no time).
+func logHead(raw []byte) (ts, lvl []byte) {
+	if !bytes.HasPrefix(raw, []byte("time=")) {
+		return nil, nil
+	}
+	rest := raw[len("time="):]
+	sp := bytes.IndexByte(rest, ' ')
+	if sp <= 0 || !bytes.HasPrefix(rest[sp:], []byte(" level=")) {
+		return nil, nil
+	}
+	ts, rest = rest[:sp], rest[sp+len(" level="):]
+	if e := bytes.IndexByte(rest, ' '); e >= 0 {
+		rest = rest[:e]
+	}
+	return ts, rest
+}
+
+// levelRankBytes is levelRank without making a string.
+func levelRankBytes(l []byte) int {
+	switch {
+	case bytes.EqualFold(l, []byte("DEBUG")):
+		return 0
+	case bytes.EqualFold(l, []byte("WARN")), bytes.EqualFold(l, []byte("WARNING")):
+		return 2
+	case bytes.EqualFold(l, []byte("ERROR")):
+		return 3
+	}
+	return 1
+}
+
+// countLines counts the non-empty lines of a file without parsing them, and gives the time of the first one that has one.
+func countLines(f *os.File) (n int, first string) {
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64<<10), 1<<20)
+	for sc.Scan() {
+		if b := sc.Bytes(); len(b) > 0 {
+			n++
+			if first == "" {
+				if ts, _ := logHead(b); ts != nil {
+					first = string(ts)
+				}
+			}
+		}
+	}
+	return n, first
 }
 
 // parseSince reads "15m", "6h", "2d" or plain seconds; empty or "all" is no limit.

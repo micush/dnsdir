@@ -94,3 +94,35 @@ func TestLogQueryArgs(t *testing.T) {
 		}
 	}
 }
+
+// A rotated file last written before the range is only counted, not searched; Oldest still comes from it.
+func TestReadLogSkipsFilesBeforeTheRange(t *testing.T) {
+	dir := t.TempDir()
+	old := logDir
+	logDir = dir
+	defer func() { logDir = old }()
+	now := time.Now()
+	ln := func(ago time.Duration, msg string) string {
+		return fmt.Sprintf("time=%s level=INFO msg=%q\n", now.Add(-ago).Format(time.RFC3339Nano), msg)
+	}
+	p2, p1 := filepath.Join(dir, logFileName+".2"), filepath.Join(dir, logFileName+".1")
+	os.WriteFile(p2, []byte(ln(5*time.Hour, "oldest")+ln(4*time.Hour, "b")), 0o600)
+	os.WriteFile(p1, []byte(ln(3*time.Hour, "c")+ln(2*time.Hour, "d")+ln(90*time.Minute, "e")), 0o600)
+	os.Chtimes(p2, now.Add(-4*time.Hour), now.Add(-4*time.Hour))
+	os.Chtimes(p1, now.Add(-90*time.Minute), now.Add(-90*time.Minute))
+	os.WriteFile(filepath.Join(dir, logFileName), []byte(ln(50*time.Minute, "f")+ln(20*time.Minute, "g")+ln(time.Minute, "h")), 0o600)
+	r, err := ReadLog(LogQuery{Since: time.Hour, Limit: 2})
+	if err != nil || r.Scanned != 8 || r.Matched != 3 || !r.Truncated || len(r.Lines) != 2 || r.Lines[0].Msg != "g" || r.Lines[1].Msg != "h" ||
+		r.Oldest != now.Add(-5*time.Hour).Format(time.RFC3339Nano) {
+		t.Fatalf("%v %+v", err, r)
+	}
+	// every line, no range: the ring gives them back in order
+	r, _ = ReadLog(LogQuery{Limit: 5})
+	var got []string
+	for _, l := range r.Lines {
+		got = append(got, l.Msg)
+	}
+	if strings.Join(got, "") != "defgh" || r.Matched != 8 {
+		t.Fatalf("%v %+v", got, r)
+	}
+}

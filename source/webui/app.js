@@ -623,12 +623,21 @@
     if (document.getElementById("main")) selectTab(state.tab);
   }
 
+  // A tick is skipped while the previous one is still waiting for its answer.  Overlapping ticks broke every page whose
+  // answer can take longer than POLL_MS (the Log of a busy cluster, Statistics over a month): each new request made the
+  // one before it stale, so no answer was ever drawn and the page stayed empty, while the nodes piled up work.
   function startPolling(fn) {
-    const tick = async () => { if (!document.hidden) { try { await fn(); } catch (_) { /* shown by view */ } } };
+    let busy = false;
+    const tick = async () => {
+      if (document.hidden || busy) return;
+      busy = true;
+      try { await fn(); } catch (_) { /* shown by view */ } finally { busy = false; }
+    };
     tick();
+    state.tick = tick;
     state.timer = setInterval(tick, POLL_MS);
   }
-  function stopPolling() { if (state.timer) clearInterval(state.timer); state.timer = null; }
+  function stopPolling() { if (state.timer) clearInterval(state.timer); state.timer = null; state.tick = null; }
   // Every timer the signed-in shell owns.  A session that ends by itself (an
   // update restarts the daemon, an idle timeout) must stop the sidebar and node
   // pollers too: they kept getting 401 and redrew the login form every few
@@ -641,7 +650,7 @@
     state.topoTimer = state.nodesTimer = state.alertTimer = null;
   }
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && state.timer && VIEWS[state.tab].poll) VIEWS[state.tab].poll().catch(() => {});
+    if (!document.hidden && state.timer && state.tick) state.tick();
   });
 
   // partialLast: the range ends inside the last bucket (more than one bucket, so there is something left to draw)
@@ -5937,6 +5946,7 @@
     }
     async function load() {
       const my = ++seq;
+      if (first && !box.firstChild) box.append(h("div", { class: "empty" }, many() ? "Reading the log of every node…" : "Reading the log…"));
       const q = new URLSearchParams({ level: level.value, q: search.value.trim(), since: span.value, n: count.value });
       try {
         const r = many() ? await loadMany(q.toString()) : (await api("GET", "/api/log?" + q.toString())).data;

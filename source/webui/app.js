@@ -4889,7 +4889,7 @@
     };
 
     let status, bar, cnote, tiles, chartBox, pies, tops, upds, foot, rangeBtns, fromIn, toIn, customRow;
-    let range = "1h", qpsView = false, clientsView = false, sel = "", pickClient = "", pickDomain = "", hidden = new Set(), last = null, lastAt = 0, seq = 0, topPage = { c: 0, d: 0 }, topKey = "", cFilter = "", dFilter = "", filterTimer = 0;
+    let range = "1h", qpsView = false, clientsView = false, sel = "", pickClient = "", pickDomain = "", last = null, lastAt = 0, seq = 0, topPage = { c: 0, d: 0 }, topKey = "", cFilter = "", dFilter = "", filterTimer = 0;
 
     // ── fetching ──
     // the picked node (Node menu in the top bar) answers; pick another member there
@@ -4957,11 +4957,8 @@
       const fq = (v) => (v >= 10 ? n0(Math.round(v)) : Number(v).toFixed(1));
       const qs = SERIES.find((s) => s.key === (only || "total"));
       const avail = clientsView ? [{ key: "client_counts", label: "Clients" + (only ? " — " + qs.label : ""), cls: qs.cls }] : qpsView ? [{ key: "qps", label: "QPS" + (only ? " — " + qs.label : ""), cls: qs.cls }] : SERIES.filter((s) => only ? s.key === only : (s.key !== "other" || d.sums.other > 0) && (s.key !== "updates" || d.sums.updates > 0));
-      const shown = avail.filter((s) => only || !hidden.has(s.key));
-      const legend = h("div", { class: "qlegend", role: "group", "aria-label": "Series" }, avail.map((s) =>
-        h("button", { type: "button", class: "qchip " + s.cls, "aria-pressed": hidden.has(s.key) && !only ? "false" : "true", disabled: only || single ? "" : null,
-          onclick: () => { if (hidden.has(s.key)) hidden.delete(s.key); else hidden.add(s.key); drawChart(d); } },
-          h("span", { class: "sw" }), s.label)));
+      // no legend: each tile's coloured edge is its line's colour, and clicking a tile shows only that line
+      const shown = avail;
       const n = d.total.length - (partialLast(d, d.total.length) && !clientsView ? 1 : 0);   // the bucket still filling is left out (not for the running client count: it only grows, and its last point is the tile)
       const top = Math.max(qpsView ? 0.1 : 1, ...shown.flatMap((s) => d[s.key].slice(0, n))), max = qpsView ? 4 * niceMax(top / 4) : niceMax(top);   // a rate gets four round steps
       const yLabels = [0, 1, 2, 3, 4].map((g) => (qpsView ? fq((max * g) / 4) : n0(Math.round((max * g) / 4))));
@@ -5006,7 +5003,7 @@
         },
         onmouseleave: () => { cross.classList.add("hidden"); tip.classList.add("hidden"); dots.forEach((dt) => dt.classList.add("hidden")); } });
       svg.append(cross, ...dots, hit, tip);
-      chartBox.append(legend, svg);
+      chartBox.append(svg);
     }
 
     function donut(title, items, clsOf, keep) {

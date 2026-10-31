@@ -1,5 +1,14 @@
 # Changelog
 
+## [v617] - 2026-10-30 — Monitor ▸ Statistics: the chart's legend pills are gone; the tiles are the legend
+
+### Changed
+- **The row of pills above the Statistics chart is removed.** Each tile above it already has a coloured edge in the colour of its line, so the pills repeated the tiles; and clicking a tile already draws only that line (and limits the donuts and lists to it), with the total bringing every line back. The pills' one extra, switching several lines off at once, goes with them; every line the range has is drawn unless a tile is picked. The pills of the smaller charts (latency, cache, Monitor ▸ Node), which have no tiles, are unchanged. The Statistics help says the tiles are the legend. The same change is in ntpdir v196.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...`, `go test -race -count=1 ./...`, `node --check` on `app.js` and `help.js`.
+- Headless Chromium, dark, real PAM user, against a running daemon of each product: Monitor ▸ Statistics has no pills over the chart and draws every line; clicking a tile drew only its line, clicking the total drew them all again.
+
 ## [v616] - 2026-10-30 — The alert mark in the sidebar follows a gateway or Cluster picked in the Node menu
 
 ### Fixed

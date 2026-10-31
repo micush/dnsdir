@@ -211,7 +211,7 @@ func (m *Mgmt) clusterQStatsGW(ctx context.Context, actor string, from, to time.
 		keep = gatewayNodes(g)
 	}
 	q := url.Values{"from": {strconv.FormatInt(from.Unix(), 10)}, "to": {strconv.FormatInt(to.Unix(), 10)},
-		"rcode": {f.Rcode}, "client": {f.Client}, "domain": {f.Domain}, "cmatch": {f.CMatch}, "dmatch": {f.DMatch}}
+		"rcode": {f.Rcode}, "client": {f.Client}, "domain": {f.Domain}, "cmatch": {f.CMatch}, "dmatch": {f.DMatch}, "proto": {f.Proto}}
 	parts, infos := clusterGatherSel(ctx, m, proxyReq{User: actor, Method: "GET", Path: "/api/qstats?" + q.Encode()}, clusterStatsTimeout,
 		func() (*QStatsResult, error) { return qstats.Query(from, to, f), nil }, keep)
 	if len(parts) == 0 {
@@ -378,6 +378,16 @@ func mergeQStats(parts []clusterPart[QStatsResult], infos []ClusterNodeInfo) *QS
 		Types: []NameCount{}, Protos: []NameCount{}, Clients: []NameCount{}, Domains: []NameCount{}}
 	types, protos, clients, domains := map[string]*NameCount{}, map[string]*NameCount{}, map[string]*NameCount{}, map[string]*NameCount{}
 	maxClients := 0
+	// the transports Clients is limited to: a node before v619 does not know the filter and answers with every client,
+	// so its clients are left out and the queries of those transports it counted become "(others)"
+	proto := ""
+	for _, p := range use {
+		if p.R.Proto != "" {
+			proto = p.R.Proto
+		}
+	}
+	r.Proto = proto
+	pset := protoSet(proto)
 	for _, p := range use {
 		q := p.R
 		if q.From < r.From {
@@ -415,7 +425,21 @@ func mergeQStats(parts []clusterPart[QStatsResult], infos []ClusterNodeInfo) *QS
 		addGuard(&r.Guard, q.Guard)
 		addCounts(types, q.Types)
 		addCounts(protos, q.Protos)
-		addCounts(clients, q.Clients)
+		if proto != "" && q.Proto != proto {
+			var n uint64
+			for _, e := range q.Protos {
+				for i, on := range pset {
+					if on && e.Name == protoNames[i] {
+						n += e.Count
+					}
+				}
+			}
+			if n > 0 {
+				addCounts(clients, []NameCount{{Name: qsOthers, Count: n}})
+			}
+		} else {
+			addCounts(clients, q.Clients)
+		}
 		addCounts(domains, q.Domains)
 	}
 	r.Types = sortedCounts(types, 0)

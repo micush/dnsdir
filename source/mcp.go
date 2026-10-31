@@ -687,13 +687,17 @@ func init() {
 		{name: "get_query_stats", title: "Query statistics",
 			desc: "Queries over time on a node, every node (node=\"cluster\") or the nodes of one gateway (gateway=N): totals, NOERROR/SERVFAIL/NXDOMAIN/REFUSED, record types, transports, cache hits, top clients and domains.",
 			props: []mcpProp{mcpRange, {name: "gateway", typ: "integer", desc: "Only the nodes of this gateway (group number); implies the cluster."},
-				{name: "top", typ: "integer", desc: "How many top clients and domains (default 20)."}},
+				{name: "top", typ: "integer", desc: "How many top clients and domains (default 20)."},
+				{name: "transport", typ: "string", desc: "Only the top clients of these transports, comma-separated: udp, tcp, dot, doh, or with 4 or 6 for one IP version (dot4, udp6)."}},
 			run: func(c *mcpCtx) (any, error) {
 				r, err := mcpRangeArg(c)
 				if err != nil {
 					return nil, err
 				}
 				q := url.Values{"from": {r}}
+				if t := c.str("transport"); t != "" {
+					q.Set("proto", t)
+				}
 				var b json.RawMessage
 				if gw := c.num("gateway", 0); gw > 0 || strings.EqualFold(c.str("node"), "cluster") {
 					if gw > 0 {

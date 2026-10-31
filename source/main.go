@@ -162,6 +162,7 @@ the web GUI):
   Statistics       --stats [--stats-range now|1h|1d|7d|30d]
                    [--stats-rcode nxdomain|servfail|refused|noerror|other|update]
                    [--stats-client ADDR | --stats-domain NAME]
+                   [--stats-transport udp|tcp|dot|doh[4|6],...]   (Top clients: only the clients of those transports)
                    [--all-nodes]   (every cluster node's numbers added together)
                    --stats-clear [--all-nodes]   (forget the counts and top lists, here or on every node)
                    --scan ADDR   (nmap of a client, run from this node; needs the nmap package)

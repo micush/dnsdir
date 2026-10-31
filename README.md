@@ -794,7 +794,7 @@ A directory account keeps its password and expiry date in the directory. **Add a
 | `--update-repo` | Configure ▸ Settings ▸ **Upgrades** tab (Online repository) |
 | `--update-cancel` | command line only (the Upgrade tab shows what is queued) |
 | `--stats-clear` `[--all-nodes]`, `--scan ADDR`, `--ping ADDR\|NAME`, `--traceroute ADDR\|NAME`, `--lookup ADDR\|NAME`, `--cache-flush NAME`, `--cache-clear` | Statistics page: **Clear**; right-click a client ▸ **Scan** (prints the report); right-click a client or domain ▸ **Ping**, **Traceroute**, **Lookup** (the popup's output, printed when done); right-click a domain ▸ **Flush** (every node); `--cache-clear` is the **Clear** button of the **Cache** box on the DNS page (every node); a client's **Limit** is the `client_limits` setting, **Copy** has no command |
-| `--stats` `[--stats-range now\|1h\|1d\|7d\|30d] [--stats-rcode KIND] [--stats-client ADDR \| --stats-domain NAME] [--all-nodes]`, `--whois NAME`, `--dns-updates` | Statistics page (Monitor); `--whois` is right-click ▸ **Whois**; the last is its **Recent dynamic updates** card |
+| `--stats` `[--stats-range now\|1h\|1d\|7d\|30d] [--stats-rcode KIND] [--stats-client ADDR \| --stats-domain NAME] [--stats-transport LIST] [--all-nodes]`, `--whois NAME`, `--dns-updates` | Statistics page (Monitor); `--whois` is right-click ▸ **Whois**; the last is its **Recent dynamic updates** card |
 | `--host` `[--host-range 1h\|1d\|7d\|30d] [--all-nodes]` | Monitor ▸ Node page; `--all-nodes` is the Node menu's **Cluster** entry (also on Statistics) |
 | `--capture IFACE` `[--capture-seconds N] [--capture-filter EXPR] [--capture-file FILE] [--all-nodes]`, `--capture-interfaces` | Capture page (Monitor); `--all-nodes` is the Node menu's **Cluster** entry there |
 | `--tshoot` `[--all-nodes] [--tshoot-file F]` | Log page ▸ tshoot |
@@ -1369,7 +1369,7 @@ A directory account keeps its password and expiry date in the directory. **Add a
 | `--update-repo` | Configure ▸ Settings ▸ **Upgrades** tab (Online repository) |
 | `--update-cancel` | command line only (the Upgrade tab shows what is queued) |
 | `--stats-clear` `[--all-nodes]`, `--scan ADDR`, `--ping ADDR\|NAME`, `--traceroute ADDR\|NAME`, `--lookup ADDR\|NAME`, `--cache-flush NAME`, `--cache-clear` | Statistics page: **Clear**; right-click a client ▸ **Scan** (prints the report); right-click a client or domain ▸ **Ping**, **Traceroute**, **Lookup** (the popup's output, printed when done); right-click a domain ▸ **Flush** (every node); `--cache-clear` is the **Clear** button of the **Cache** box on the DNS page (every node); a client's **Limit** is the `client_limits` setting, **Copy** has no command |
-| `--stats` `[--stats-range now\|1h\|1d\|7d\|30d] [--stats-rcode KIND] [--stats-client ADDR \| --stats-domain NAME] [--all-nodes]`, `--whois NAME`, `--dns-updates` | Statistics page (Monitor); `--whois` is right-click ▸ **Whois**; the last is its **Recent dynamic updates** card |
+| `--stats` `[--stats-range now\|1h\|1d\|7d\|30d] [--stats-rcode KIND] [--stats-client ADDR \| --stats-domain NAME] [--stats-transport LIST] [--all-nodes]`, `--whois NAME`, `--dns-updates` | Statistics page (Monitor); `--whois` is right-click ▸ **Whois**; the last is its **Recent dynamic updates** card |
 | `--host` `[--host-range 1h\|1d\|7d\|30d] [--all-nodes]` | Monitor ▸ Node page; `--all-nodes` is the Node menu's **Cluster** entry (also on Statistics) |
 | `--capture IFACE` `[--capture-seconds N] [--capture-filter EXPR] [--capture-file FILE] [--all-nodes]`, `--capture-interfaces` | Capture page (Monitor); `--all-nodes` is the Node menu's **Cluster** entry there |
 | `--tshoot` `[--all-nodes] [--tshoot-file F]` | Log page ▸ tshoot |
@@ -1593,15 +1593,15 @@ Monitor ▸ Statistics (or `dnsdir --stats`) shows what the DNS proxy has answer
 
 - the total number of queries and how they ended (No Error, Server Failure, NX Domain, Refused, and dynamic DNS Updates), and the **QPS** (queries per second in the last finished interval, with the peak of the range under it; click it to draw the rate in the chart),
 - the number of different clients,
-- a line chart over time (hover for the values, click a name in the legend to hide a line),
-- donuts for record type and transport (UDP and TCP), and
+- a line chart over time (hover for the values; each tile is the legend of its line),
+- donuts for record type and transport (UDP, TCP, DoT and DoH, over IPv4 or IPv6; click a transport to list only its clients), and
 - the top clients (with the reverse-DNS name once it is known) and the top domains.
 
 ![Monitor ▸ Statistics: query rates, response codes, record types, transport, top clients and top domains](snaps/statistics.png)
 
 The range is Last Hour, Last Day, Last Week, Last Month, or a custom start and end. The proxy does not block or serve zones itself, so there are no Blocked or Authoritative figures; cache hits have their own tile.
 
-**Drilling down.** Click a tile (No Error, Server Failure, NX Domain, Refused) to limit the chart, the donuts and the top lists to that kind of answer, for example to see which domains get NXDOMAIN and who asks for them. Total Queries clears it. Click a client to list the domains it asked for, or a domain to list the clients that asked for it; this combines with the tiles.
+**Drilling down.** Click a tile (No Error, Server Failure, NX Domain, Refused) to limit the chart, the donuts and the top lists to that kind of answer, for example to see which domains get NXDOMAIN and who asks for them. Total Queries clears it. Click a client to list the domains it asked for, or a domain to list the clients that asked for it; this combines with the tiles. Click a transport in the **Transport** donut (Ctrl-click for more than one) to list in Top Clients only the clients that used it (`--stats-transport dot`; `udp`, `tcp`, `doh`, or `dot4`, `udp6` for one IP version); the chart, the record types and Top Domains are not split by transport.
 
 **Naming a client.** Right-click a client in Top Clients ▸ **Name** gives it a name by hand (up to 64 characters), shown under its address instead of the reverse-DNS name, found by the Filter box, and shared by the cluster (`client_names` in the DNS block: address to name). A named client's menu has **Rename** and **Remove name** instead. Name… asks for a full host name (`ann-pc.corp.example`) and, after saving it, registers it in DNS with RFC 2136 dynamic updates (a delete of the old records, then an add) sent by the node you are connected to: the A/AAAA record to the primary of the name's zone and the PTR record of the client's address to the primary of the reverse zone (found from the SOA records). Rename… does the same and removes the old name's address record; Remove name leaves DNS alone. Optional TSIG (HMAC-SHA256) signing and the record TTL are in Settings (`register_key_name`, `register_key`, `register_ttl`); without a key the update is unsigned, so the zone must allow updates from this node.
 
@@ -1636,6 +1636,7 @@ dnsdir --stats
 dnsdir --stats --stats-rcode nxdomain
 dnsdir --stats --stats-client 192.0.2.7        (what that client asked for)
 dnsdir --stats --stats-domain example.com      (who asked for it)
+dnsdir --stats --stats-transport dot           (the clients that used DNS over TLS; dot4, udp6, ... for one IP version)
 dnsdir --whois example.com                     (registration data, from its registry)
 dnsdir --stats --stats-range now
 dnsdir --stats --stats-range 1d

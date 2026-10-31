@@ -29,25 +29,25 @@ type cliFlags struct {
 	schedule, scheduleHistory                                                                                               *bool
 	scheduleSet, scheduleDel, scheduleRun                                                                                   *string
 
-	users                                                                                                                                                                                                                                            *bool
-	userAdd, userPasswd, userExpiry, userDel, userGrant, userRevoke, expires, hostname                                                                                                                                                               *string
-	power, powerAt                                                                                                                                                                                                                                   *string
-	powerIn                                                                                                                                                                                                                                          *int
-	blockStatus, bgp, bgpDisable, bgpEnable, logShow, statsShow, statsClear, cacheClear, hostShow, dnsUpdates, nodePause, nodeResume, nodeStatus, allNodes, captureList                                                                              *bool
-	logMin, logGrep, logSince, logLines, statsRange, statsRcode, statsClient, statsDomain, whoisName, scanAddr, pingAddr, traceAddr, lookupAddr, cacheFlush, dnsLookup, hostRange, captureIface, captureSecs, captureFilter, captureFile, tshootFile *string
-	syslog, syslogOff, syslogOn, syslogTest, syslogInsecure                                                                                                                                                                                          *bool
-	lldp, lldpOn, lldpOff                                                                                                                                                                                                                            *bool
-	syslogServer, syslogProto, syslogFacility, syslogFormat, syslogCA                                                                                                                                                                                *string
-	ospf, ospfDisable, ospfEnable                                                                                                                                                                                                                    *bool
-	ospfRouterID, ospfIfAdd, ospfIfDel, ospfIfDisable, ospfIfEnable, ospfArea, ospfNetwork, ospfKey, ospfHello, ospfDead, ospfMetric                                                                                                                 *string
-	asn, routerID, asPrepend, nbrAdd, nbrDel, nbrDisable, nbrEnable, remoteAS, descr, passwd, multihop, keepalive, hold                                                                                                                              *string
-	updateUpload, updatePush, updateCancel, updateAuto, updateRepo, clusterFailover                                                                                                                                                                  *string
-	canvas, vmacTest, tshoot, tshootCapture                                                                                                                                                                                                          *bool
-	canvasPause, canvasResume, canvasMove, canvasAdd, canvasDel, canvasSet, vip, vip6, ifname, server, name, qtype, ecs, label, anycast, address, scope, node, realMACs                                                                              *string
-	pos, group, ecsV4, ecsV6, spreadBand, downPercent, failThreshold, maxAttempts                                                                                                                                                                    *int
-	serverStats, gatewayStats, spread, lbMode                                                                                                                                                                                                        *string
-	serverType, serverLists, fwdRoute, blockUpdate, blockTest                                                                                                                                                                                        *string
-	latencyAlpha                                                                                                                                                                                                                                     *float64
+	users                                                                                                                                                                                                                                                        *bool
+	userAdd, userPasswd, userExpiry, userDel, userGrant, userRevoke, expires, hostname                                                                                                                                                                           *string
+	power, powerAt                                                                                                                                                                                                                                               *string
+	powerIn                                                                                                                                                                                                                                                      *int
+	blockStatus, bgp, bgpDisable, bgpEnable, logShow, statsShow, statsClear, cacheClear, hostShow, dnsUpdates, nodePause, nodeResume, nodeStatus, allNodes, captureList                                                                                          *bool
+	logMin, logGrep, logSince, logLines, statsRange, statsRcode, statsClient, statsDomain, statsProto, whoisName, scanAddr, pingAddr, traceAddr, lookupAddr, cacheFlush, dnsLookup, hostRange, captureIface, captureSecs, captureFilter, captureFile, tshootFile *string
+	syslog, syslogOff, syslogOn, syslogTest, syslogInsecure                                                                                                                                                                                                      *bool
+	lldp, lldpOn, lldpOff                                                                                                                                                                                                                                        *bool
+	syslogServer, syslogProto, syslogFacility, syslogFormat, syslogCA                                                                                                                                                                                            *string
+	ospf, ospfDisable, ospfEnable                                                                                                                                                                                                                                *bool
+	ospfRouterID, ospfIfAdd, ospfIfDel, ospfIfDisable, ospfIfEnable, ospfArea, ospfNetwork, ospfKey, ospfHello, ospfDead, ospfMetric                                                                                                                             *string
+	asn, routerID, asPrepend, nbrAdd, nbrDel, nbrDisable, nbrEnable, remoteAS, descr, passwd, multihop, keepalive, hold                                                                                                                                          *string
+	updateUpload, updatePush, updateCancel, updateAuto, updateRepo, clusterFailover                                                                                                                                                                              *string
+	canvas, vmacTest, tshoot, tshootCapture                                                                                                                                                                                                                      *bool
+	canvasPause, canvasResume, canvasMove, canvasAdd, canvasDel, canvasSet, vip, vip6, ifname, server, name, qtype, ecs, label, anycast, address, scope, node, realMACs                                                                                          *string
+	pos, group, ecsV4, ecsV6, spreadBand, downPercent, failThreshold, maxAttempts                                                                                                                                                                                *int
+	serverStats, gatewayStats, spread, lbMode                                                                                                                                                                                                                    *string
+	serverType, serverLists, fwdRoute, blockUpdate, blockTest                                                                                                                                                                                                    *string
+	latencyAlpha                                                                                                                                                                                                                                                 *float64
 }
 
 func registerCLIFlags(fs *flag.FlagSet) *cliFlags {
@@ -79,7 +79,7 @@ func registerCLIFlags(fs *flag.FlagSet) *cliFlags {
 		users: b("users"), userAdd: s("user-add"), userPasswd: s("user-passwd"), userExpiry: s("user-expiry"), userDel: s("user-del"), userGrant: s("user-grant"), userRevoke: s("user-revoke"), expires: s("expires"), hostname: s("hostname"),
 		power: s("power"), powerAt: s("at"), powerIn: fs.Int("in", 0, ""),
 		nodePause: b("node-pause"), nodeResume: b("node-resume"), nodeStatus: b("node-status"),
-		logShow: b("log"), logMin: s("log-min"), logGrep: s("log-grep"), logSince: s("log-since"), logLines: s("log-lines"), statsShow: b("stats"), statsClear: b("stats-clear"), cacheClear: b("cache-clear"), scanAddr: s("scan"), pingAddr: s("ping"), lookupAddr: s("lookup"), cacheFlush: s("cache-flush"), traceAddr: s("traceroute"), statsRange: s("stats-range"), statsRcode: s("stats-rcode"), statsClient: s("stats-client"), statsDomain: s("stats-domain"), whoisName: s("whois"), dnsLookup: s("dns-lookup"), hostShow: b("host"), allNodes: b("all-nodes"), captureList: b("capture-interfaces"), captureIface: s("capture"), captureSecs: s("capture-seconds"), captureFilter: s("capture-filter"), captureFile: s("capture-file"), dnsUpdates: b("dns-updates"), hostRange: s("host-range"),
+		logShow: b("log"), logMin: s("log-min"), logGrep: s("log-grep"), logSince: s("log-since"), logLines: s("log-lines"), statsShow: b("stats"), statsClear: b("stats-clear"), cacheClear: b("cache-clear"), scanAddr: s("scan"), pingAddr: s("ping"), lookupAddr: s("lookup"), cacheFlush: s("cache-flush"), traceAddr: s("traceroute"), statsRange: s("stats-range"), statsRcode: s("stats-rcode"), statsClient: s("stats-client"), statsDomain: s("stats-domain"), statsProto: s("stats-transport"), whoisName: s("whois"), dnsLookup: s("dns-lookup"), hostShow: b("host"), allNodes: b("all-nodes"), captureList: b("capture-interfaces"), captureIface: s("capture"), captureSecs: s("capture-seconds"), captureFilter: s("capture-filter"), captureFile: s("capture-file"), dnsUpdates: b("dns-updates"), hostRange: s("host-range"),
 		bgp: b("bgp"), bgpDisable: b("bgp-disable"), bgpEnable: b("bgp-enable"), nbrDisable: s("bgp-neighbor-disable"), nbrEnable: s("bgp-neighbor-enable"), asn: s("asn"), routerID: s("router-id"), asPrepend: s("as-prepend"),
 		nbrAdd: s("bgp-neighbor-add"), nbrDel: s("bgp-neighbor-del"), remoteAS: s("remote-as"), descr: s("description"),
 		syslog: b("syslog"), syslogOff: b("syslog-disable"), syslogOn: b("syslog-enable"), syslogTest: b("syslog-test"), syslogInsecure: b("syslog-tls-insecure"),
@@ -1187,7 +1187,7 @@ func runStats(sock string, f *cliFlags) {
 	if *f.allNodes {
 		cmd = "qstats.cluster"
 	}
-	decode(op(sock, cmd, map[string]string{"from": rng, "rcode": *f.statsRcode, "client": *f.statsClient, "domain": *f.statsDomain}), &r)
+	decode(op(sock, cmd, map[string]string{"from": rng, "rcode": *f.statsRcode, "client": *f.statsClient, "domain": *f.statsDomain, "proto": *f.statsProto}), &r)
 	printClusterNote(r.Cluster)
 	pct := func(n uint64) string {
 		if r.Sums.Total == 0 {
@@ -1230,6 +1230,11 @@ func runStats(sock string, f *cliFlags) {
 	}
 	if r.Domain != "" {
 		fmt.Printf("\nTop clients below: who asked for %s.\n", r.Domain)
+	}
+	if r.Proto != "" {
+		fmt.Printf("\nTop clients below: the clients that used %s.\n", strings.ReplaceAll(r.Proto, ",", ", "))
+	} else if *f.statsProto != "" {
+		fmt.Printf("\nTop clients below: every client — this node does not keep the clients by transport (update it to v619 or later).\n")
 	}
 	list("Query types", r.Types, false)
 	list("Transport", r.Protos, false)

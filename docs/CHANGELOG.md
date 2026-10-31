@@ -1,5 +1,21 @@
 # Changelog
 
+## [v619] - 2026-10-30 — Monitor ▸ Statistics: click a transport to see the clients that used it
+
+### Added
+- **Click a transport in the Transport donut (its slice or its row) and Top Clients lists only the clients that used it**, each with its queries over that transport and its share of them, and a "Clients that used DoT · IPv4 — Show all" line above the list. **Ctrl-click** (Cmd on a Mac) adds more transports (both rows of DoT, say); clicking the picked one again, or **Show all**, lists every client again. The other slices are dimmed while one is picked. It combines with a tile (only NXDOMAIN over DoT), with a picked client and with the Filter box; a picked domain and a picked transport clear each other, because who asked for a domain is not kept by transport. The chart, the record types and Top Domains are not split by transport and stay as they are. The plain "UDP" and "TCP" rows (counts made before the IP-version split) and "Other" cannot be picked.
+- The daemon now counts each slot's clients by transport as well (`cproto`, at most as many as the client list itself), saved with the statistics. Queries counted before this version have no client by transport and show as "(others)" when a transport is picked, so the list still adds up to the donut's number.
+- **API:** `/api/qstats` and `/api/clusterstats` take `proto=` (comma-separated names as the donut shows them, or `udp`, `tcp`, `dot`, `doh`, with 4 or 6 for one IP version), and the answer says which in `proto`. **CLI:** `--stats --stats-transport dot` (also with `--all-nodes`). **MCP:** `get_query_stats` takes `transport`.
+- **Cluster:** a node on an older version answers with every client; its clients are left out of a transport-limited list and its queries over the transport count as "(others)". When the picked node itself is older, the line above Top Clients says the list is not limited and why.
+
+### Fixed
+- The Statistics help and the README still said a name in the chart's legend hides a line (the legend went in v617), and that the Transport donut is "UDP or TCP" (it has had DoT, DoH and the IP versions for a while).
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./...`, `node --check` on `app.js` and `help.js`; `apiroutes.go` regenerated.
+- **New tests** (`qstats_proto_test.go`): the clients of one transport with their counts over it; two transports together; with a tile, a picked client and the Filter box; a transport nobody used; older counts as "(others)"; the counts survive a save and restore; the argument's short and long forms and its refusals (with a picked domain too); a cluster merge with a node of an older version, and with only older nodes.
+- **Live:** a daemon with one gateway serving UDP, TCP and DNS over TLS, queried by four clients (127.0.0.2 over UDP and DoT, .3 over UDP, .4 over TCP, .5 over DoT). Headless Chromium, real PAM user: clicking **DoT · IPv4** listed .5 (6) and .2 (2); Ctrl-click **TCP · IPv4** added .4; clicking the UDP slice listed .2 (12) and .3 (5); clicking a domain cleared the transport; **Show all** brought back all four. `dnsdir --stats --stats-transport dot` printed the same two clients.
+
 ## [v618] - 2026-10-30 — A gateway with its own DNS servers follows "Accept any certificate" (and the other Settings-only DNS settings)
 
 ### Fixed

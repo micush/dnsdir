@@ -58,6 +58,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		QCMatch  string                `json:"cmatch"`
 		QGW      string                `json:"gw"` // qstats.cluster: only the nodes of this gateway (group number)
 		QDMatch  string                `json:"dmatch"`
+		QProto   string                `json:"proto"`
 		Lookup   string                `json:"lookup"`
 		Paused   bool                  `json:"paused"`
 		User     string                `json:"username"`
@@ -303,6 +304,9 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 			return nil, err
 		}
 		f = f.withMatch(a.QCMatch, a.QDMatch)
+		if f, err = f.withProto(a.QProto); err != nil {
+			return nil, err
+		}
 		return qstats.Query(from, to, f), nil
 	// the same for the whole cluster: every node's numbers added together (Node menu ▸ Cluster, --stats --all-nodes)
 	// packet capture: this node's Capture page, a timed capture (also what each node runs for the cluster-wide one), and
@@ -508,6 +512,9 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 			return nil, err
 		}
 		f = f.withMatch(a.QCMatch, a.QDMatch)
+		if f, err = f.withProto(a.QProto); err != nil {
+			return nil, err
+		}
 		gid := 0
 		if a.QGW != "" {
 			if gid, err = strconv.Atoi(a.QGW); err != nil || gid < 1 {

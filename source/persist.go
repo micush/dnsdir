@@ -44,6 +44,8 @@ type pKind struct {
 	TCP     uint32                       `json:"tc,omitempty"`
 	// Split is UDP and TCP counted by the client's IP version (qsKind.proto), absent in a file of an older version
 	Split []uint32 `json:"ps,omitempty"`
+	// CP is the clients by transport (qsKind.cproto), absent in a file of a version before v619
+	CP []map[string]uint32 `json:"cp,omitempty"`
 }
 
 type pHostRow struct {
@@ -107,6 +109,14 @@ func (s *QStats) persistTo(emit func(pRec) error) error {
 				rec.Top[ci] = pKind{Clients: copyU32(k.clients), Domains: copyU32(k.domains), Types: copyU32(k.types), UDP: k.udp, TCP: k.tcp}
 				if k.proto != ([8]uint32{}) {
 					rec.Top[ci].Split = append([]uint32(nil), k.proto[:]...)
+				}
+				for i, m := range k.cproto {
+					if m != nil {
+						if rec.Top[ci].CP == nil {
+							rec.Top[ci].CP = make([]map[string]uint32, len(k.cproto))
+						}
+						rec.Top[ci].CP[i] = copyU32(m)
+					}
 				}
 			}
 			s.mu.Unlock()
@@ -312,6 +322,7 @@ func (s *QStats) restore(r pRec) int {
 			q.clients, q.domains, q.types = k.Clients, k.Domains, k.Types
 			q.udp, q.tcp = k.UDP, k.TCP
 			copy(q.proto[:], k.Split) // a file of an older version has four counters: the DoT and DoH ones start at 0
+			copy(q.cproto[:], k.CP)
 			if q.domains == nil {
 				q.domains = map[string]uint32{}
 			}

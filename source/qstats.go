@@ -102,6 +102,10 @@ type qsKind struct {
 	// 3 TCP over IPv6 (see protoIdx).  Counts saved by an older version have no split: what udp and tcp hold beyond
 	// the split is shown as plain UDP and TCP.
 	proto [8]uint32
+	// cproto is the clients again, counted apart by transport (an index of proto), so Top clients can be limited to the
+	// clients of one transport.  A map is made at the first query of its transport; counts saved by a version before
+	// v619 have none (see Query).
+	cproto [8]map[string]uint32
 }
 
 // protoNames are the names of the proto counters, in index order.
@@ -376,7 +380,12 @@ func (s *QStats) apply(e qEvent) {
 		default:
 			k.udp++
 		}
-		k.proto[protoIdxVia(via, tcp, client)]++
+		pi := protoIdxVia(via, tcp, client)
+		k.proto[pi]++
+		if k.cproto[pi] == nil {
+			k.cproto[pi] = map[string]uint32{}
+		}
+		bump(k.cproto[pi], who, qsCaps[kind][0])
 	}
 }
 
@@ -493,6 +502,7 @@ type QStatsResult struct {
 	Client     string       `json:"client,omitempty"` // when set, Domains lists what this client asked for
 	Domain     string       `json:"domain,omitempty"` // when set, Clients lists who asked for this domain
 	Rcode      string       `json:"rcode"`            // the answer kind the types, transports and top lists are limited to; empty is all
+	Proto      string       `json:"proto,omitempty"`  // the transports (comma-separated names of the Transport donut) Clients is limited to
 	Start      int64        `json:"start"`
 	Step       int          `json:"step"`
 	From       int64        `json:"from"`
@@ -570,13 +580,14 @@ func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
 	if n > qsMaxPoints {
 		n = qsMaxPoints
 	}
-	r := &QStatsResult{Rcode: rcode, Client: f.Client, Domain: f.Domain, Start: start, Step: int(step), From: from.Unix(), To: to.Unix(), Since: s.start.Unix(),
+	r := &QStatsResult{Rcode: rcode, Proto: f.Proto, Client: f.Client, Domain: f.Domain, Start: start, Step: int(step), From: from.Unix(), To: to.Unix(), Since: s.start.Unix(),
 		Total: make([]uint64, n), NoError: make([]uint64, n), ServFail: make([]uint64, n), NXDomain: make([]uint64, n),
 		Refused: make([]uint64, n), Other: make([]uint64, n), Updates: make([]uint64, n), ClientsN: make([]uint64, n),
 		Types: []NameCount{}, Protos: []NameCount{}, Clients: []NameCount{}, Domains: []NameCount{}}
 	types, clients, domains := map[string]uint64{}, map[string]uint64{}, map[string]uint64{}
 	var protos [8]uint64
 	var udp, tcp uint64
+	pset, byProto := protoSet(f.Proto), map[string]uint64{} // the clients of the picked transports
 	pairDomains, pairClients := map[string]uint64{}, map[string]uint64{}
 
 	s.flush()
@@ -627,6 +638,11 @@ func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
 			tcp += uint64(k.tcp)
 			for i, n := range k.proto {
 				protos[i] += uint64(n)
+				if pset[i] {
+					for c, v := range k.cproto[i] {
+						byProto[c] += uint64(v)
+					}
+				}
 			}
 		}
 	}
@@ -679,6 +695,15 @@ func (s *QStats) Query(from, to time.Time, f QFilter) *QStatsResult {
 	}
 	if f.Domain != "" {
 		clients = withRest(pairClients, sumSet(domains, dset))
+	}
+	if f.Proto != "" { // what was counted before the clients were kept by transport is "(others)"
+		var n uint64
+		for i, on := range pset {
+			if on {
+				n += protos[i]
+			}
+		}
+		clients = withRest(byProto, n)
 	}
 	nc, nd := qsKeepResult, qsKeepResult
 	if f.Domain != "" {
@@ -869,6 +894,9 @@ type QFilter struct {
 	// two top lists.  They look through everything the counters kept, not only the entries the reply lists.
 	CMatch string
 	DMatch string
+	// Proto limits the client list to the clients of these transports: names of the Transport donut ("DoT · IPv4"),
+	// comma-separated, as qstatsProto writes them.  Not with Domain (who asked for a domain is not kept by transport).
+	Proto string
 }
 
 // withMatch adds the two filter-box texts (trimmed, lower case, at most 100 characters) to a filter.
@@ -1103,6 +1131,77 @@ func qstatsFilter(rcode, client, domain string) (QFilter, error) {
 		return f, fmt.Errorf("pick a client or a domain, not both")
 	}
 	f.Client, f.Domain = client, domain
+	return f, nil
+}
+
+// qstatsProto checks and normalises the transport argument of the API and CLI: a comma-separated list of the names the
+// Transport donut shows ("UDP · IPv4", "DoT · IPv6") or short ones, any case: udp, tcp, dot, doh for both IP versions,
+// or with 4 or 6 after them (udp4, dot6).  The answer lists the names in the donut's order; empty is no filter.
+func qstatsProto(s string) (string, error) {
+	var on [8]bool
+	for _, p := range strings.Split(s, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		found := false
+		for i, n := range protoNames {
+			if strings.EqualFold(p, n) {
+				on[i], found = true, true
+			}
+		}
+		if !found {
+			short := strings.ToLower(strings.NewReplacer(" ", "", "·", "", "-", "", "ipv", "").Replace(p))
+			fam := -1
+			if strings.HasSuffix(short, "4") || strings.HasSuffix(short, "6") {
+				fam = map[byte]int{'4': 0, '6': 1}[short[len(short)-1]]
+				short = short[:len(short)-1]
+			}
+			for i, n := range []string{"udp", "tcp", "dot", "doh"} {
+				if short == n {
+					found = true
+					for f := 0; f < 2; f++ {
+						if fam < 0 || fam == f {
+							on[2*i+f] = true
+						}
+					}
+				}
+			}
+		}
+		if !found {
+			return "", fmt.Errorf("%q is not a transport: use udp, tcp, dot or doh, with 4 or 6 after it for one IP version (udp4, dot6), or a name as Statistics shows it (%q)", p, protoNames[4])
+		}
+	}
+	var out []string
+	for i, b := range on {
+		if b {
+			out = append(out, protoNames[i])
+		}
+	}
+	return strings.Join(out, ","), nil
+}
+
+// protoSet is the indices of qsKind.proto that a normalised transport list names.
+func protoSet(s string) (set [8]bool) {
+	for _, p := range strings.Split(s, ",") {
+		for i, n := range protoNames {
+			if p == n {
+				set[i] = true
+			}
+		}
+	}
+	return set
+}
+
+// withProto adds the transport argument to a filter.
+func (f QFilter) withProto(p string) (QFilter, error) {
+	var err error
+	if f.Proto, err = qstatsProto(p); err != nil {
+		return f, err
+	}
+	if f.Proto != "" && f.Domain != "" {
+		return f, fmt.Errorf("pick a transport or a domain, not both: who asked for a domain is not kept by transport")
+	}
 	return f, nil
 }
 

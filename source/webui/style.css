@@ -476,6 +476,12 @@ svg rect.sw { fill: var(--c); background: none; }
 .qkey li { display: flex; align-items: center; gap: .5rem; padding: .1rem 0; }
 .qkey .kn { flex: 1; }
 .qkey .kc { color: var(--muted); }
+.qkey .qlink.kn { word-break: normal; }
+.qkey li.picked .kn { font-weight: 600; }
+.qkey li.dim { opacity: .55; }
+.qseg.pick { cursor: pointer; }
+.qseg.pick:hover { opacity: .8; }
+.qseg.dim { opacity: .3; }
 th.num, td.num { text-align: right; }
 .card > .body.flush { padding: 0; }
 .pager { display: inline-flex; align-items: center; gap: .6rem; flex-wrap: wrap; }

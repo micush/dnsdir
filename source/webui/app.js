@@ -4889,13 +4889,13 @@
     };
 
     let status, bar, cnote, tiles, chartBox, pies, tops, upds, foot, rangeBtns, fromIn, toIn, customRow;
-    let range = "1h", qpsView = false, clientsView = false, sel = "", pickClient = "", pickDomain = "", last = null, lastAt = 0, seq = 0, topPage = { c: 0, d: 0 }, topKey = "", cFilter = "", dFilter = "", filterTimer = 0;
+    let range = "1h", qpsView = false, clientsView = false, sel = "", pickClient = "", pickDomain = "", pickProto = "", last = null, lastAt = 0, seq = 0, topPage = { c: 0, d: 0 }, topKey = "", cFilter = "", dFilter = "", filterTimer = 0;
 
     // ── fetching ──
     // the picked node (Node menu in the top bar) answers; pick another member there
     // sel: the answer kind a tile picked ("" = everything); the daemon limits the donuts and
     // top lists to it, the chart just shows that one line
-    const q = (from, to) => "/api/qstats?from=" + encodeURIComponent(from) + (to ? "&to=" + encodeURIComponent(to) : "") + (sel ? "&rcode=" + sel : "") + (pickClient ? "&client=" + encodeURIComponent(pickClient) : "") + (pickDomain ? "&domain=" + encodeURIComponent(pickDomain) : "") + (cFilter ? "&cmatch=" + encodeURIComponent(cFilter) : "") + (dFilter ? "&dmatch=" + encodeURIComponent(dFilter) : "");
+    const q = (from, to) => "/api/qstats?from=" + encodeURIComponent(from) + (to ? "&to=" + encodeURIComponent(to) : "") + (sel ? "&rcode=" + sel : "") + (pickClient ? "&client=" + encodeURIComponent(pickClient) : "") + (pickDomain ? "&domain=" + encodeURIComponent(pickDomain) : "") + (pickProto ? "&proto=" + encodeURIComponent(pickProto) : "") + (cFilter ? "&cmatch=" + encodeURIComponent(cFilter) : "") + (dFilter ? "&dmatch=" + encodeURIComponent(dFilter) : "");
     const KINDS = { no_error: "noerror", server_failure: "servfail", nx_domain: "nxdomain", refused: "refused", updates: "update" };
     async function fetchData() {
       let from = range, to = "";
@@ -5006,7 +5006,9 @@
       chartBox.append(svg);
     }
 
-    function donut(title, items, clsOf, keep) {
+    // o (the Transport donut): a named slice and its row are buttons; o.picked is what is picked (comma-separated),
+    // o.onPick(name, add) picks, o.can(name) says whether a name can be picked
+    function donut(title, items, clsOf, keep, o) {
       const total = items.reduce((a, e) => a + e.count, 0);
       const card = h("div", { class: "qdonut" }, h("h3", {}, tc(title)));
       if (!total) return card.appendChild(h("div", { class: "empty" }, "No queries in this range.")), card;
@@ -5020,20 +5022,29 @@
       let a0 = -Math.PI / 2;
       for (const e of rows) {
         const frac = e.count / total, a1 = a0 + frac * 2 * Math.PI;
-        const cls = e.cls || clsOf[e.name];
-        const tt = sv("title", {}, e.name + ": " + n0(e.count) + " (" + pct(e.count, total) + ")");
+        const can = canPick(e), on = can && inPick(o.picked, e.name);
+        const cls = (e.cls || clsOf[e.name]) + (can ? " pick" : "") + (o && o.picked && !on ? " dim" : "");
+        const tt = sv("title", {}, e.name + ": " + n0(e.count) + " (" + pct(e.count, total) + ")" + (can ? "\n\n" + pickTip(e.name, on) : ""));
+        const click = can ? (ev) => o.onPick(e.name, ev.ctrlKey || ev.metaKey) : null;
         if (frac > 0.9999) {
-          svg.append(sv("circle", { class: "qseg ring " + cls, cx: c, cy: c, r: (ro + ri) / 2, "stroke-width": ro - ri }, tt));
+          svg.append(sv("circle", { class: "qseg ring " + cls, cx: c, cy: c, r: (ro + ri) / 2, "stroke-width": ro - ri, onclick: click }, tt));
         } else {
           const p = (r, a) => (c + r * Math.cos(a)).toFixed(2) + " " + (c + r * Math.sin(a)).toFixed(2);
           const big = a1 - a0 > Math.PI ? 1 : 0;
-          svg.append(sv("path", { class: "qseg " + cls, "stroke-width": 2, d: `M ${p(ro, a0)} A ${ro} ${ro} 0 ${big} 1 ${p(ro, a1)} L ${p(ri, a1)} A ${ri} ${ri} 0 ${big} 0 ${p(ri, a0)} Z` }, tt));
+          svg.append(sv("path", { class: "qseg " + cls, "stroke-width": 2, d: `M ${p(ro, a0)} A ${ro} ${ro} 0 ${big} 1 ${p(ro, a1)} L ${p(ri, a1)} A ${ri} ${ri} 0 ${big} 0 ${p(ri, a0)} Z`, onclick: click }, tt));
         }
         a0 = a1;
       }
       svg.append(sv("text", { class: "qpiet", x: c, y: c + 5, "text-anchor": "middle" }, sv("title", {}, n0(total)), shortCount(total)));
-      card.append(h("div", { class: "qrow" }, svg, h("ul", { class: "qkey" }, rows.map((e) => h("li", {}, h("span", { class: "sw " + (e.cls || clsOf[e.name]) }), h("span", { class: "kn" }, e.name), h("span", { class: "kc", title: n0(e.count) }, shortCount(e.count) + " · " + pct(e.count, total)))))));
+      card.append(h("div", { class: "qrow" }, svg, h("ul", { class: "qkey" }, rows.map((e) => {
+        const can = canPick(e), on = can && inPick(o.picked, e.name);
+        return h("li", { class: on ? "picked" : o && o.picked && can ? "dim" : null }, h("span", { class: "sw " + (e.cls || clsOf[e.name]) }),
+          can ? h("button", { type: "button", class: "qlink kn", "aria-pressed": on ? "true" : "false", title: pickTip(e.name, on), onclick: (ev) => o.onPick(e.name, ev.ctrlKey || ev.metaKey) }, e.name)
+            : h("span", { class: "kn" }, e.name),
+          h("span", { class: "kc", title: n0(e.count) }, shortCount(e.count) + " · " + pct(e.count, total)));
+      }))));
       return card;
+      function canPick(e) { return !!o && !e.cls && o.can(e.name); }
     }
 
     // Tooltips: a client shows every reverse-DNS name the daemon has for it.  Whois is a popup (right-click ▸ Whois):
@@ -5563,8 +5574,12 @@
       if (i >= 0) l.splice(i, 1); else l.push(name);
       return l.join(",");
     }
+    // a transport the daemon keeps the clients of: not the plain UDP / TCP of counts made before the split, not "Other"
+    const PROTO_PICKABLE = (n) => /^(UDP|TCP|DoT|DoH) · IPv[46]$/.test(n);
+    const pickTip = (name, on) => on ? "Click: list every client again (Ctrl-click: take this transport off)" : "Click: list in Top Clients only the clients that used " + name + " (Ctrl-click: add it to the transports picked)";
+    function pickP(p, add) { const v = togglePick(pickProto, p, add); if (v === pickProto) return; pickProto = v; if (v) pickDomain = ""; load(); }
     function pickC(c, add) { const v = togglePick(pickClient, c, add); if (v === pickClient) return; pickClient = v; pickDomain = ""; load(); }
-    function pickD(n, add) { const v = togglePick(pickDomain, n, add); if (v === pickDomain) return; pickDomain = v; pickClient = ""; load(); }
+    function pickD(n, add) { const v = togglePick(pickDomain, n, add); if (v === pickDomain) return; pickDomain = v; pickClient = ""; if (v) pickProto = ""; load(); }
     function pick(kind) {
       const was = qpsView || clientsView;
       qpsView = clientsView = false;   // any other tile goes back to counting queries
@@ -5581,13 +5596,17 @@
       clear(status);
       drawTiles(d);
       drawChart(d);
-      clear(pies).append(donut("Query types" + kindLabel(), d.types, TYPE_CLS, 8), donut("Transport" + kindLabel(), d.protos, PROTO_CLS, 6));
+      clear(pies).append(donut("Query types" + kindLabel(), d.types, TYPE_CLS, 8), donut("Transport" + kindLabel(), d.protos, PROTO_CLS, 6, { picked: pickProto, onPick: pickP, can: PROTO_PICKABLE }));
       const sumOf = (l) => l.reduce((a, e) => a + e.count, 0);
-      const tk = [range, sel, pickClient, pickDomain, cFilter, dFilter].join("|");   // a different question starts on page one
+      const tk = [range, sel, pickClient, pickDomain, pickProto, cFilter, dFilter].join("|");   // a different question starts on page one
       if (tk !== topKey) { topKey = tk; topPage = { c: 0, d: 0 }; }
       fill(tops, 
-        topTable("Top Clients" + kindLabel(": "), d.clients, pickDomain ? sumOf(d.clients) : shareBase(d), true,
-          { picked: pickClient, onPick: pickC, note: pickDomain ? "Clients that asked for " + pickText(pickDomain) : "", onClear: () => pickD("") }),
+        topTable("Top Clients" + kindLabel(": "), d.clients, pickDomain || (pickProto && d.proto) ? sumOf(d.clients) : shareBase(d), true,
+          { picked: pickClient, onPick: pickC, onClear: () => (pickDomain ? pickD("") : pickP("")),
+            note: pickDomain ? "Clients that asked for " + pickText(pickDomain)
+              : !pickProto ? ""
+              : d.proto ? "Clients that used " + pickText(d.proto)
+              : "Every client: this node keeps no clients by transport (update it to v619 or later)" }),
         topTable("Top Domains" + kindLabel(": "), d.domains, pickClient ? sumOf(d.domains) : shareBase(d), false,
           { picked: pickDomain, onPick: pickD, note: pickClient ? "Domains that " + pickText(pickClient) + " asked for" : "", onClear: () => pickC("") }));
       clear(cnote).append(...clusterNote(d.cluster));   // which nodes are added together, when the Node menu says Cluster

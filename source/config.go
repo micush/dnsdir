@@ -1194,6 +1194,20 @@ func (c *DNSConfig) followSettings(shared DNSConfig) {
 		c.SortList = nil
 	}
 	c.ClientRate, c.ClientBurst, c.ClientAction = shared.ClientRate, shared.ClientBurst, shared.ClientAction
+	// The rest of what only the Settings page sets.  A gateway's own pool starts as a copy of the shared block (the
+	// Topology's Edit), so without this it kept the value it was made with: "Accept any certificate from tls:// and
+	// https:// servers" ticked on the Settings page did nothing for a gateway with its own servers, whose tls:// servers
+	// went on failing "x509: cannot validate certificate".  Likewise the bootstrap servers, the probe and query timings,
+	// the client-subnet prefix lengths and the forwarding of dynamic updates.  (Servers, fallback servers, test domains,
+	// client subnet on/off and load balancing are the gateway's own, edited on the Topology page.)
+	c.TLSInsecure = shared.TLSInsecure
+	c.Bootstrap = append([]string(nil), shared.Bootstrap...)
+	if len(c.Bootstrap) == 0 {
+		c.Bootstrap = nil
+	}
+	c.ProbeIntervalMS, c.ProbeTimeoutMS, c.QueryTimeoutMS = shared.ProbeIntervalMS, shared.ProbeTimeoutMS, shared.QueryTimeoutMS
+	c.ECSPrefix4, c.ECSPrefix6 = shared.ECSPrefix4, shared.ECSPrefix6
+	c.ForwardUpdates, c.RegisterKeyName, c.RegisterKey, c.RegisterTTL = shared.ForwardUpdates, shared.RegisterKeyName, shared.RegisterKey, shared.RegisterTTL
 }
 
 func (dc *DaemonConfig) Validate() error {

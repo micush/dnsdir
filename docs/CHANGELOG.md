@@ -1,5 +1,15 @@
 # Changelog
 
+## [v618] - 2026-10-30 — A gateway with its own DNS servers follows "Accept any certificate" (and the other Settings-only DNS settings)
+
+### Fixed
+- **"Accept any certificate from tls:// and https:// servers (insecure)" did nothing for a gateway with its own DNS servers.** Its tls:// servers went on failing `tls: failed to verify certificate: x509: cannot validate certificate for 86.54.11.1 because it doesn't contain any IP SANs` with the box ticked. A gateway's own pool starts as a copy of the shared `dns` block (Topology ▸ Edit), and `followSettings` brought only some of the Settings page's values over to it afterwards (cache, client rules, DoT/DoH ports, policy, block lists, sort list), so the copy kept `tls_insecure` as it was when the gateway got its own servers. It now follows `tls_insecure`, and with it the other values only the Settings page sets that were left behind the same way: the bootstrap servers, the probe interval, probe timeout and query timeout, the client-subnet prefix lengths (`ecs_prefix4`, `ecs_prefix6`) and the forwarding of dynamic updates with its TSIG key (`forward_updates`, `register_key_name`, `register_key`, `register_ttl`). What a gateway sets for itself on the Topology page stays its own: servers, fallback servers, test domains, client subnet on or off, load balancing. `--show-dns` now also prints the "certificates are NOT checked" line for such a gateway's pool, as it already did for the shared one.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, cross-builds for linux/amd64, arm64, arm, 386 and riscv64 (only the native amd64 build is verified with PAM).
+- **New test** `TestGroupPoolFollowsSharedSettings`: every value above follows the shared block, the gateway's own servers and client-subnet switch stay, and unticking the box on Settings makes the gateway check certificates again.
+- **Live:** a local DNS-over-TLS server with a self-signed certificate that has no IP SANs, as the only server of a gateway with its own pool (`tls_insecure` false there, true in the shared block). v617: the server was down with "x509: cannot validate certificate", as in the report. This version: up, answering, and `--show-dns` says certificates are not checked.
+
 ## [v617] - 2026-10-30 — Monitor ▸ Statistics: the chart's legend pills are gone; the tiles are the legend
 
 ### Changed

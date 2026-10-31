@@ -149,3 +149,35 @@ func TestGroupPoolFollowsSharedDoTAndDoHPorts(t *testing.T) {
 		t.Fatalf("the gateway's pool has dot %d, doh %d; want 853 and 443", c.DoTPort, c.DoHPort)
 	}
 }
+
+// A gateway with its own DNS pool follows the Settings page's other pool-wide settings too: the certificate check of
+// tls:// and https:// servers above all (ticking "Accept any certificate" used to leave such a gateway's servers failing).
+func TestGroupPoolFollowsSharedSettings(t *testing.T) {
+	dc := newDaemonConfig()
+	own := defaultDNS()
+	own.Servers = []string{"tls://86.54.11.1:853"}
+	own.ECS = true
+	dc.Groups[0].DNS = &own
+	dc.DNS.TLSInsecure = true
+	dc.DNS.Bootstrap = []string{"9.9.9.9:53"}
+	dc.DNS.ProbeIntervalMS, dc.DNS.ProbeTimeoutMS, dc.DNS.QueryTimeoutMS = 7000, 1500, 2500
+	dc.DNS.ECSPrefix4, dc.DNS.ECSPrefix6 = 22, 48
+	dc.DNS.ForwardUpdates, dc.DNS.RegisterKeyName, dc.DNS.RegisterKey, dc.DNS.RegisterTTL = true, "k1", "c2VjcmV0", 120
+	_, c := dc.poolFor(&dc.Groups[0])
+	if !c.TLSInsecure {
+		t.Fatal("the gateway's pool still checks certificates after Settings said not to")
+	}
+	if len(c.Bootstrap) != 1 || c.ProbeIntervalMS != 7000 || c.ProbeTimeoutMS != 1500 || c.QueryTimeoutMS != 2500 || c.ECSPrefix4 != 22 || c.ECSPrefix6 != 48 ||
+		!c.ForwardUpdates || c.RegisterKeyName != "k1" || c.RegisterKey != "c2VjcmV0" || c.RegisterTTL != 120 {
+		t.Fatalf("not followed: %+v", c)
+	}
+	// what is the gateway's own stays its own
+	if len(c.Servers) != 1 || c.Servers[0] != "tls://86.54.11.1:853" || !c.ECS {
+		t.Fatalf("the gateway's own settings were overwritten: servers %v ecs %v", c.Servers, c.ECS)
+	}
+	// and unticking it on the Settings page checks certificates again
+	dc.DNS.TLSInsecure = false
+	if _, c := dc.poolFor(&dc.Groups[0]); c.TLSInsecure {
+		t.Fatal("unticked on Settings, still insecure")
+	}
+}

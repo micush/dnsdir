@@ -276,6 +276,10 @@ func cloneDNS(d DNSConfig) DNSConfig {
 	if len(d.MetricsACL) == 0 {
 		d.MetricsACL = nil
 	}
+	d.MCPKeys = append([]MCPKey(nil), d.MCPKeys...)
+	if len(d.MCPKeys) == 0 {
+		d.MCPKeys = nil
+	}
 	if len(d.Schedule) > 0 {
 		sch := make([]SchedTask, len(d.Schedule))
 		for i, t := range d.Schedule {

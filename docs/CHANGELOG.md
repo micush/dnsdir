@@ -1,5 +1,23 @@
 # Changelog
 
+## [v621] - 2026-10-31 — MCP keys: an assistant whose address changes can connect with a key
+
+### Added
+- **Configure ▸ Monitoring ▸ MCP ▸ Keys.** Besides the address list, `/mcp` now takes a key in the header `Authorization: Bearer KEY`, so a laptop on DHCP, Wi-Fi or a VPN no longer needs its address in the list. Each key has a name and an access, `ro` or `rw`. With a valid key the caller gets that access from any address, and from a listed address it gets the higher of the two. A key that matches none is refused (401, with `WWW-Authenticate: Bearer`), whatever the address, so a typo shows at once, and it is logged as a warning once a minute per address. A request with neither a listed address nor a key gets 403, which now says why.
+- **Add key…** makes a random 256-bit key in the browser (`dnsdir_…`) and shows it once, with **Copy** buttons and the whole `claude mcp add … --header "Authorization: Bearer KEY"` command line. It is sent with the next save, and the daemon keeps only its SHA-256 hash (`mcp_keys` in the shared `dns` block: `name`, `access`, `hash`, `created`), so the key is not in the configuration file, its history, the other nodes or any MCP or API answer, and cannot be read back. The table shows each key's name, access (changeable in the row), the date it was added and a fingerprint (the start of its hash). **Remove** asks first, and whatever uses that key is refused from then on. Up to 32 keys; names are letters, digits, `.`, `-`, `_`.
+- A key can also be given as `{"name": "laptop", "access": "rw", "key": "AT-LEAST-32-CHARACTERS"}` through `edit_config`, the API or the file. The configuration check turns it into its hash before anything is saved or sent to the cluster. A hand-edited file keeps the key as typed until the next save.
+- Requests with a key run, are logged and are kept in the configuration history as `mcp:NAME@ADDRESS` (`mcp@ADDRESS` without one). The help (Configure ▸ Monitoring ▸ MCP) and the README have the steps for Claude Code and for Claude Desktop with `mcp-remote`. The same change is in ntpdir v197.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...`, `go test -race -count=1 ./...`, `node --check` on `app.js` and `help.js`.
+- **New tests** (`mcpkeys_test.go`):
+  - A new key becomes its hash, and the access is normalised.
+  - Bad names, duplicate names or keys, short keys, a missing or bad hash and a bad access are refused.
+  - Access checks: no key and no address gets 403; a wrong key gets 401, even from an allowed address; a non-Bearer header gets 401.
+  - A read-only key gets the read tools only, and its write is refused. A read-write key changes things under `mcp:laptop@127.0.0.1` in the history. An allowed address combined with a key gets the higher of the two accesses.
+  - A key set through `edit_config` is saved as its hash only: no file under the configuration's directory (the file, its history, the state) contains the key, and the saved key then opens the endpoint.
+- **Live:** a running daemon in headless Chromium, real PAM user, dark and light themes. **Add key…** showed the key and the command line once. The file then held only the hash, and no file under the configuration's directory or the state held the key. With `curl` on `/mcp`, the read-write key listed the write tools and the read-only key did not, a wrong key got 401, and no key with an empty address list got 403. A change made with the key was logged as `NAME@127.0.0.1 calls …`.
+
 ## [v620] - 2026-10-31 — The Log page stayed empty on a busy node or cluster
 
 ### Fixed

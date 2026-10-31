@@ -2542,6 +2542,7 @@
   ];
   const MCP_FIELDS = [
     { shared: true, k: "mcp_acl", l: "Allowed sources", t: "rows", rows: "mcpacl", wide: true },
+    { shared: true, k: "mcp_keys", l: "Keys", t: "mcpkeys", wide: true },
   ];
   const CLUSTER_FIELDS = [
     { k: "listen", l: "Binding address", t: "port" },
@@ -3401,6 +3402,87 @@
   const WELL_KNOWN_KEYS = ["", "dnsdir", "dgw", "ddgw", "change-me", "changeme", "secret", "password", "key", "test", "default"];
   const isWeakKey = (k) => k.length < 12 || WELL_KNOWN_KEYS.includes(k.trim().toLowerCase());
 
+  // The MCP keys (Configure ▸ Monitoring ▸ MCP): a name, ro or rw, and only a hash of the key.  Add key makes a random key
+  // here, shows it once, and sends it with the next save; the daemon keeps only its hash.  A change is a "change" event,
+  // so the page saves it like any other field.
+  function mcpKeysEditor(list) {
+    const keys = (list || []).map((k) => ({ ...k }));
+    const el = h("div", { class: "mcpkeys" });
+    const changed = () => { draw(); el.dispatchEvent(new Event("change", { bubbles: true })); };
+    const NAME_RE = /^[A-Za-z0-9._-]{1,40}$/;
+    const day = (t) => (t ? new Date(t * 1000).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }) : "");
+    const finger = (k) => (k.hash || "").replace(/^sha256:/, "").slice(0, 12);
+    function draw() {
+      clear(el).append(
+        keys.length
+          ? h("table", { class: "rows mcpkeytab" },
+            h("thead", {}, h("tr", {}, h("th", {}, "Name"), h("th", {}, "Access"), h("th", {}, "Added"), h("th", {}, "Fingerprint"), h("th", { "aria-label": "Remove" }))),
+            h("tbody", {}, keys.map((k, i) => h("tr", {},
+              h("td", { class: "mono" }, k.name),
+              h("td", {}, h("select", { "aria-label": "Access of " + k.name, onchange: (ev) => { k.access = ev.target.value; } },
+                ["ro", "rw"].map((a) => h("option", { value: a, selected: (k.access || "ro") === a }, a)))),
+              h("td", { class: "muted small" }, day(k.created)),
+              h("td", { class: "mono muted small", title: k.hash ? "The start of the key's SHA-256 hash: " + k.hash : "Saved with the next change" }, k.key ? (k.fp || "(new)") : finger(k)),
+              h("td", {}, h("button", { class: "btn small", type: "button", title: "Remove this key: whoever holds it can no longer connect",
+                onclick: () => { if (confirm("Remove the key " + k.name + "?\n\nWhatever uses it can no longer connect to /mcp.")) { keys.splice(i, 1); changed(); } } }, "Remove"))))))
+          : h("div", { class: "muted small" }, "No keys: only the sources above may use /mcp."),
+        h("div", { class: "toolbar tight" }, h("button", { class: "btn", type: "button", onclick: addKey }, "Add key…")));
+    }
+    function randomKey() {
+      const b = new Uint8Array(32);
+      crypto.getRandomValues(b);
+      return "dnsdir_" + btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    }
+    function dialog(title, body) {
+      const d = h("dialog", { class: "cv-dialog", "aria-label": title });
+      const close = () => { try { d.close(); } catch (_) { /* closed */ } d.remove(); };
+      d.addEventListener("close", () => d.remove());
+      d.append(h("h2", {}, title), ...body(close));
+      root.append(d);
+      d.showModal();
+      return d;
+    }
+    function addKey() {
+      const name = h("input", { type: "text", autocomplete: "off", spellcheck: "false", maxlength: "40", placeholder: "e.g. laptop, claude-ops", "aria-label": "Name" });
+      const access = h("select", { "aria-label": "Access" }, h("option", { value: "ro" }, "ro — read only"), h("option", { value: "rw" }, "rw — read and change"));
+      const err = h("div", { "aria-live": "polite" });
+      dialog("Add an MCP key", (close) => [h("form", { onsubmit: (ev) => {
+        ev.preventDefault();
+        const n = name.value.trim();
+        if (!NAME_RE.test(n)) { errorBox(err, "Give it a name of up to 40 letters, digits, dots, dashes and underscores: who or what will hold it."); return; }
+        if (keys.some((k) => k.name.toLowerCase() === n.toLowerCase())) { errorBox(err, "There is already a key named " + n + "."); return; }
+        const key = randomKey();
+        const entry = { name: n, access: access.value, key, created: Math.floor(Date.now() / 1000) };
+        keys.push(entry);
+        close();
+        changed();
+        // the fingerprint the daemon will show (the page is HTTPS, so the browser can hash it too)
+        if (window.crypto && crypto.subtle) crypto.subtle.digest("SHA-256", new TextEncoder().encode(key)).then((d) => { entry.fp = [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, "0")).join("").slice(0, 12); draw(); }, () => {});
+        showKey(n, access.value, key);
+      } },
+      h("label", { class: "f wide" }, "Name", name, h("span", { class: "hint" }, "Who or what holds the key. Its changes are logged and kept in the configuration history as mcp:NAME@ADDRESS.")),
+      h("label", { class: "f wide" }, "Access", access),
+      err,
+      h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "submit" }, "Create key"), h("button", { class: "btn", type: "button", onclick: close }, "Cancel")))]);
+      name.focus();
+    }
+    function showKey(n, acc, key) {
+      const cmd = "claude mcp add --transport http dnsdir " + location.origin + "/mcp --header \"Authorization: Bearer " + key + "\"";
+      const copy = (text, b) => { try { navigator.clipboard.writeText(text); b.textContent = "Copied"; setTimeout(() => { b.textContent = "Copy"; }, 1500); } catch (_) { /* select it by hand */ } };
+      const kb = h("button", { class: "btn small", type: "button" }, "Copy"), cb = h("button", { class: "btn small", type: "button" }, "Copy");
+      kb.onclick = () => copy(key, kb); cb.onclick = () => copy(cmd, cb);
+      dialog("Key " + n + " (" + acc + ")", (close) => [
+        h("p", {}, "Copy it now: it is not shown again. Only its hash is kept; if it is lost, remove it and add another."),
+        h("div", { class: "keyshow" }, h("code", { class: "mono" }, key), kb),
+        h("p", { class: "hint" }, "Claude Code:"),
+        h("div", { class: "keyshow" }, h("code", { class: "mono" }, cmd), cb),
+        h("p", { class: "hint" }, "Any MCP client: the URL " + location.origin + "/mcp with the header Authorization: Bearer KEY. With the self-signed certificate, start Claude Code with NODE_TLS_REJECT_UNAUTHORIZED=0."),
+        h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "button", onclick: close }, "Done"))]);
+    }
+    draw();
+    return { el, get: () => keys.map((k) => (k.key ? { name: k.name, access: k.access || "ro", key: k.key, created: k.created } : { name: k.name, access: k.access || "ro", hash: k.hash, created: k.created })) };
+  }
+
   function fieldset(specs, obj, asCards) {
     const getters = {};
     let grid = h("div", { class: "grid" });
@@ -3437,6 +3519,13 @@
         const rt = rowTable(ROW_TABLES[f.rows], v || []);
         getters[f.k] = rt.get;
         grid.append(h("div", { class: "f wide" }, h("span", {}, f.l, sharedTag(f)), rt.el, f.hint ? h("span", { class: "hint" }, f.hint) : null));
+        continue;
+      }
+      if (f.t === "mcpkeys") {
+        const mk = mcpKeysEditor(v || []);
+        getters[f.k] = mk.get;
+        grid.append(h("div", { class: "f wide" }, h("span", {}, f.l, sharedTag(f)), mk.el,
+          h("span", { class: "hint" }, "A key opens /mcp from any address, for an assistant whose address changes. It is sent as the header Authorization: Bearer KEY, gives its own access, and the higher of it and the address list's applies. Only a hash of each key is kept, so a key is shown once, when it is added.")));
         continue;
       }
       if (f.t === "blocklists") {
@@ -3912,7 +4001,7 @@
       const dns = fieldset(DNS_FIELDS, cfg.dns, true);
       const snmp = fieldset(SNMP_FIELDS, { snmp_communities: cfg.dns.snmp_communities, snmp_acl: cfg.dns.snmp_acl, snmp_contact: cfg.dns.snmp_contact, location: (cfg.snmp || {}).location });
       const prom = fieldset(PROM_FIELDS, { metrics_acl: cfg.dns.metrics_acl });
-      const mcp = fieldset(MCP_FIELDS, { mcp_acl: cfg.dns.mcp_acl });
+      const mcp = fieldset(MCP_FIELDS, { mcp_acl: cfg.dns.mcp_acl, mcp_keys: cfg.dns.mcp_keys });
       const lldp = fieldset(LLDP_FIELDS, { lldp: !!cfg.dns.lldp });
       const lldpShared = () => ({ lldp: lldp.get().lldp });
       // what lldpd is doing on this node, beside the box (refreshed after every save); a few words, never a banner
@@ -3936,7 +4025,7 @@
       const backup = backupForm(cfg.dns.backup, (sch) => { cfg.dns.schedule = sch; if (state.cfg && state.cfg.dns) state.cfg.dns.schedule = sch; });
       const backupShared = () => { const b = backup.get(); return b ? { backup: b } : {}; };
       // what snmpd is doing, under the form (refreshed after every save)
-      const snmpShared = () => { const v = snmp.get(), m = prom.get(); return { snmp_communities: v.snmp_communities, snmp_acl: v.snmp_acl, snmp_contact: v.snmp_contact, metrics_acl: m.metrics_acl, mcp_acl: mcp.get().mcp_acl }; };
+      const snmpShared = () => { const v = snmp.get(), m = prom.get(); return { snmp_communities: v.snmp_communities, snmp_acl: v.snmp_acl, snmp_contact: v.snmp_contact, metrics_acl: m.metrics_acl, mcp_acl: mcp.get().mcp_acl, mcp_keys: mcp.get().mcp_keys }; };
       const snmpLocal = () => { const v = snmp.get(); return { location: v.location }; };
       const snmpPill = h("span");   // ACTIVE beside the heading while snmpd is running
       refreshSNMP = async () => {

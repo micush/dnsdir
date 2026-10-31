@@ -1,5 +1,17 @@
 # Changelog
 
+## [v616] - 2026-10-30 — The alert mark in the sidebar follows a gateway or Cluster picked in the Node menu
+
+### Fixed
+- **The warning mark on Monitor and Monitor ▸ Alerts ignored a gateway or Cluster picked in the Node menu.** It asked `/api/alerts` through the ordinary request routing, which sends that route to the signed-in node for those two choices, so it showed that node's alerts only, while the Alerts page lists every node's (Cluster) or the gateway's nodes' (gateway). With an open alert on another node the page showed it and the mark stayed off, and the other way round. `refreshAlertMark` now asks the same nodes as the page, each directly or through the cluster relay (`nodePath`), and for a gateway counts its own alerts and the nodes' own (CPU, disk, …), not another gateway's — the page's rule. It is also refreshed at once when the Node menu changes, not up to 5 s later. With one node picked nothing changes. (ntpdir's Alerts page has no gateway or Cluster view, so it has no such mark problem.)
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...`, `go test -race -count=1 ./...`, `node --check webui/app.js`.
+- Headless Chromium against a real daemon (two gateways, real PAM user), with a second node `ns2` added to the `/api/cluster` answer and its `/api/alerts` answered through `/api/proxy` by the test, one open alert on `ns2` about gateway 100: the mark was off on this node, **on** for Cluster and for gateway 100, off for gateway 100 once the alert was about gateway 101, and off back on this node. The same run against v615 had it off in every case although the list showed the alert.
+
+### Not verified
+- A real multi-node cluster (the second node was simulated as above; the relay is the one the page itself uses).
+
 ## [v615] - 2026-10-30 — Fallback servers are checked every round: Monitor ▸ DNS, --show-dns, the canvas and an alert say whether each one answers
 
 ### Added

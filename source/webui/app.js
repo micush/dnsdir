@@ -304,11 +304,19 @@
     m.innerHTML = '<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 1.4 15 14H1z" fill="#fff" stroke="#d32f2f" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 5.9v3.9M8 11.3v1" stroke="#d32f2f" stroke-width="1.7" stroke-linecap="round"/></svg>';
     return m;
   };
+  // The mark follows the Node menu like the Alerts page: one node's alerts, or, with a gateway or Cluster picked, those of
+  // every node it covers (a gateway's own alerts and the nodes' own), asked of each node as the page does.
   async function refreshAlertMark() {
     let on = false;
+    const isOn = (a) => !a.closed && !a.acked && !a.silenced_until;
     try {
-      const v = (await api("GET", "/api/alerts")).data;
-      on = (v.alerts || []).some((a) => !a.closed && !a.acked && !a.silenced_until);
+      if (many()) {
+        const gw = pickedGw();
+        const lists = await Promise.all(pickedNodes().map((n) => api("GET", nodePath(n, "/api/alerts"), undefined, true).then((r) => r.data.alerts || [], () => [])));
+        on = lists.flat().some((a) => isOn(a) && (!gw || !(a.gateways || []).length || a.gateways.includes(gw.group_id)));
+      } else {
+        on = ((await api("GET", "/api/alerts")).data.alerts || []).some(isOn);
+      }
     } catch (_) { return; }
     const marks = [root.querySelector('.nav-item[data-tab="alerts"]'), root.querySelector('.nav-group[data-group="Monitor"] .nav-group-label')];
     for (const el of marks) {
@@ -611,6 +619,7 @@
     state.topo.action = null;   // the gateway picked stays picked: the sidebar list is the signed-in node's, whichever node is driven
     refreshTopoNav();
     certBanner();
+    refreshAlertMark();   // the mark follows the Node menu
     if (document.getElementById("main")) selectTab(state.tab);
   }
 

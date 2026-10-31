@@ -3412,21 +3412,39 @@
     const NAME_RE = /^[A-Za-z0-9._-]{1,40}$/;
     const day = (t) => (t ? new Date(t * 1000).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }) : "");
     const finger = (k) => (k.hash || "").replace(/^sha256:/, "").slice(0, 12);
+    // the same look as the address list above (rowTable): a numbered table, edited in place, right-click for the rest
     function draw() {
-      clear(el).append(
-        keys.length
-          ? h("table", { class: "rows mcpkeytab" },
-            h("thead", {}, h("tr", {}, h("th", {}, "Name"), h("th", {}, "Access"), h("th", {}, "Added"), h("th", {}, "Fingerprint"), h("th", { "aria-label": "Remove" }))),
-            h("tbody", {}, keys.map((k, i) => h("tr", {},
-              h("td", { class: "mono" }, k.name),
-              h("td", {}, h("select", { "aria-label": "Access of " + k.name, onchange: (ev) => { k.access = ev.target.value; } },
-                ["ro", "rw"].map((a) => h("option", { value: a, selected: (k.access || "ro") === a }, a)))),
-              h("td", { class: "muted small" }, day(k.created)),
-              h("td", { class: "mono muted small", title: k.hash ? "The start of the key's SHA-256 hash: " + k.hash : "Saved with the next change" }, k.key ? (k.fp || "(new)") : finger(k)),
-              h("td", {}, h("button", { class: "btn small", type: "button", title: "Remove this key: whoever holds it can no longer connect",
-                onclick: () => { if (confirm("Remove the key " + k.name + "?\n\nWhatever uses it can no longer connect to /mcp.")) { keys.splice(i, 1); changed(); } } }, "Remove"))))))
-          : h("div", { class: "muted small" }, "No keys: only the sources above may use /mcp."),
-        h("div", { class: "toolbar tight" }, h("button", { class: "btn", type: "button", onclick: addKey }, "Add key…")));
+      const tbody = h("tbody", {}, keys.map((k, i) => {
+        const name = h("input", { type: "text", autocomplete: "off", spellcheck: "false", maxlength: "40", "aria-label": "Name", value: k.name,
+          title: "Who or what holds the key; renaming it does not change the key" });
+        name.addEventListener("change", (ev) => {
+          const n = name.value.trim();
+          if (!NAME_RE.test(n) || keys.some((x) => x !== k && x.name.toLowerCase() === n.toLowerCase())) { ev.stopPropagation(); name.value = k.name; return; }   // not saved: the old name comes back
+          k.name = n;
+        });
+        const acc = h("select", { "aria-label": "Access of " + k.name }, ["ro", "rw"].map((a) => h("option", { value: a }, a)));
+        acc.value = k.access || "ro";
+        acc.addEventListener("change", () => { k.access = acc.value; });
+        const tr = h("tr", {},
+          h("td", { class: "grip" }, h("span", { class: "rownum" }, String(i + 1))),
+          h("td", {}, name),
+          h("td", {}, acc),
+          h("td", { class: "ctext" }, day(k.created)),
+          h("td", { class: "ctext mono", title: k.hash ? "The start of the key's SHA-256 hash: " + k.hash : "Saved with this change" }, k.key ? (k.fp || "(new)") : finger(k)));
+        tr.addEventListener("contextmenu", rowMenu([
+          ["Add key", addKey],
+          ["Copy fingerprint", () => { try { navigator.clipboard.writeText((k.hash || "").replace(/^sha256:/, "")); } catch (_) { /* nothing to copy to */ } }],
+          ["Delete", () => { if (confirm("Delete the key " + k.name + "?\n\nWhatever uses it can no longer connect to /mcp.")) { keys.splice(keys.indexOf(k), 1); changed(); } }, "danger"],
+        ]));
+        return tr;
+      }));
+      const tbl = h("table", { class: "policy zones rows mcpkeytab" },
+        h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number" }, "#"), h("th", {}, "Name"), h("th", {}, "Access"), h("th", {}, "Added"), h("th", {}, "Fingerprint"))), tbody);
+      const empty = h("div", { class: "policy-empty" }, "No keys: only the sources above may use /mcp. Right-click here ▸ Add key.");
+      empty.hidden = keys.length > 0;
+      const wrap = h("div", { class: "policy-wrap" }, tbl, empty);
+      wrap.addEventListener("contextmenu", (e) => { if (!e.target.closest("tbody tr")) rowMenu([["Add key", addKey]])(e); });
+      clear(el).append(h("div", { class: "policy-box rows" }, wrap));
     }
     function randomKey() {
       const b = new Uint8Array(32);
@@ -3524,8 +3542,7 @@
       if (f.t === "mcpkeys") {
         const mk = mcpKeysEditor(v || []);
         getters[f.k] = mk.get;
-        grid.append(h("div", { class: "f wide" }, h("span", {}, f.l, sharedTag(f)), mk.el,
-          h("span", { class: "hint" }, "A key opens /mcp from any address, for an assistant whose address changes. It is sent as the header Authorization: Bearer KEY, gives its own access, and the higher of it and the address list's applies. Only a hash of each key is kept, so a key is shown once, when it is added.")));
+        grid.append(h("div", { class: "f wide" }, h("span", {}, f.l, sharedTag(f)), mk.el));   // what keys are and do is in the help, like the address list above
         continue;
       }
       if (f.t === "blocklists") {

@@ -1,5 +1,19 @@
 # Changelog
 
+## [v622] - 2026-10-31 — The MCP Keys table looks and works like the address list above it
+
+### Changed
+- **Configure ▸ Monitoring ▸ MCP ▸ Keys** is now built like **Allowed sources**: the same numbered, bordered table, the same width, and edited in place. A key's **Name** can be changed in its row, as well as its **Access**. Renaming doesn't change the key; an invalid or duplicate name puts the old one back. The **Added** date and the **Fingerprint** are plain cells.
+- Adding and deleting work through **right-click**, like the other tables. On the table or the empty-table line, choose **Add key**. On a key's row, choose **Add key**, **Copy fingerprint** or **Delete**; Delete asks first. The **Add key…** and **Remove** buttons are gone. The empty table reads "No keys: only the sources above may use /mcp. Right-click here ▸ Add key."
+- The paragraph under the table is gone. Like the address list, what keys do is in the page's help (Configure ▸ Monitoring ▸ MCP ▸ Fields ▸ Keys, and the key steps), now with renaming and the right-click menu. The help and the README now spell the menu item **Add key** without "…", as menus throughout the GUI drop it. The same change is in ntpdir v198.
+
+### Verified
+- `gofmt -l .` (empty), `go vet .`, `go test -count=1 .`, `node --check` on `app.js` and `help.js`.
+- Headless Chromium, real PAM user, a running daemon of each product (dnsdir in light, ntpdir in dark):
+  - Right-click ▸ **Add key** created a key.
+  - Renaming the first key in its row was saved to the file, with its access and hash unchanged.
+  - The table matched the address list above it, with no paragraph under it, and the help showed the keys text.
+
 ## [v621] - 2026-10-31 — MCP keys: an assistant whose address changes can connect with a key
 
 ### Added

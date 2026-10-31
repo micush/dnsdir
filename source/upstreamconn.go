@@ -43,10 +43,18 @@ type dotConnPool struct {
 
 var dotConns = &dotConnPool{idle: map[string][]idleTLS{}}
 
-// dotKey: a connection is only reused for the same server, the same certificate check and the same trusted
-// authorities (a connection made under other rules is not one these rules would have accepted)
-func dotKey(hp string, insecure bool) string {
-	return hp + "|" + strconv.FormatBool(insecure) + "|" + fmt.Sprintf("%p", dotRootCAs)
+// dotKey: a connection is only reused for the same server, the same certificate check (none, or against which name) and
+// the same trusted authorities (a connection made under other rules is not one these rules would have accepted)
+func dotKey(hp string, t upTLS) string {
+	return hp + "|" + strconv.FormatBool(t.insecure) + "|" + t.name + "|" + fmt.Sprintf("%p", dotRootCAs)
+}
+
+// tlsName is the name a server's certificate is checked against (and sent in the handshake): its own, or host.
+func (t upTLS) tlsName(host string) string {
+	if t.name != "" {
+		return t.name
+	}
+	return host
 }
 
 // take returns the most recently used idle connection to key, closing the ones idle too long.
@@ -96,7 +104,7 @@ func (p *dotConnPool) count(key string) int {
 	return len(p.idle[key])
 }
 
-func dialDoT(ctx context.Context, hp string, deadline time.Time, insecure bool) (*tls.Conn, error) {
+func dialDoT(ctx context.Context, hp string, deadline time.Time, t upTLS) (*tls.Conn, error) {
 	host, _, _ := net.SplitHostPort(hp)
 	var d net.Dialer
 	tc, err := dialUpstream(ctx, &d, "tcp", hp) // a name is looked up as in bootstrap.go
@@ -104,7 +112,7 @@ func dialDoT(ctx context.Context, hp string, deadline time.Time, insecure bool) 
 		return nil, err
 	}
 	tc.SetDeadline(deadline)
-	tl := tls.Client(tc, &tls.Config{ServerName: host, RootCAs: dotRootCAs, MinVersion: tls.VersionTLS12, InsecureSkipVerify: insecure})
+	tl := tls.Client(tc, &tls.Config{ServerName: t.tlsName(host), RootCAs: dotRootCAs, MinVersion: tls.VersionTLS12, InsecureSkipVerify: t.insecure})
 	if err := tl.HandshakeContext(ctx); err != nil {
 		tc.Close()
 		return nil, err
@@ -113,14 +121,14 @@ func dialDoT(ctx context.Context, hp string, deadline time.Time, insecure bool) 
 }
 
 // exchangeDoT sends one query to the DoT server hp (host:port), on a kept connection when there is one.
-func exchangeDoT(ctx context.Context, hp string, query []byte, deadline time.Time, insecure bool) ([]byte, time.Duration, error) {
-	key := dotKey(hp, insecure)
+func exchangeDoT(ctx context.Context, hp string, query []byte, deadline time.Time, t upTLS) ([]byte, time.Duration, error) {
+	key := dotKey(hp, t)
 	for attempt := 0; ; attempt++ {
 		c := dotConns.take(key)
 		reused := c != nil
 		if !reused {
 			var err error
-			if c, err = dialDoT(ctx, hp, deadline, insecure); err != nil {
+			if c, err = dialDoT(ctx, hp, deadline, t); err != nil {
 				return nil, 0, err
 			}
 		}
@@ -214,8 +222,8 @@ var dohClients = struct {
 }{m: map[string]*dohClient{}}
 
 // dohClientFor is the kept HTTP client for the DoH server of u (one per scheme, host and port, and certificate check).
-func dohClientFor(u *url.URL, insecure bool) *dohClient {
-	key := dotKey(u.Host, insecure) // same rules as for DoT connections
+func dohClientFor(u *url.URL, t upTLS) *dohClient {
+	key := dotKey(u.Host, t) // same rules as for DoT connections
 	dohClients.Lock()
 	defer dohClients.Unlock()
 	now := time.Now()
@@ -230,7 +238,7 @@ func dohClientFor(u *url.URL, insecure bool) *dohClient {
 		}
 	}
 	tr := &http.Transport{
-		TLSClientConfig:     &tls.Config{ServerName: u.Hostname(), RootCAs: dotRootCAs, MinVersion: tls.VersionTLS12, InsecureSkipVerify: insecure},
+		TLSClientConfig:     &tls.Config{ServerName: t.tlsName(u.Hostname()), RootCAs: dotRootCAs, MinVersion: tls.VersionTLS12, InsecureSkipVerify: t.insecure},
 		ForceAttemptHTTP2:   true,
 		IdleConnTimeout:     upstreamIdle,
 		MaxIdleConnsPerHost: 4,

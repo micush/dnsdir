@@ -57,7 +57,7 @@ func TestUpstreamUDPSocketIsReused(t *testing.T) {
 	st := newUDPStub(t, func(q []byte, reply func([]byte)) { reply(answerTo(q)) })
 	for i := 0; i < 8; i++ {
 		q := cacheQuery("reuse.example", 1, nil)
-		resp, _, err := exchangeOpt(context.Background(), st.addr, q, false, time.Second, false)
+		resp, _, err := exchangeOpt(context.Background(), st.addr, q, false, time.Second, upTLS{})
 		if err != nil || len(resp) < len(q) {
 			t.Fatalf("exchange %d: %v", i, err)
 		}
@@ -80,7 +80,7 @@ func TestUpstreamUDPIgnoresAnswerToAnotherQuestion(t *testing.T) {
 		reply(answerTo(q))
 	})
 	q := cacheQuery("wanted.example", 1, nil)
-	resp, _, err := exchangeOpt(context.Background(), st.addr, q, false, time.Second, false)
+	resp, _, err := exchangeOpt(context.Background(), st.addr, q, false, time.Second, upTLS{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestUpstreamUDPAcceptsErrorAnswerWithoutQuestion(t *testing.T) {
 		r[4], r[5] = 0, 0
 		reply(r)
 	})
-	resp, _, err := exchangeOpt(context.Background(), st.addr, cacheQuery("x.example", 1, nil), false, time.Second, false)
+	resp, _, err := exchangeOpt(context.Background(), st.addr, cacheQuery("x.example", 1, nil), false, time.Second, upTLS{})
 	if err != nil || resp[3]&0x0f != 1 {
 		t.Fatalf("%v %x", err, resp)
 	}
@@ -113,11 +113,11 @@ func TestUpstreamUDPTimedOutSocketIsNotReused(t *testing.T) {
 			reply(answerTo(q))
 		}
 	})
-	if _, _, err := exchangeOpt(context.Background(), st.addr, cacheQuery("t.example", 1, nil), false, 80*time.Millisecond, false); err == nil {
+	if _, _, err := exchangeOpt(context.Background(), st.addr, cacheQuery("t.example", 1, nil), false, 80*time.Millisecond, upTLS{}); err == nil {
 		t.Fatal("expected a timeout")
 	}
 	drop.Store(false)
-	if _, _, err := exchangeOpt(context.Background(), st.addr, cacheQuery("t.example", 1, nil), false, time.Second, false); err != nil {
+	if _, _, err := exchangeOpt(context.Background(), st.addr, cacheQuery("t.example", 1, nil), false, time.Second, upTLS{}); err != nil {
 		t.Fatal(err)
 	}
 	st.mu.Lock()
@@ -321,7 +321,7 @@ func TestUpstreamSeesRandomIDAndClientGetsItsOwnBack(t *testing.T) {
 	for i := 0; i < n; i++ {
 		q := cacheQuery("id.example", 1, nil)
 		q[0], q[1] = 0x12, 0x34
-		resp, _, err := exchangeOpt(context.Background(), st.addr, q, false, time.Second, false)
+		resp, _, err := exchangeOpt(context.Background(), st.addr, q, false, time.Second, upTLS{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -343,7 +343,7 @@ func TestUpstreamSeesRandomIDAndClientGetsItsOwnBack(t *testing.T) {
 func TestUpstreamSocketIsRetiredAfterManyUses(t *testing.T) {
 	st := newUDPStub(t, func(q []byte, reply func([]byte)) { reply(answerTo(q)) })
 	for i := 0; i < udpMaxUses+10; i++ {
-		if _, _, err := exchangeOpt(context.Background(), st.addr, cacheQuery("rot.example", 1, nil), false, time.Second, false); err != nil {
+		if _, _, err := exchangeOpt(context.Background(), st.addr, cacheQuery("rot.example", 1, nil), false, time.Second, upTLS{}); err != nil {
 			t.Fatal(err)
 		}
 	}

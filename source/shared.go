@@ -332,6 +332,15 @@ func cloneDNS(d DNSConfig) DNSConfig {
 		}
 		d.ServerQueries = m
 	}
+	if len(d.ServerTLS) > 0 {
+		m := make(map[string]ServerTLS, len(d.ServerTLS))
+		for k, v := range d.ServerTLS {
+			m[k] = v
+		}
+		d.ServerTLS = m
+	} else {
+		d.ServerTLS = nil
+	}
 	if len(d.ServerNames) > 0 {
 		m := make(map[string]string, len(d.ServerNames))
 		for k, v := range d.ServerNames {

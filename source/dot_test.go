@@ -170,40 +170,30 @@ func mustQ(t *testing.T) []byte {
 func TestDoTInsecureAcceptsAnyCertificate(t *testing.T) {
 	f := newFakeDNS(t)
 	addr := newDoTServer(t, f)
-	dotRootCAs = x509.NewCertPool() // trusts nothing, so only tls_insecure can let it through
+	dotRootCAs = x509.NewCertPool() // trusts nothing, so only "do not check" can let it through
 	cfg := testDNSCfg(addr)
-	cfg.TLSInsecure = true
+	cfg.ServerTLS = map[string]ServerTLS{addr: {Insecure: true}}
 	p := NewPool(cfg)
 	p.ProbeNow(context.Background())
 	if r := rankedAddrs(p); len(r) != 1 {
-		t.Fatalf("tls_insecure did not accept the server: %v", r)
+		t.Fatalf("\"insecure\" did not accept the server: %v", r)
 	}
 	q, _ := buildQuery(0x4321, "a.example", "A")
 	if _, err := p.Forward(context.Background(), q, true); err != nil {
 		t.Fatal(err)
 	}
-	cfg.TLSInsecure = false
+	cfg.ServerTLS = nil
 	p2 := NewPool(cfg)
 	p2.ProbeNow(context.Background())
 	if r := rankedAddrs(p2); len(r) != 0 {
-		t.Fatalf("with tls_insecure off the same server must be refused: %v", r)
+		t.Fatalf("checked, the same server must be refused: %v", r)
 	}
 }
 
-func TestTLSInsecureConfigKey(t *testing.T) {
-	d := defaultDNS()
-	if d.TLSInsecure {
-		t.Fatal("tls_insecure must be off by default")
-	}
-	b, _ := json.Marshal(d)
-	if strings.Contains(string(b), "tls_insecure") {
-		t.Fatal("an off tls_insecure must not be written")
-	}
-	d.TLSInsecure = true
-	b, _ = json.Marshal(d)
-	var back DNSConfig
-	if err := json.Unmarshal(b, &back); err != nil || !back.TLSInsecure {
-		t.Fatalf("round trip: %v %v", err, back.TLSInsecure)
+func TestTLSConfigKeysNotWrittenByDefault(t *testing.T) {
+	b, _ := json.Marshal(defaultDNS())
+	if strings.Contains(string(b), "tls_insecure") || strings.Contains(string(b), "server_tls") {
+		t.Fatalf("written by default: %s", b)
 	}
 }
 
@@ -260,7 +250,7 @@ func TestDoTFrontendServesClients(t *testing.T) {
 	if _, _, err := exchange(context.Background(), srv, q, true, time.Second); err == nil {
 		t.Fatal("an untrusted certificate was accepted")
 	}
-	if _, _, err := exchangeOpt(context.Background(), srv, q, true, time.Second, true); err != nil {
+	if _, _, err := exchangeOpt(context.Background(), srv, q, true, time.Second, upTLS{insecure: true}); err != nil {
 		t.Fatalf("skipping the check should work: %v", err)
 	}
 	// plain TCP to the DoT port is not DNS: it gets no answer

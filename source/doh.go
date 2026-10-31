@@ -49,7 +49,7 @@ func normalizeDoH(rest string) (string, error) {
 
 // dohExchange sends one query to the DoH server addr and returns its answer and the round trip (from sending the
 // request).  The server's HTTP client and its connection are kept between queries (upstreamconn.go).
-func dohExchange(ctx context.Context, addr string, query []byte, timeout time.Duration, insecure bool) ([]byte, time.Duration, error) {
+func dohExchange(ctx context.Context, addr string, query []byte, timeout time.Duration, t upTLS) ([]byte, time.Duration, error) {
 	if len(query) < 12 {
 		return nil, 0, errors.New("query too short")
 	}
@@ -60,7 +60,7 @@ func dohExchange(ctx context.Context, addr string, query []byte, timeout time.Du
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	// the server's kept client: its HTTP/2 connection carries many queries (upstreamconn.go)
-	cl := dohClientFor(u, insecure)
+	cl := dohClientFor(u, t)
 	// RFC 8484 asks for ID 0 on the wire; the caller's ID is put back on the answer
 	id := binary.BigEndian.Uint16(query)
 	body := append([]byte(nil), query...)
@@ -71,6 +71,9 @@ func dohExchange(ctx context.Context, addr string, query []byte, timeout time.Du
 		req, rerr := http.NewRequestWithContext(ctx, http.MethodPost, addr, bytes.NewReader(body))
 		if rerr != nil {
 			return nil, 0, rerr
+		}
+		if t.name != "" {
+			req.Host = t.name // a server given by address and checked against a name is asked for that name (virtual hosting)
 		}
 		req.Header.Set("Content-Type", "application/dns-message")
 		req.Header.Set("Accept", "application/dns-message")

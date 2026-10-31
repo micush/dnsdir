@@ -1,5 +1,42 @@
 # Changelog
 
+## [v624] - 2026-10-31 — Certificate checking is set per tls:// and https:// server, not for the whole pool
+
+### Changed
+- **How a DNS-over-TLS or DNS-over-HTTPS server's certificate is checked is now a setting of that server.** Set it on the Topology page under Edit DNS server ▸ **Certificate**. The fields show for a `tls://` or `https://` address only. There are three choices:
+  - **Check** (the default): the certificate must be valid for the host in the address.
+  - **Check against a host name**: the same check, against a name you give under **Certificate host name**, while still connecting to the address written. This is the fix for a server given by IP address whose certificate names only its host. `tls://86.54.11.1` failed with "x509: cannot validate certificate for 86.54.11.1 because it doesn't contain any IP SANs"; checked against `protective.joindns4.eu` it passes, and the check is still made. The name is also sent in the TLS handshake (SNI) and, for `https://`, as the request's Host. Kept connections are separate for each name, as they already were for checked and unchecked.
+  - **Don't check (insecure)**: accepts any certificate, for this server only.
+- **Config:** `server_tls` in the shared `dns` block or a gateway's own pool, keyed by the server like `server_names`: `{"name": "protective.joindns4.eu"}` or `{"insecure": true}`. An entry for a server that is gone, or that is not `tls://` or `https://`, is dropped. A name that is an IP address or not a host name is refused, and so is a name together with "insecure". Renaming a server on the Topology page moves its setting with it. Copying and pasting a server copies it too.
+- **CLI:** `--canvas-set server --group N --server ADDR --cert check|none|NAME`, also on `--canvas-add server`, and `--canvas-set fallback` for a fallback server.
+- **Where a server that isn't checked shows:**
+  - a ⚠ in the corner of its square on the Topology page, with its tooltip saying so (a name check is in the tooltip too);
+  - "certificate not checked" (or "cert: NAME") on its row on Monitor ▸ DNS;
+  - a line in `--show-dns`, and a tag in `--canvas`;
+  - a warning naming the servers when its pool starts.
+
+### Removed
+- **"Accept any certificate from tls:// and https:// servers (insecure)"** (Configure ▸ DNS, `tls_insecure`), which turned the check off for every server of every pool at once. It is read one last time so that nothing that answers stops answering. A pool that had it on gives each of its `tls://` and `https://` servers (fallback servers too) **Don't check** of its own; a server that already had a setting keeps it. Every gateway's own pool counts as on while the shared switch was on, since they followed it from v618. This happens when the configuration is read (the page shows it, and a save keeps it), and the log says once which pools were changed. The switch is never written again, so check the servers again one at a time.
+- During an upgrade, a node still on an older version ignores `server_tls`. Until it is upgraded too, it checks every certificate, so a server set to "Don't check" or a name shows as down on that node only.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...` (also with `CGO_ENABLED=0`), `go test -race -count=1 ./...` (one run hit the known random-port clash in `TestUpdateReachesResolveAndStats`; it passes on its own, three times), `node --check` on `app.js` and `help.js`.
+- **New tests** (`servertls_test.go`):
+  - DoT to a server with a host-name-only certificate: by address and checked it fails with "IP SANs"; against its name it passes; against another name it fails; unchecked it passes; through a pool the name comes from the configuration.
+  - DoH: checked against a name, with the request's Host being that name.
+  - One unchecked server leaves the other checked in the same pool.
+  - Validation: keys normalised and pruned, the name lower-cased, IP names, bad names and name with "insecure" refused, empty entries dropped.
+  - Migration from the shared switch and from a gateway's own, keeping a server's existing setting and never writing the switch again.
+  - `--cert` on add and set of servers and fallback servers, and the setting gone with its fallback server.
+- The tests that used `tls_insecure` now use the per-server setting, and the connection key test covers the name.
+- **Live:** a v622 configuration (`tls_insecure` on, a gateway with its own pool and a DoT server whose certificate is signed by a trusted test CA for `protective.example` only, reached by IP address), headless Chromium with a real PAM user:
+  - On start, the log told the change once and warned about the unchecked server, and the server was up.
+  - The square had its ⚠, and Edit showed **Don't check (insecure)**.
+  - **Check against a host name** `protective.example` kept it up, and the tooltip said so.
+  - **Check** brought it down with "doesn't contain any IP SANs", and the file then had neither `tls_insecure` nor `server_tls`.
+  - `--canvas-set … --cert none` gave "certificate not checked" on Monitor ▸ DNS.
+  - The form showed the certificate fields for `https://` and not for a plain server.
+
 ## [v622] - 2026-10-31 — The MCP Keys table looks and works like the address list above it
 
 ### Changed

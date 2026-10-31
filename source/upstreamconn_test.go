@@ -75,7 +75,7 @@ func TestDoTUpstreamReusesTheConnection(t *testing.T) {
 	if accepted.Load() != 1 {
 		t.Fatalf("%d connections for 5 queries, want 1", accepted.Load())
 	}
-	if n := dotConns.count(dotKey(addr[len(dotScheme):], false)); n != 1 {
+	if n := dotConns.count(dotKey(addr[len(dotScheme):], upTLS{})); n != 1 {
 		t.Fatalf("%d idle connections kept, want 1", n)
 	}
 }
@@ -97,14 +97,17 @@ func TestDoTUpstreamRetriesAClosedConnection(t *testing.T) {
 
 // A connection made under other certificate rules is not reused.
 func TestDoTUpstreamKeyFollowsTheRules(t *testing.T) {
-	if dotKey("h:853", false) == dotKey("h:853", true) {
+	if dotKey("h:853", upTLS{}) == dotKey("h:853", upTLS{insecure: true}) {
 		t.Fatal("insecure and checked connections share a key")
 	}
+	if dotKey("h:853", upTLS{}) == dotKey("h:853", upTLS{name: "dns.test"}) {
+		t.Fatal("connections checked against another name share a key")
+	}
 	old := dotRootCAs
-	a := dotKey("h:853", false)
+	a := dotKey("h:853", upTLS{})
 	dotRootCAs = x509.NewCertPool()
 	defer func() { dotRootCAs = old }()
-	if a == dotKey("h:853", false) {
+	if a == dotKey("h:853", upTLS{}) {
 		t.Fatal("other trusted authorities share a key")
 	}
 }
@@ -116,7 +119,7 @@ func TestDoHUpstreamReusesTheConnection(t *testing.T) {
 	var conns atomic.Int64
 	// count the TCP connections the server accepts, by wrapping its listener through the client's dialer
 	u := mustURL(t, addr)
-	c := dohClientFor(u, false)
+	c := dohClientFor(u, upTLS{})
 	c.tr.DialContext = func(ctx context.Context, network, a string) (net.Conn, error) {
 		conns.Add(1)
 		var d net.Dialer

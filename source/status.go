@@ -270,7 +270,7 @@ func (s *StatusServer) dnsStatus() map[string]any {
 			"client_action": orDefault(pi.Cfg.ClientAction, actDrop), "denied": pi.Pool.Denied.Load(), "limited": pi.Pool.Limited.Load(),
 			"domain_limits": pi.Pool.dlim.rows(), "domain_limited": pi.Pool.DomainLimited.Load(),
 			"cache":    pi.Pool.cache.stats(),
-			"dot_port": pi.Cfg.DoTPort, "doh_port": pi.Cfg.DoHPort, "tls_insecure": pi.Cfg.TLSInsecure, "spread": pi.Cfg.Spread, "spread_band": pi.Cfg.SpreadBand,
+			"dot_port": pi.Cfg.DoTPort, "doh_port": pi.Cfg.DoHPort, "spread": pi.Cfg.Spread, "spread_band": pi.Cfg.SpreadBand,
 		})
 	}
 	first := list[0]

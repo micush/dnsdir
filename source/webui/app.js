@@ -712,6 +712,11 @@
     const shortAddr = (a) => a.replace(/:53$/, "").replace(/^\[(.*)\]$/, "$1");
     // the optional name of a server (dns.server_names), shown under its address
     const srvName = (g, addr) => ((g.dns || cv.cfg.dns || {}).server_names || {})[addr] || "";
+    // how a tls:// or https:// server's certificate is checked: {} (normally), { name } (against that host name) or { insecure: true }
+    const srvCert = (g, addr) => ((g.dns || cv.cfg.dns || {}).server_tls || {})[addr] || {};
+    const isTLSAddr = (a) => /^(tls|https):\/\//i.test(String(a || "").trim());
+    const CERT_CHOICES = ["Check", "Check against a host name", "Don't check (insecure)"];
+    const certTip = (g, addr) => { if (!isTLSAddr(addr)) return ""; const c = srvCert(g, addr); return c.insecure ? " — certificate NOT checked" : c.name ? " — certificate checked against " + c.name : ""; };
     const srvTitle = (g, addr) => (srvName(g, addr) ? srvName(g, addr) + " (" + shortAddr(addr) + ")" : shortAddr(addr));
     // what a server serves in conditional forwarding (dns.server_forward): P public, I internal (its zones only), P+I both
     const FWD_TYPES = ["Public resolver", "Internal (zones only)", "Public + Internal resolver"];
@@ -1111,9 +1116,11 @@
             ghost: (k) => sv("rect", { class: "dropslot", x: rowX + (COLW - SW) / 2 + k * COLW, y: SY, width: SW, height: SH, rx: 4 }),
             drop: (k) => { ensureDNS(g); reorder(g.dns.servers, i, k); cv.sel = { kind: "srv", addr }; commit(); } }),
           onkeydown: (e) => { if (e.key === "Enter") pick("srv", addr)(e); } },
-          sv("title", {}, srvTitle(g, addr) + " — " + ss.why + " — " + fwdTip(srvForward(g, addr)) + (info && ss.c !== "paused" && ss.c !== "idle" ? upLine(info.uptime) : "")),
+          sv("title", {}, srvTitle(g, addr) + " — " + ss.why + " — " + fwdTip(srvForward(g, addr)) + certTip(g, addr) + (info && ss.c !== "paused" && ss.c !== "idle" ? upLine(info.uptime) : "")),
           sv("rect", { x, y: SY, width: SW, height: SH, rx: 4 }),
           sv("text", { x: x + 7, y: SY + SH - 7, "text-anchor": "start", class: "t2 srvtype" }, fwdBadge(srvForward(g, addr))),
+          // a server whose certificate is not checked carries a mark in its corner (Edit ▸ Certificate)
+          isTLSAddr(addr) && srvCert(g, addr).insecure ? sv("text", { x: x + SW - 7, y: SY + SH - 7, "text-anchor": "end", class: "t2 certmark" }, sv("title", {}, "Certificate not checked: anyone on the path could answer for this server"), "⚠") : null,
           label(mx, SY + (srvName(g, addr) ? 19 : 20), fitPx(shortAddr(addr), SW - 44, "600 13px system-ui, sans-serif"), "t1"),
           ...(srvName(g, addr) ? [label(mx, SY + 35, fitPx(srvName(g, addr), SW - 44, "400 11px system-ui, sans-serif"), "t2")] : []),
           label(mx, SY + (srvName(g, addr) ? 51 : 35), info && (ss.c === "ok" || ss.c === "warn") ? info.ms + " ms" + (info.rank ? " · #" + info.rank : "") : ss.c === "bad" ? "down" : ss.c === "paused" ? "paused" : "", "t2")));
@@ -1582,7 +1589,7 @@
     }
     const copyServer = (g, addr) => {
       const f = srvForward(g, addr);
-      srvClip = { addr, label: srvName(g, addr), forward: f ? { lists: (f.lists || []).slice(), ...(f.zones_only ? { zones_only: true } : {}) } : null, queries: effQueries(g, addr).map((q) => ({ name: q.name, type: q.type })) };
+      srvClip = { addr, label: srvName(g, addr), forward: f ? { lists: (f.lists || []).slice(), ...(f.zones_only ? { zones_only: true } : {}) } : null, queries: effQueries(g, addr).map((q) => ({ name: q.name, type: q.type })), cert: { ...srvCert(g, addr) } };
     };
     const pasteServerWhy = () => {
       if (!srvClip) return "No server copied yet: right-click a server ▸ Copy ▸ Server";
@@ -1593,12 +1600,13 @@
       if (pasteServerWhy()) return;
       const c = srvClip;
       ensureDNS(g);
-      if (g.dns.servers.includes(c.addr)) { serverForm(g, null, { forward: c.forward, queries: c.queries }); return; }
+      if (g.dns.servers.includes(c.addr)) { serverForm(g, null, { forward: c.forward, queries: c.queries, cert: c.cert }); return; }
       quick(() => {
         g.dns.servers.push(c.addr);
         g.dns.server_queries[c.addr] = c.queries.map((q) => ({ ...q }));
         if (c.forward) { g.dns.server_forward = g.dns.server_forward || {}; g.dns.server_forward[c.addr] = { ...c.forward, lists: c.forward.lists.slice() }; }
         if (c.label) { g.dns.server_names = g.dns.server_names || {}; g.dns.server_names[c.addr] = c.label; }
+        if (c.cert && (c.cert.name || c.cert.insecure)) { g.dns.server_tls = g.dns.server_tls || {}; g.dns.server_tls[c.addr] = { ...c.cert }; }
         cv.sel = { kind: "srv", addr: c.addr };
       });
     }
@@ -1966,13 +1974,24 @@
     }
     function serverForm(g, edit, pre) {   // pre: a server pasted on a gateway that has its address already (forward, queries): all but the address is filled in
       const lk = lookupHooks();
+      const c0 = edit ? srvCert(g, edit) : pre && pre.cert ? pre.cert : {};
+      // the certificate fields show for a tls:// or https:// address only, and the name only when it is the choice
+      const certVis = (els) => {
+        const tls = isTLSAddr(els.addr.value);
+        els.cert.parentElement.style.display = tls ? "" : "none";
+        els.certname.parentElement.style.display = tls && els.cert.value === CERT_CHOICES[1] ? "" : "none";
+      };
       const f0 = edit ? srvForward(g, edit) : pre ? pre.forward : srvForward(g, "");
       const q0 = pre && pre.queries[0] ? pre.queries[0] : { name: "", type: "A" };
       form(edit ? "Edit DNS server" : pre ? "Paste server" : "Add DNS server", [
-        { k: "addr", l: "IP address or host name", v: edit ? shortAddr(edit) : "", ph: "8.8.8.8", hint: pre ? "That server is already on this gateway: give the copy its own address. " : "Add :port for a port other than 53. Write tls://host for DNS over TLS (port 853) or https://host/path for DNS over HTTPS (port 443).", on: lk.addr },
+        { k: "addr", l: "IP address or host name", v: edit ? shortAddr(edit) : "", ph: "8.8.8.8", hint: pre ? "That server is already on this gateway: give the copy its own address. " : "Add :port for a port other than 53. Write tls://host for DNS over TLS (port 853) or https://host/path for DNS over HTTPS (port 443).", on: (els, note) => { certVis(els); return lk.addr(els, note); } },
         { k: "label", l: "Name (optional)", v: edit ? srvName(g, edit) : "", ph: "e.g. dns-a", hint: "Shown under the address on the diagram. Fill in the address and its name is looked up; fill in a host name here and its address is.", on: lk.label },
         { k: "ftype", l: "Server type", v: fwdTypeOf(f0), options: FWD_TYPES, initOn: true, on: (els) => { const pub = els.ftype.value === FWD_TYPES[0]; els.flists.setDisabled(pub); els.flists.parentElement.style.display = pub ? "none" : ""; }, hint: "Public resolver: answers everything except the zones other servers carry. Internal: answers only the zones of its lists (never other names). Public + Internal: answers its zones and everything else." },
         { k: "flists", l: "Zone lists", v: (f0 || {}).lists || [], checks: forwardListNames(), none: "There are no zone lists yet. Make them under Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding.", hint: "For an Internal or Public + Internal server: type to find the zone lists it serves and add them (they are made under Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding). A Public resolver has none." },
+        // tls:// and https:// only: how the server's certificate is checked (hidden for a plain server)
+        { k: "cert", l: "Certificate", v: c0.insecure ? CERT_CHOICES[2] : c0.name ? CERT_CHOICES[1] : CERT_CHOICES[0], options: CERT_CHOICES, initOn: true, on: certVis,
+          hint: "Check: the certificate must be valid for the host in the address. Given by IP address, most public servers fail that (their certificate names the host): check against its host name instead. Don't check only for a server you trust whose certificate cannot be checked (self-signed); the traffic is encrypted, but anyone on the path could answer." },
+        { k: "certname", l: "Certificate host name", v: c0.name || "", ph: "e.g. protective.joindns4.eu", hint: "The name the server's certificate is for. dnsdir still connects to the address above." },
         ...(edit ? [] : [
           { k: "name", l: "Domain to ask it about", v: q0.name, ph: "google.com", hint: (pre && pre.queries.length > 1 ? "The other " + (pre.queries.length - 1) + " copied domains are added too: " + pre.queries.slice(1).map((q) => q.name + " (" + q.type + ")").join(", ") + ". " : "") + "A server is checked by asking it a question; add more domains afterwards. For an Internal server, use a name in one of its zones (its zone itself with type SOA works). A domain inside one of its zones decides that zone only." },
           { k: "type", l: "Record type", v: q0.type, options: QTYPES }]),
@@ -1986,6 +2005,10 @@
         if (v.ftype === FWD_TYPES[0] && flists.length) return "A public resolver has no zone lists: choose Internal or Public + Internal, or clear the lists.";
         const missing = flists.filter((l) => !haveLists.includes(l));
         if (missing.length) return "There is no zone list called " + missing.join(", ") + (haveLists.length ? " (the lists are: " + haveLists.join(", ") + ")." : " — there are no zone lists yet. Make them under Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding.");
+        const certName = (v.certname || "").trim().toLowerCase().replace(/\.$/, "");
+        const certChoice = isTLSAddr(v.addr) ? v.cert : CERT_CHOICES[0];
+        if (certChoice === CERT_CHOICES[1] && !(certName.includes(".") && certName.split(".").every((l) => /^[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?$/.test(l)) && !/^[0-9.]+$/.test(certName)))
+          return "Give the host name the server's certificate is for (e.g. protective.joindns4.eu), or choose Check or Don't check.";
         const nm = (v.label || "").trim();
         const full = nm.toLowerCase();
         const ip = (/^\[([0-9a-f:.]+)\](:\d+)?$/i.exec(v.addr) || /^(\d+\.\d+\.\d+\.\d+)(:\d+)?$/.exec(v.addr) || /^([0-9a-f:]*:[0-9a-f:]*)$/i.exec(v.addr) || [])[1] || "";
@@ -2000,6 +2023,7 @@
           if (a !== edit) {
             if (g.dns.server_names) delete g.dns.server_names[edit];
             if (g.dns.server_forward) delete g.dns.server_forward[edit];
+            if (g.dns.server_tls) delete g.dns.server_tls[edit];
             g.dns.server_queries[a] = ownQueries(g, edit); delete g.dns.server_queries[edit];
             if ((g.dns.paused_servers || []).includes(edit)) g.dns.paused_servers = g.dns.paused_servers.map((x) => (x === edit ? a : x));
           }
@@ -2009,6 +2033,9 @@
           g.dns.server_queries[a] = [{ name: v.name, type: v.type }, ...(pre ? pre.queries.slice(1).map((q) => ({ ...q })) : [])];
           cv.sel = { kind: "srv", addr: a };
         }
+        const cert = certChoice === CERT_CHOICES[2] ? { insecure: true } : certChoice === CERT_CHOICES[1] ? { name: certName } : null;
+        if (cert) { g.dns.server_tls = g.dns.server_tls || {}; g.dns.server_tls[a] = cert; }
+        else if (g.dns.server_tls) { delete g.dns.server_tls[a]; if (!Object.keys(g.dns.server_tls).length) delete g.dns.server_tls; }
         if (flists.length) { g.dns.server_forward = g.dns.server_forward || {}; g.dns.server_forward[a] = { lists: flists, ...(v.ftype === FWD_TYPES[1] ? { zones_only: true } : {}) }; }
         else if (g.dns.server_forward) { delete g.dns.server_forward[a]; if (!Object.keys(g.dns.server_forward).length) delete g.dns.server_forward; }
         const oldNm = edit ? srvName(g, edit) : "";
@@ -2298,7 +2325,6 @@
               p.allowed_clients ? pill("allowed clients · " + p.allowed_clients + " network" + (p.allowed_clients === 1 ? "" : "s") + (p.denied ? " · " + p.denied.toLocaleString() + " refused" : ""), p.denied ? "warn" : "info") : null,
               p.dot_port ? pill("DoT · " + p.dot_port, "info") : null,
               p.doh_port ? pill("DoH · " + p.doh_port, "info") : null,
-              p.tls_insecure ? pill("tls:// and https:// certificates not checked", "warn") : null,
               p.spread ? h("span", { class: "muted small", title: "Servers within " + p.spread_band + "% of the fastest one's latency take turns; slower ones are fallbacks." }, "spread within " + p.spread_band + "%") : null,
               (() => {
                 const c = p.cache, n0 = (n) => Number(n || 0).toLocaleString();
@@ -2319,6 +2345,8 @@
                 h("td", {}, s.healthy && s.rank ? s.rank : "–"),
                 h("td", { class: "sname", title: s.name || null }, s.name || "–"),   // a long name is cut short; the whole is the tooltip
                 h("td", { class: "mono" }, s.addr, s.fallback ? [h("span", { class: "muted small fb-tag", title: "Used only while every other server is down" }, "fallback")] : null,
+                  s.cert_unchecked ? h("span", { class: "small fb-tag warn-text", title: "Its certificate is not checked: anyone on the path could answer for it (Topology ▸ Edit server ▸ Certificate)" }, "certificate not checked")
+                    : s.cert_name ? h("span", { class: "muted small fb-tag", title: "Its certificate is checked against this host name instead of the address" }, "cert: " + s.cert_name) : null,
                   // a server given by name: its address and where that came from (the host's resolver may be this node itself)
                   s.resolved_via ? h("div", { class: "small " + (s.resolved_via === "host resolver" ? "warn-text" : "muted"), title: s.resolved_via === "host resolver" ? "No server is given by IP address and no bootstrap server is set, so the name comes from this host's resolver. If that is this node, the server can only be reached while another one answers." : null },
                     (s.resolved_ips || []).join(", ") + " via " + s.resolved_via) : null),
@@ -2371,7 +2399,6 @@
     { shared: true, k: "fallback_servers", l: "Fallback servers", t: "rows", rows: "fallback", wide: true, hint: "Same forms. Used only while no server above is in service (all down or paused), and dropped as soon as one answers again. They are never tested with the test domains and always count as up, so a public resolver that knows nothing of your internal names is fine; each round only checks that they answer at all (Monitor ▸ DNS)." },
     { shared: true, k: "bootstrap", l: "Bootstrap servers", t: "rows", rows: "bootstrap", wide: true, hint: "IP addresses only. They look up the names of servers given by name (tls://name, https://name) when no server above is given by IP address and up; otherwise they are not needed." },
     { shared: true, k: "queries", l: "Probe queries", t: "rows", rows: "queries", wide: true, hint: "Every server is asked each of these to check it works: a name and a record type." },
-    { shared: true, k: "tls_insecure", l: "Accept any certificate from tls:// and https:// servers (insecure)", t: "bool" },
     { section: "Load Balancing", cols: 3, note: "Applies to every gateway unless that gateway has its own load balancing (Topology ▸ right-click the gateway ▸ Edit)." },
     { shared: true, k: "spread", l: "Spread queries over servers of similar speed (round-robin)", t: "bool" },
     { shared: true, k: "spread_band", l: "Spread band (% of fastest)", t: "int", min: 1, max: 1000 },

@@ -53,6 +53,9 @@ type CanvasServer struct {
 	// server.  Lists are the zone lists it serves (see fwdzones.go).
 	Type  string   `json:"type,omitempty"`
 	Lists []string `json:"lists,omitempty"`
+	// CertName and CertUnchecked: how a tls:// or https:// server's certificate is checked (see ServerStat)
+	CertName      string `json:"cert_name,omitempty"`
+	CertUnchecked bool   `json:"cert_unchecked,omitempty"`
 }
 
 // CanvasFamily is the state of one address family of a gateway (a gateway with
@@ -247,6 +250,9 @@ func buildCanvas(dc *DaemonConfig, rows []SnapshotRow, pools []poolInfo) []Canva
 			}
 			for _, addr := range cfg.Servers {
 				cs := CanvasServer{Addr: addr, Name: cfg.ServerNames[addr], Tests: []CanvasTest{}}
+				if t := cfg.tlsFor(addr); isTLSServer(addr) {
+					cs.CertName, cs.CertUnchecked = t.name, t.insecure
+				}
 				if f, ok := cfg.ServerForward[addr]; ok && len(f.Lists) > 0 {
 					cs.Type, cs.Lists = f.fwdType(), append([]string(nil), f.Lists...)
 					if cs.Type == fwdPublic {
@@ -628,6 +634,9 @@ type canvasEdit struct {
 	// serves in conditional forwarding (see fwdzones.go); empty leaves it as it is.
 	ServerType string `json:"server_type"`
 	Lists      string `json:"lists"`
+	// Cert is how a tls:// or https:// server's certificate is checked: "check" (the normal check), "none" (not
+	// checked), or a host name to check it against; empty leaves it as it is (servertls.go).
+	Cert string `json:"cert"`
 	// Node names a cluster node for --canvas-add|del node: its address, host name or node ID.  CanvasEdit turns it into
 	// nodeID and lists the cluster's node IDs in members, so the last member cannot be removed.
 	Node string `json:"node"`
@@ -1172,6 +1181,11 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 					return "", err
 				}
 			}
+			if e.Cert != "" {
+				if _, err := setServerCert(d, addr, e.Cert); err != nil {
+					return "", err // the whole edit is dropped, nothing above is kept
+				}
+			}
 			return fmt.Sprintf("added server %s to gateway %d", addr, e.Group), nil
 		case "move":
 			if idx < 0 {
@@ -1185,6 +1199,15 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 		case "set":
 			if idx < 0 {
 				return "", fmt.Errorf("server %s is not on gateway %d", addr, e.Group)
+			}
+			if e.Cert != "" {
+				msg, err := setServerCert(d, addr, e.Cert)
+				if err != nil {
+					return "", err
+				}
+				if e.ServerType == "" && e.Lists == "" && e.Label == "" {
+					return msg, nil
+				}
 			}
 			if e.ServerType != "" || e.Lists != "" {
 				msg, err := setServerForward(dc, d, addr, e.ServerType, e.Lists)
@@ -1202,7 +1225,7 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 				return msg, nil
 			}
 			if e.Label == "" {
-				return "", errors.New("nothing to change: give --label (a name, or - to clear it), or --server-type / --lists")
+				return "", errors.New("nothing to change: give --label (a name, or - to clear it), --server-type / --lists, or --cert")
 			}
 			if e.Label == "-" {
 				setServerName(d, addr, "")
@@ -1287,7 +1310,20 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 				}
 			}
 			d.FallbackServers = append(d.FallbackServers, addr)
+			if e.Cert != "" {
+				if _, err := setServerCert(d, addr, e.Cert); err != nil {
+					return "", err
+				}
+			}
 			return fmt.Sprintf("added fallback server %s to gateway %d (used only while every other server is down)", addr, e.Group), nil
+		case "set":
+			if idx < 0 {
+				return "", fmt.Errorf("%s is not a fallback server of gateway %d", addr, e.Group)
+			}
+			if e.Cert == "" {
+				return "", errors.New("nothing to change: a fallback server has only --cert check|none|NAME")
+			}
+			return setServerCert(d, addr, e.Cert)
 		case "del":
 			if idx < 0 {
 				return "", fmt.Errorf("%s is not a fallback server of gateway %d", addr, e.Group)

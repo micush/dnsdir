@@ -112,21 +112,21 @@ func asciiEqualFold(a, b []byte) bool {
 // settings say so and the server allows it.
 func (p *Pool) exchangeQ(ctx context.Context, s *Server, q []byte, tcp bool) ([]byte, time.Duration, error) {
 	if !p.cfg.RandomizeCase || tcp || strings.HasPrefix(s.Addr, dohScheme) || strings.HasPrefix(s.Addr, dotScheme) {
-		return exchangeOpt(ctx, s.Addr, q, tcp, p.cfg.queryTimeout(), p.cfg.TLSInsecure)
+		return exchangeOpt(ctx, s.Addr, q, tcp, p.cfg.queryTimeout(), p.cfg.tlsFor(s.Addr))
 	}
 	if until := s.case0x20Off.Load(); until != 0 {
 		if time.Now().UnixNano() < until {
-			return exchangeOpt(ctx, s.Addr, q, tcp, p.cfg.queryTimeout(), p.cfg.TLSInsecure)
+			return exchangeOpt(ctx, s.Addr, q, tcp, p.cfg.queryTimeout(), p.cfg.tlsFor(s.Addr))
 		}
 		s.case0x20Off.Store(0) // the pause is over: try it again
 		s.case0x20Miss.Store(case0x20Strikes - 1)
 	}
 	rq, end, ok := randomCaseName(q)
 	if !ok {
-		return exchangeOpt(ctx, s.Addr, q, tcp, p.cfg.queryTimeout(), p.cfg.TLSInsecure)
+		return exchangeOpt(ctx, s.Addr, q, tcp, p.cfg.queryTimeout(), p.cfg.tlsFor(s.Addr))
 	}
 	case0x20Sent.Add(1)
-	resp, rtt, err := exchangeOpt(ctx, s.Addr, rq, tcp, p.cfg.queryTimeout(), p.cfg.TLSInsecure)
+	resp, rtt, err := exchangeOpt(ctx, s.Addr, rq, tcp, p.cfg.queryTimeout(), p.cfg.tlsFor(s.Addr))
 	if err != nil {
 		return resp, rtt, err
 	}
@@ -154,5 +154,5 @@ func (p *Pool) exchangeQ(ctx context.Context, s *Server, q []byte, tcp bool) ([]
 		s.case0x20Off.Store(time.Now().Add(case0x20Pause).UnixNano())
 		warnf("dns: server %s does not keep the case of names (0x20): asking it the usual way for %v", s.Addr, case0x20Pause)
 	}
-	return exchangeOpt(ctx, s.Addr, q, tcp, p.cfg.queryTimeout(), p.cfg.TLSInsecure)
+	return exchangeOpt(ctx, s.Addr, q, tcp, p.cfg.queryTimeout(), p.cfg.tlsFor(s.Addr))
 }

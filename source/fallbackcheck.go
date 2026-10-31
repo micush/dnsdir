@@ -41,7 +41,7 @@ func buildRootNSQuery(id uint16) []byte {
 // checkFallback asks s, a fallback server, for the root zone's NS records and keeps the result.  It never changes whether
 // the pool may use s.
 func (p *Pool) checkFallback(ctx context.Context, s *Server) {
-	resp, rtt, err := exchangeOpt(ctx, s.Addr, buildRootNSQuery(uint16(rand.Uint32())), false, p.cfg.probeTimeout(), p.cfg.TLSInsecure)
+	resp, rtt, err := exchangeOpt(ctx, s.Addr, buildRootNSQuery(uint16(rand.Uint32())), false, p.cfg.probeTimeout(), p.cfg.tlsFor(s.Addr))
 	if ctx.Err() != nil {
 		return
 	}

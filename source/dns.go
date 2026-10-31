@@ -136,24 +136,24 @@ var errNoServers = errors.New("no healthy upstream servers")
 // A fresh connected socket per exchange gives source-port randomisation and
 // kernel-level source filtering.
 func exchange(ctx context.Context, addr string, query []byte, tcp bool, timeout time.Duration) ([]byte, time.Duration, error) {
-	return exchangeOpt(ctx, addr, query, tcp, timeout, false)
+	return exchangeOpt(ctx, addr, query, tcp, timeout, upTLS{})
 }
 
-// exchangeOpt is exchange with the choice of not checking a TLS server's certificate (insecure).
+// exchangeOpt is exchange with the certificate check of a tls:// or https:// server given (t, see servertls.go).
 //
 // The query goes upstream under a fresh random ID, and the answer gets the client's ID back.  A client's own ID
 // must not be what an upstream sees: the client chooses it, so a client that is also the attacker would know it,
 // leaving only the source port (and over a reused socket, not even a new one each time) to guess before it could
 // get a forged answer accepted and cached for everyone.
-func exchangeOpt(ctx context.Context, addr string, query []byte, tcp bool, timeout time.Duration, insecure bool) ([]byte, time.Duration, error) {
+func exchangeOpt(ctx context.Context, addr string, query []byte, tcp bool, timeout time.Duration, t upTLS) ([]byte, time.Duration, error) {
 	if len(query) < 12 || (query[2]>>3)&0x0F != 0 {
 		// not a plain query (a dynamic update, say, which may be signed over its ID and whose answer is never cached)
-		return exchangeOptID(ctx, addr, query, tcp, timeout, insecure)
+		return exchangeOptID(ctx, addr, query, tcp, timeout, t)
 	}
 	orig := binary.BigEndian.Uint16(query)
 	q := append([]byte(nil), query...)
 	binary.BigEndian.PutUint16(q, uint16(rand.Uint32()))
-	resp, rtt, err := exchangeOptID(ctx, addr, q, tcp, timeout, insecure)
+	resp, rtt, err := exchangeOptID(ctx, addr, q, tcp, timeout, t)
 	if err == nil && len(resp) >= 2 {
 		binary.BigEndian.PutUint16(resp, orig)
 	}
@@ -161,7 +161,7 @@ func exchangeOpt(ctx context.Context, addr string, query []byte, tcp bool, timeo
 }
 
 // exchangeOptID is exchangeOpt with the query sent exactly as given.
-func exchangeOptID(ctx context.Context, addr string, query []byte, tcp bool, timeout time.Duration, insecure bool) ([]byte, time.Duration, error) {
+func exchangeOptID(ctx context.Context, addr string, query []byte, tcp bool, timeout time.Duration, t upTLS) ([]byte, time.Duration, error) {
 	if !tcp && !strings.HasPrefix(addr, dohScheme) && !strings.HasPrefix(addr, dotScheme) {
 		// plain UDP needs only a deadline: a child context per query registers with the parent (a lock shared by
 		// every query in flight) and was about a tenth of the lock waiting on a busy node
@@ -174,7 +174,7 @@ func exchangeOptID(ctx context.Context, addr string, query []byte, tcp bool, tim
 	defer cancel()
 	deadline, _ := ctx.Deadline()
 	if strings.HasPrefix(addr, dohScheme) {
-		return dohExchange(ctx, addr, query, timeout, insecure)
+		return dohExchange(ctx, addr, query, timeout, t)
 	}
 	if !tcp && !strings.HasPrefix(addr, dotScheme) {
 		return exchangeUDP(ctx, addr, query, deadline)
@@ -182,7 +182,7 @@ func exchangeOptID(ctx context.Context, addr string, query []byte, tcp bool, tim
 	if hp, ok := strings.CutPrefix(addr, dotScheme); ok {
 		// DNS over TLS: the same length-prefixed messages as DNS over TCP, inside TLS, on a kept connection when
 		// there is one (upstreamconn.go)
-		return exchangeDoT(ctx, hp, query, deadline, insecure)
+		return exchangeDoT(ctx, hp, query, deadline, t)
 	}
 	// plain DNS over TCP, on a kept connection when there is one (upstreamconn.go)
 	return exchangeTCP(ctx, addr, query, deadline)
@@ -263,6 +263,10 @@ type ServerStat struct {
 	ZonesDown []string `json:"zones_down,omitempty"`
 	// Check is a fallback server's latest check (fallbackcheck.go); nil for a normal server and before the first round.
 	Check *FallbackCheck `json:"check,omitempty"`
+	// CertName is the host name a tls:// or https:// server's certificate is checked against instead of its own host;
+	// CertUnchecked says its certificate is not checked at all (servertls.go).
+	CertName      string `json:"cert_name,omitempty"`
+	CertUnchecked bool   `json:"cert_unchecked,omitempty"`
 }
 
 // TestStat is the latest result of one probe query against one server.
@@ -490,7 +494,7 @@ func (p *Pool) probeServer(ctx context.Context, s *Server) {
 			s.dh[domKey(s.Addr, q.Name, q.Type)].addPrFail()
 			continue
 		}
-		resp, rtt, err := exchangeOpt(ctx, s.Addr, pkt, false, p.cfg.probeTimeout(), p.cfg.TLSInsecure)
+		resp, rtt, err := exchangeOpt(ctx, s.Addr, pkt, false, p.cfg.probeTimeout(), p.cfg.tlsFor(s.Addr))
 		if err == nil {
 			h, _ := parseHeader(resp)
 			switch {
@@ -938,6 +942,9 @@ func (p *Pool) Snapshot() []ServerStat {
 			Served: s.served.Load(), LastError: s.lastErr,
 			Tests: append([]TestStat{}, s.tests...),
 			Check: p.fallbackCheckOf(s),
+		}
+		if t := p.cfg.tlsFor(s.Addr); isTLSServer(s.Addr) {
+			st.CertName, st.CertUnchecked = t.name, t.insecure
 		}
 		st.ResolvedIPs, st.ResolvedVia = boot.resolvedVia(s.Addr)
 		if !s.lastProbe.IsZero() {

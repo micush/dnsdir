@@ -86,6 +86,9 @@ the web GUI):
                                          Topology page; - clears; a full name such as dns-a.example.com is also registered
                                          in DNS for the server's IP address when an existing server is named;
                                          --canvas-add server sends nothing)
+                   --canvas-set server|fallback --group N --server tls://..|https://.. --cert check|none|NAME
+                                         (how its certificate is checked: normally, not at all, or against the host
+                                         name NAME instead of the host in its address; also on --canvas-add)
                    --canvas-pause|--canvas-resume gateway --group N   (this node stops/starts serving it)
                    --canvas-pause|--canvas-resume server --group N --server ADDR  (no queries/probes)
                    --canvas-del node --group N --node NODE   (remove a cluster node from the gateway: it stops serving it, on every
@@ -207,7 +210,8 @@ DNS proxy ("dns" block at the top level of the config):
   servers            upstream resolvers, e.g. ["10.0.0.53", "10.0.1.53:5353", "tls://dns.example.com", "https://dns.example.com/dns-query"]
                      (tls://host[:853] is DNS over TLS, https://host[:443][/dns-query] is DNS over HTTPS;
                      the certificate must match the host)
-  tls_insecure       true accepts any certificate from tls:// and https:// servers (default false; not safe)
+  server_tls         per tls:// or https:// server: {"name": "dns.example.com"} checks its certificate against that name
+                     instead of the host in its address; {"insecure": true} does not check it (not safe)
   queries            probe queries: "example.com" or {"name":..., "type":"AAAA"}
   down_percent       a server is down when at least this % of its probe queries fail (default
                      100); with fewer failing it stays in use and shows as degraded. The old
@@ -822,7 +826,6 @@ func showDNSTable(sock string) {
 			ECSSent uint64       `json:"ecs_sent"`
 			Cache   cacheStats   `json:"cache"`
 			Spread  bool         `json:"spread"`
-			Insec   bool         `json:"tls_insecure"`
 			DoT     int          `json:"dot_port"`
 			DoH     int          `json:"doh_port"`
 			Band    int          `json:"spread_band"`
@@ -880,8 +883,13 @@ func showDNSTable(sock string) {
 		if p.DoT != 0 {
 			fmt.Printf("DNS over TLS: served to clients on port %d (the GUI certificate)\n", p.DoT)
 		}
-		if p.Insec {
-			fmt.Println("tls:// and https:// servers: certificates are NOT checked (tls_insecure) — anyone on the path could answer")
+		for _, s := range p.Servers {
+			switch {
+			case s.CertUnchecked:
+				fmt.Printf("%s: certificate NOT checked — anyone on the path could answer\n", s.Addr)
+			case s.CertName != "":
+				fmt.Printf("%s: certificate checked against the name %s\n", s.Addr, s.CertName)
+			}
 		}
 		if p.Spread {
 			fmt.Printf("spread: on, servers within %d%% of the fastest take turns (see the Served column)\n", p.Band)

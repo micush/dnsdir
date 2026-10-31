@@ -136,11 +136,11 @@ func TestDoHRefusesUntrustedCertificateUnlessInsecure(t *testing.T) {
 		t.Fatalf("an untrusted certificate was accepted (%d requests)", hits.Load())
 	}
 	cfg := testDNSCfg(addr)
-	cfg.TLSInsecure = true
+	cfg.ServerTLS = map[string]ServerTLS{addr: {Insecure: true}}
 	p2 := NewPool(cfg)
 	p2.ProbeNow(context.Background())
 	if len(rankedAddrs(p2)) != 1 {
-		t.Fatal("tls_insecure did not accept the DoH server")
+		t.Fatal("\"insecure\" did not accept the DoH server")
 	}
 }
 

@@ -640,13 +640,18 @@ type DNSConfig struct {
 	// Spread shares the queries out: the servers within SpreadBand percent of the fastest one's latency
 	// (default 20) take turns instead of the fastest getting everything; slower ones are still only fallbacks.
 	Spread bool `json:"spread"`
-	// TLSInsecure makes a tls:// server be accepted whatever certificate it presents (expired, self-signed, the
-	// wrong name): the traffic is still encrypted but the server is not authenticated. Off by default.
-	TLSInsecure  bool `json:"tls_insecure,omitempty"`
-	SpreadBand   int  `json:"spread_band"`
-	Cache        bool `json:"cache"`
-	CacheEntries int  `json:"cache_entries"`
-	CacheMaxTTL  int  `json:"cache_max_ttl"`
+	// TLSInsecure was the switch that stopped checking the certificates of every tls:// and https:// server of the pool.
+	// It is only read now: loading a configuration that has it on gives each such server ServerTLS "insecure" instead
+	// (migrateTLSInsecure, servertls.go), and it is never written again.
+	TLSInsecure bool `json:"tls_insecure,omitempty"`
+	// ServerTLS is how the certificate of a tls:// or https:// server is checked, keyed by the server as written in
+	// Servers or FallbackServers: against a host name of its own, or not at all.  A server without an entry gets the
+	// normal check (servertls.go).
+	ServerTLS    map[string]ServerTLS `json:"server_tls,omitempty"`
+	SpreadBand   int                  `json:"spread_band"`
+	Cache        bool                 `json:"cache"`
+	CacheEntries int                  `json:"cache_entries"`
+	CacheMaxTTL  int                  `json:"cache_max_ttl"`
 	// FailureCacheSeconds is how long a failure (SERVFAIL, REFUSED, or every server timing out) is remembered, so a client that
 	// asks again and again for a name that fails does not send each question upstream (RFC 9520; cache.go).  0 turns it
 	// off; at most cacheFailTTLMax (5 minutes).  Shared like the rest of the cache settings.
@@ -951,6 +956,9 @@ func (d *DNSConfig) Validate() error {
 	if len(names) == 0 {
 		d.ServerNames = nil
 	}
+	if err := d.normServerTLS(); err != nil {
+		return err
+	}
 	if err := d.validateForwarding(seen); err != nil {
 		return err
 	}
@@ -1202,8 +1210,8 @@ func (c *DNSConfig) followSettings(shared DNSConfig) {
 	// https:// servers" ticked on the Settings page did nothing for a gateway with its own servers, whose tls:// servers
 	// went on failing "x509: cannot validate certificate".  Likewise the bootstrap servers, the probe and query timings,
 	// the client-subnet prefix lengths and the forwarding of dynamic updates.  (Servers, fallback servers, test domains,
-	// client subnet on/off and load balancing are the gateway's own, edited on the Topology page.)
-	c.TLSInsecure = shared.TLSInsecure
+	// client subnet on/off and load balancing are the gateway's own, edited on the Topology page, and so is how each
+	// server's certificate is checked, ServerTLS.)
 	c.Bootstrap = append([]string(nil), shared.Bootstrap...)
 	if len(c.Bootstrap) == 0 {
 		c.Bootstrap = nil
@@ -1296,6 +1304,7 @@ func (dc *DaemonConfig) Validate() error {
 	if dc.DNS.LB != nil {
 		return errors.New("dns: lb belongs to a gateway's own pool (the shared settings are the load-balancing settings themselves)")
 	}
+	migrateTLSInsecure(dc) // a configuration from elsewhere (the API, the cluster) that still has the old switch
 	needGlobal := false
 	for i := range dc.Groups {
 		g := &dc.Groups[i]
@@ -1409,6 +1418,9 @@ func loadConfig(path string) (*DaemonConfig, error) {
 	// every reader (the page, the scheduler's edits, the history) sees the backup schedule of v583-v591 as the Scheduler
 	// task it becomes, so a save made from what was read keeps it
 	migrateBackupSchedule(&dc.DNS)
+	// and the old pool-wide tls_insecure as the per-server setting it becomes (servertls.go): the Topology's Edit server
+	// shows what the daemon does, and a save from it keeps it
+	migrateTLSInsecure(dc)
 	return dc, nil
 }
 

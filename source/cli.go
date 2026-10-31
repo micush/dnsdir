@@ -1018,7 +1018,11 @@ func showCanvas(sock string) {
 			if g.UsingFallback {
 				note = "IN USE now: every server is down or paused"
 			}
-			fmt.Printf("      fallback servers: %s — %s\n", strings.Join(g.Fallback, ", "), note)
+			fbs := make([]string, 0, len(g.Fallback))
+			for _, a := range g.Fallback {
+				fbs = append(fbs, a+" ("+fallbackCheckWords(g.FallbackCheck[a])+")")
+			}
+			fmt.Printf("      fallback servers: %s — %s\n", strings.Join(fbs, ", "), note)
 		}
 		if g.ECS {
 			fmt.Println("      client subnet (ECS) is passed to the DNS servers")

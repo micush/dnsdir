@@ -228,6 +228,13 @@ type Server struct {
 	tick      atomic.Uint32 // live answers seen, to sample the latency of one in several
 	lastErr   string
 	lastProbe time.Time
+
+	// a fallback server's check (fallbackcheck.go), under mu
+	fbChecked bool
+	fbFails   int
+	fbErr     string
+	fbMS      float64
+	fbAt      time.Time
 }
 
 // ServerStat is the exported snapshot of a Server.
@@ -254,6 +261,8 @@ type ServerStat struct {
 	ResolvedVia string   `json:"resolved_via,omitempty"`
 	// ZonesDown are the zones the server serves whose probe domains fail: it is out of service for them only.
 	ZonesDown []string `json:"zones_down,omitempty"`
+	// Check is a fallback server's latest check (fallbackcheck.go); nil for a normal server and before the first round.
+	Check *FallbackCheck `json:"check,omitempty"`
 }
 
 // TestStat is the latest result of one probe query against one server.
@@ -340,8 +349,8 @@ func NewPool(cfg DNSConfig) *Pool {
 		p.servers = append(p.servers, sv)
 	}
 	for _, a := range cfg.FallbackServers {
-		// a fallback is a last resort: it is never probed (the domains the normal servers are tested with may be
-		// ones only they know) and always counts as up
+		// a fallback is a last resort: it is never probed with the test domains (they may be names only the normal
+		// servers know) and always counts as up; each round only checks that it answers at all (fallbackcheck.go)
 		p.servers = append(p.servers, &Server{Addr: a, Fallback: true, healthy: true, hist: srvhist.series(a)})
 	}
 	p.fwd = newFwdRouter(cfg, p.servers)
@@ -382,13 +391,14 @@ func (p *Pool) Stop() {
 func (p *Pool) ProbeNow(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, s := range p.servers {
-		if s.Fallback {
-			continue
-		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			defer recoverPanic("a probe of " + s.Addr)
+			if s.Fallback {
+				p.checkFallback(ctx, s) // reports only: a fallback server always counts as up
+				return
+			}
 			p.probeServer(ctx, s)
 		}()
 	}
@@ -927,6 +937,7 @@ func (p *Pool) Snapshot() []ServerStat {
 			ConsecFails: s.fails, Successes: s.okCount, Failures: s.failCount,
 			Served: s.served.Load(), LastError: s.lastErr,
 			Tests: append([]TestStat{}, s.tests...),
+			Check: p.fallbackCheckOf(s),
 		}
 		st.ResolvedIPs, st.ResolvedVia = boot.resolvedVia(s.Addr)
 		if !s.lastProbe.IsZero() {

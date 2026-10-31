@@ -83,10 +83,12 @@ type CanvasGateway struct {
 	LBOwn   bool           `json:"lb_own"`
 	Servers []CanvasServer `json:"servers"`
 	// Fallback are the servers used only while every one of Servers is down; UsingFallback says they are in use now.
-	Fallback      []string       `json:"fallback"`
-	UsingFallback bool           `json:"using_fallback,omitempty"`
-	Members       []CanvasMember `json:"members"`
-	Paused        bool           `json:"paused"`
+	Fallback      []string `json:"fallback"`
+	UsingFallback bool     `json:"using_fallback,omitempty"`
+	// FallbackCheck is each fallback server's latest check, by address (fallbackcheck.go); one not checked yet is missing.
+	FallbackCheck map[string]*FallbackCheck `json:"fallback_check,omitempty"`
+	Members       []CanvasMember            `json:"members"`
+	Paused        bool                      `json:"paused"`
 	// NodePaused says the pause comes from the whole node being paused, not from this gateway.
 	NodePaused bool `json:"node_paused,omitempty"`
 	// PausedScope says where this gateway is paused by its own setting: "all" (every node) or "node" (this one).
@@ -321,6 +323,12 @@ func buildCanvas(dc *DaemonConfig, rows []SnapshotRow, pools []poolInfo) []Canva
 		for _, addr := range cfg.FallbackServers {
 			if st, ok := stats[addr]; ok && st.Healthy {
 				fbUp = true
+			}
+			if st, ok := stats[addr]; ok && st.Check != nil {
+				if cg.FallbackCheck == nil {
+					cg.FallbackCheck = map[string]*FallbackCheck{}
+				}
+				cg.FallbackCheck[addr] = st.Check
 			}
 		}
 		// the gateway itself, one state per address family

@@ -2304,11 +2304,12 @@
                   // a server given by name: its address and where that came from (the host's resolver may be this node itself)
                   s.resolved_via ? h("div", { class: "small " + (s.resolved_via === "host resolver" ? "warn-text" : "muted"), title: s.resolved_via === "host resolver" ? "No server is given by IP address and no bootstrap server is set, so the name comes from this host's resolver. If that is this node, the server can only be reached while another one answers." : null },
                     (s.resolved_ips || []).join(", ") + " via " + s.resolved_via) : null),
-                h("td", {}, pill(s.healthy ? "up" : "down", s.healthy ? "ok" : "bad")),
-                h("td", { class: "num" }, s.healthy ? h("span", { class: "bar-wrap" }, h("span", { class: "bar-fill" })) : null, s.healthy ? fmtMs(s.ewma_ms) : "–"),
-                h("td", { class: "num" }, s.last_ms > 0 ? fmtMs(s.last_ms) : "–"),
-                h("td", { class: "num" }, s.successes), h("td", { class: "num" }, s.failures), h("td", { class: "num" }, s.served)              ), s.last_error ? h("tr", { class: "err" }, h("td", { colspan: "9", class: "muted small", title: s.last_error }, s.last_error)) : null].filter(Boolean)))))));
-          for (const s of p.servers) if (s.healthy) fills.push([s, maxE]);
+                // a fallback server always counts as up; its state is its check, ". NS" every round (fallbackcheck.go)
+                h("td", {}, s.fallback ? fbState(s.check) : pill(s.healthy ? "up" : "down", s.healthy ? "ok" : "bad")),
+                h("td", { class: "num" }, hasBar(s) ? h("span", { class: "bar-wrap" }, h("span", { class: "bar-fill" })) : null, hasBar(s) ? fmtMs(s.ewma_ms) : "–"),
+                h("td", { class: "num" }, s.fallback ? (s.check && s.check.ms > 0 ? fmtMs(s.check.ms) : "–") : s.last_ms > 0 ? fmtMs(s.last_ms) : "–"),
+                h("td", { class: "num" }, s.successes), h("td", { class: "num" }, s.failures), h("td", { class: "num" }, s.served)              ), errOf(s) ? h("tr", { class: "err" }, h("td", { colspan: "9", class: "muted small", title: errOf(s) }, errOf(s))) : null].filter(Boolean)))))));
+          for (const s of p.servers) if (hasBar(s)) fills.push([s, maxE]);
         }
         morph(body, out);
         // widths are set via the CSSOM (allowed under the page's CSP)
@@ -2317,6 +2318,12 @@
       },
     };
   })();
+
+  // a fallback server's check (Monitor ▸ DNS): it always counts as up, so its pill says whether it answers at all
+  const fbState = (c) => !c ? pill("unchecked") : !c.answering ? pill("no answer", "bad") : pill("answering", c.last_ok ? "ok" : "warn");
+  // the latency bar: a fallback server has an average only once it has served clients
+  const hasBar = (s) => s.healthy && !(s.fallback && !(s.ewma_ms > 0));
+  const errOf = (s) => (s.fallback ? (s.check && s.check.error) || "" : s.last_error || "");
 
   // ── configuration  (CLI: --show-config, --configure) ──────────────────────
   const LB = ["roundrobin", "weighted", "hostpinned", "failover"];
@@ -2343,7 +2350,7 @@
   const DNS_FIELDS = [
     { section: "Upstream servers", note: "The default settings for every gateway that has no servers of its own (a gateway drawn on the Topology page can have its own)." },
     { shared: true, k: "servers", l: "Servers", t: "rows", rows: "servers", wide: true, hint: "One per row: 10.0.0.53, 10.0.1.53:5353, [2001:db8::53]:53, tls://dns.example.com (DNS over TLS, port 853), https://dns.example.com/dns-query (DNS over HTTPS)" },
-    { shared: true, k: "fallback_servers", l: "Fallback servers", t: "rows", rows: "fallback", wide: true, hint: "Same forms. Used only while no server above is in service (all down or paused), and dropped as soon as one answers again. They are never probed and always count as up, so a public resolver that knows nothing of your internal names is fine." },
+    { shared: true, k: "fallback_servers", l: "Fallback servers", t: "rows", rows: "fallback", wide: true, hint: "Same forms. Used only while no server above is in service (all down or paused), and dropped as soon as one answers again. They are never tested with the test domains and always count as up, so a public resolver that knows nothing of your internal names is fine; each round only checks that they answer at all (Monitor ▸ DNS)." },
     { shared: true, k: "bootstrap", l: "Bootstrap servers", t: "rows", rows: "bootstrap", wide: true, hint: "IP addresses only. They look up the names of servers given by name (tls://name, https://name) when no server above is given by IP address and up; otherwise they are not needed." },
     { shared: true, k: "queries", l: "Probe queries", t: "rows", rows: "queries", wide: true, hint: "Every server is asked each of these to check it works: a name and a record type." },
     { shared: true, k: "tls_insecure", l: "Accept any certificate from tls:// and https:// servers (insecure)", t: "bool" },

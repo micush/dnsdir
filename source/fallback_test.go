@@ -26,13 +26,17 @@ func TestFallbackServersOnlyWhenAllDown(t *testing.T) {
 		t.Fatal("not using the fallback while the normal servers are up")
 	}
 	q, _ := buildQuery(0x1111, "www.example", "A")
+	checks := fb.hits.Load() // the round's check of the fallback (fallbackcheck.go); no client query
+	if checks != 1 {
+		t.Fatalf("fallback asked %d times in one round, want its one check", checks)
+	}
 	for i := 0; i < 6; i++ {
 		if _, err := p.Forward(ctx, q, false); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if fb.hits.Load() != 0 { // a fallback is never probed, and gets no client traffic while a normal server is up
-		t.Fatalf("fallback got %d queries, want none", fb.hits.Load())
+	if fb.hits.Load() != checks { // no client traffic while a normal server is up
+		t.Fatalf("fallback got %d client queries, want none", fb.hits.Load()-checks)
 	}
 
 	// one normal server down: still no fallback
@@ -100,21 +104,91 @@ func TestNoFallbackStillFails(t *testing.T) {
 	}
 }
 
-// A fallback is a last resort: it is never probed and always counts as up, even though the domains the
-// normal servers are tested with may be ones it knows nothing about.
-func TestFallbackNeverProbedAlwaysUp(t *testing.T) {
+// A fallback is a last resort: it is never probed with the test domains (it may know nothing about them) and always
+// counts as up.  Each round only checks that it answers at all, with ". NS"; NXDOMAIN counts as answering.
+func TestFallbackOnlyCheckedAlwaysUp(t *testing.T) {
 	a, fb := newFakeDNS(t), newFakeDNS(t)
-	fb.mode.Store(1) // NXDOMAIN for everything: a probe would fail it
+	fb.mode.Store(1) // NXDOMAIN for everything: a probe with the test domains would fail it
 	p := NewPool(fbCfg([]string{a.addr}, []string{fb.addr}))
 	p.ProbeNow(context.Background())
 	p.ProbeNow(context.Background())
-	if fb.hits.Load() != 0 {
-		t.Fatalf("the fallback was probed %d times", fb.hits.Load())
+	if fb.hits.Load() != 2 {
+		t.Fatalf("the fallback was asked %d times in two rounds, want its two checks", fb.hits.Load())
+	}
+	if c := fbCheck(t, p, fb.addr); c == nil || !c.Answering || !c.LastOK || c.Error != "" {
+		t.Fatalf("an NXDOMAIN answer is an answer: %+v", c)
 	}
 	a.mode.Store(2)
 	p.ProbeNow(context.Background())
 	if !p.UsingFallback() {
-		t.Fatal("every normal server is down: the fallback must be in use without ever having been probed")
+		t.Fatal("every normal server is down: the fallback must be in use")
+	}
+}
+
+func fbCheck(t *testing.T, p *Pool, addr string) *FallbackCheck {
+	t.Helper()
+	for _, s := range p.Snapshot() {
+		if s.Addr == addr {
+			if !s.Fallback {
+				t.Fatalf("%s is not marked as a fallback", addr)
+			}
+			return s.Check
+		}
+	}
+	t.Fatalf("%s is not in the snapshot", addr)
+	return nil
+}
+
+// A fallback that does not answer its check is reported (after fail_threshold rounds) but still used: the check only reports.
+func TestFallbackCheckReportsOnly(t *testing.T) {
+	a, fb := newFakeDNS(t), newFakeDNS(t)
+	cfg := fbCfg([]string{a.addr}, []string{fb.addr})
+	cfg.FailThreshold = 2
+	p := NewPool(cfg)
+	ctx := context.Background()
+	if c := fbCheck(t, p, fb.addr); c != nil {
+		t.Fatalf("checked before any round: %+v", c)
+	}
+	fb.mode.Store(3) // SERVFAIL
+	p.ProbeNow(ctx)
+	if c := fbCheck(t, p, fb.addr); c == nil || !c.Answering || c.LastOK || c.ConsecFails != 1 || !strings.Contains(c.Error, "SERVFAIL") {
+		t.Fatalf("one miss of two allowed: %+v", c)
+	}
+	p.ProbeNow(ctx)
+	if c := fbCheck(t, p, fb.addr); c == nil || c.Answering || c.ConsecFails != 2 {
+		t.Fatalf("two misses: %+v", c)
+	}
+	// still a last resort: every normal server down, the fallback answers clients
+	fb.mode.Store(0)
+	a.mode.Store(2)
+	p.ProbeNow(ctx)
+	p.ProbeNow(ctx)
+	if !p.UsingFallback() {
+		t.Fatal("the fallback must be in use whatever its check said")
+	}
+	if c := fbCheck(t, p, fb.addr); c == nil || !c.Answering || c.ConsecFails != 0 || c.MS <= 0 {
+		t.Fatalf("answers again: %+v", c)
+	}
+	// a server that does not answer at all
+	fb.mode.Store(2)
+	p.ProbeNow(ctx)
+	p.ProbeNow(ctx)
+	if c := fbCheck(t, p, fb.addr); c == nil || c.Answering || c.Error == "" {
+		t.Fatalf("no answer: %+v", c)
+	}
+	if !p.UsingFallback() {
+		t.Fatal("still the last resort")
+	}
+}
+
+func TestRootNSQuery(t *testing.T) {
+	q := buildRootNSQuery(0xabcd)
+	want := []byte{0xab, 0xcd, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 1}
+	if string(q) != string(want) {
+		t.Fatalf("% x", q)
+	}
+	if fallbackCheckWords(nil) != "not checked yet" || fallbackCheckWords(&FallbackCheck{}) != "NOT ANSWERING" || fallbackCheckWords(&FallbackCheck{Answering: true, LastOK: true}) != "answering" {
+		t.Fatal("words")
 	}
 }
 
@@ -178,6 +252,9 @@ func TestCanvasShowsFallbackInUse(t *testing.T) {
 	cv := buildCanvas(dc, rows, pools)
 	if cv[0].Status != "ok" || cv[0].UsingFallback || len(cv[0].Fallback) != 1 {
 		t.Fatalf("normal server up: %+v", cv[0])
+	}
+	if c := cv[0].FallbackCheck[fb.addr]; c == nil || !c.Answering {
+		t.Fatalf("the canvas carries the fallback's check: %+v", cv[0].FallbackCheck)
 	}
 	a.mode.Store(2)
 	p.ProbeNow(context.Background())

@@ -506,8 +506,8 @@ type DNSConfig struct {
 	ServerForward map[string]ServerForward `json:"server_forward,omitempty"`
 	// FallbackServers are a last resort, used only while no server in Servers is in service (all down or paused,
 	// or none listed): the pool then answers from them, and goes back to Servers as soon as one of those answers
-	// again.  Same address forms as Servers.  They are never probed (the domains the normal servers are tested with
-	// may be ones only those know) and always count as up.
+	// again.  Same address forms as Servers.  They are never probed with the test domains (those may be ones only the
+	// normal servers know) and always count as up; each round only checks that they answer at all (fallbackcheck.go).
 	FallbackServers []string `json:"fallback_servers,omitempty"`
 	// Bootstrap are plain DNS servers, by IP address, that look up the names of upstream servers given by name
 	// (tls://name, https://name/…, or a plain name) when no upstream given by address is up (bootstrap.go).  Empty is

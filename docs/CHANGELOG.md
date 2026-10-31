@@ -1,5 +1,22 @@
 # Changelog
 
+## [v615] - 2026-10-30 — Fallback servers are checked every round: Monitor ▸ DNS, --show-dns, the canvas and an alert say whether each one answers
+
+### Added
+- **A check of every fallback server, every probe round** (`fallbackcheck.go`). Fallback servers are still never tested with the test domains (those may be internal names a public resolver does not know) and still always count as up, so until now nothing said whether one would answer on the day it was needed. Each round now asks every fallback server one question any resolver can answer, the root zone's NS records (`. IN NS`, recursion desired; `buildRootNSQuery`, since `buildQuery` does not take the root name), over the server's own transport (plain, `tls://`, `https://`). **NOERROR or NXDOMAIN counts as answering**; REFUSED, SERVFAIL, any other code, a timeout or no connection do not. After `fail_threshold` rounds in a row without an answer the server is *not answering*; one good answer makes it answering again. The log says so when it changes (`dns: fallback server X does not answer (...)` / `... answers again`), not at start.
+- **The check only reports.** A fallback that fails it is still used when every normal server is down, exactly as before, so a check that is wrong for some network can never take away the last resort.
+- **Where it shows:** Monitor ▸ DNS gives a fallback's **State** as **answering** (amber when it missed the latest check), **no answer**, or *unchecked* before the first round; **Last** is the check's time; the line under the row says why the latest check failed; **Average** and its bar stay empty until the fallback has served clients (they showed a meaningless 0.00 before). `dnsdir --show-dns` has the same in its STATE, LAST and LAST ERROR columns (STATE is wider for it). `dnsdir --canvas` lists each fallback with its state. `get_dns` / `/api/dns` carry `check` on each fallback (`answering`, `last_ok`, `ms`, `error`, `consec_fails`, `ago_s`); the canvas carries `fallback_check` by address. A fallback's checks also go into its server history like a normal server's probes.
+- **Alert "Fallback server not answering"** (`fallback_down`, warning, on by default, *Recheck* fix, opens on Monitor ▸ DNS), one per fallback server and pool, saying it is still used if every other server goes down.
+- Help (Monitor: DNS's new "Fallback servers" section, the Topology and Configure ▸ DNS fields), README and code comments no longer say fallbacks are never probed.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, cross-builds for linux/amd64, arm64, arm, 386 and riscv64 (only the native amd64 build is verified with PAM). `node --check` on `app.js` and `help.js`.
+- **Tests:** `TestFallbackOnlyCheckedAlwaysUp` replaces `TestFallbackNeverProbedAlwaysUp` (a fallback answering NXDOMAIN to everything is asked once a round and counts as answering); `TestFallbackCheckReportsOnly` (no check before the first round; SERVFAIL counts as a miss, answering until `fail_threshold` misses; still used with every normal server down; answering again; a server that does not answer at all); `TestRootNSQuery`; `TestFallbackServersOnlyWhenAllDown` now allows the round's one check and still sees no client query reach the fallback; `TestCanvasShowsFallbackInUse` checks `fallback_check`.
+- **Live**, a daemon with a gateway on `lo`, a normal server and three fallbacks on local stub DNS servers (one answering, one answering SERVFAIL, one port with nothing behind it), rounds every 2 s, `fail_threshold` 2: the log named the two failing fallbacks once each; `--show-dns` and `--canvas` showed *answering*, *NOT ANSWERING* (". NS: SERVFAIL") and *NOT ANSWERING* ("connection refused"); after about a minute `get_alerts` had two **fallback_down** alerts with those messages; starting a stub on the empty port logged "answers again". Headless Chromium, light and dark, real PAM user: Monitor ▸ DNS showed *answering*, **no answer** with ". NS: SERVFAIL" under it, and *answering*, with no average bars on the fallbacks; the "?" panel has the new section.
+
+### Not verified
+- A cluster of more than one node (each node checks its own pools' fallbacks, as it probes its own servers), and real public resolvers (the sandbox has no outside DNS).
+
 ## [v614] - 2026-10-30 — Neighbor discovery: the lldpd state beside the box keeps itself up to date; the box reads "Run LLDP on every node"
 
 ### Fixed

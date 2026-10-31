@@ -844,7 +844,7 @@ func showDNSTable(sock string) {
 		fmt.Println("Listening: " + strings.Join(d.Listeners, ", "))
 	}
 	fmt.Printf("Queries: %d  answered: %d  SERVFAIL: %d\n", d.Queries, d.Answered, d.ServFail)
-	const f = "%-4s %-16s %-28s %-6s %-10s %-10s %-8s %-8s %-8s %s\n"
+	const f = "%-4s %-16s %-28s %-13s %-10s %-10s %-8s %-8s %-8s %s\n"
 	for _, p := range d.Pools {
 		who := "shared pool"
 		if p.Key != 0 {
@@ -902,7 +902,7 @@ func showDNSTable(sock string) {
 			fmt.Println("no configured server is in service (down or paused): answering from the fallback servers")
 		}
 		fmt.Printf(f, "RANK", "SERVER NAME", "SERVER IP", "STATE", "AVG(ms)", "LAST(ms)", "OK", "FAIL", "SERVED", "LAST ERROR")
-		fmt.Println(strings.Repeat("-", 127))
+		fmt.Println(strings.Repeat("-", 134))
 		for _, s := range p.Servers {
 			rank, state := "-", "down"
 			if s.Healthy {
@@ -911,13 +911,18 @@ func showDNSTable(sock string) {
 					rank = itoa(s.Rank)
 				}
 			}
-			addr := s.Addr
+			addr, last, lastErr := s.Addr, s.LastMS, s.LastError
 			if s.Fallback {
+				// a fallback server is always usable; its state is its check (fallbackcheck.go)
 				addr += " (fallback)"
+				state = fallbackCheckWords(s.Check)
+				if s.Check != nil {
+					last, lastErr = s.Check.MS, s.Check.Error
+				}
 			}
-			fmt.Printf(f, rank, orDefault(s.Name, "-"), addr, state, fmt.Sprintf("%.2f", s.EWMAMS), fmt.Sprintf("%.2f", s.LastMS),
+			fmt.Printf(f, rank, orDefault(s.Name, "-"), addr, state, fmt.Sprintf("%.2f", s.EWMAMS), fmt.Sprintf("%.2f", last),
 				strconv.FormatUint(s.Successes, 10), strconv.FormatUint(s.Failures, 10),
-				strconv.FormatUint(s.Served, 10), s.LastError)
+				strconv.FormatUint(s.Served, 10), lastErr)
 		}
 	}
 }

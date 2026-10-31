@@ -14,6 +14,7 @@ import (
 
 var alertDefs = []alertDef{
 	{ID: "upstream_down", Title: "Upstream server down", Subject: "upstream server", Kind: "updown", Sev: "warning", On: true, Fix: []string{"recheck"}, Go: "dns"},
+	{ID: "fallback_down", Title: "Fallback server not answering", Subject: "fallback server", Kind: "updown", Sev: "warning", On: true, Fix: []string{"recheck"}, Go: "dns"},
 	{ID: "fallback_in_use", Title: "Only fallback servers in use", Subject: "pool", Kind: "updown", Sev: "warning", On: true, Fix: []string{"recheck"}, Go: "dns"},
 	{ID: "listener_down", Title: "DNS listener down", Subject: "gateway", Kind: "updown", Sev: "critical", On: true, Fix: []string{"restart_dns"}, Go: "gateways"},
 	{ID: "no_active_gateway", Title: "No active gateway", Subject: "gateway", Kind: "updown", Sev: "critical", On: true, Go: "gateways"},
@@ -83,6 +84,22 @@ func (e *AlertEngine) sampleNode(now time.Time) []alertSample {
 		pl := poolLabel(st, pi.Key)
 		for _, sv := range st.namedServers(pi) {
 			if sv.Fallback {
+				if sv.Check == nil { // not checked yet
+					continue
+				}
+				who := sv.Addr
+				if sv.Name != "" {
+					who = sv.Name + " (" + sv.Addr + ")"
+				}
+				subj := sv.Addr
+				if pi.Key != 0 {
+					subj += " · " + pl
+				}
+				msg := "fallback server " + who + " does not answer"
+				if sv.Check.Error != "" {
+					msg += ": " + sv.Check.Error
+				}
+				out = append(out, alertSample{Rule: "fallback_down", Subject: subj, Bad: !sv.Check.Answering, Message: msg + " (it is still used if every other server goes down)", Gateways: pi.Groups})
 				continue
 			}
 			who := sv.Addr

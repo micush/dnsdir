@@ -323,6 +323,81 @@ func TestParseBFDPeers(t *testing.T) {
 	}
 }
 
+func TestParseBFDSessionsTimers(t *testing.T) {
+	// field names as `show bfd peers json` prints them
+	raw := `[
+	 {"multihop":false,"peer":"192.0.2.1","local":"192.0.2.10","vrf":"default","status":"up","uptime":120,"diagnostic":"ok",
+	  "receive-interval":300,"transmit-interval":300,"echo-receive-interval":50,"echo-transmit-interval":0,"detect-multiplier":3,
+	  "remote-receive-interval":300,"remote-transmit-interval":300,"remote-echo-receive-interval":50,"remote-detect-multiplier":3},
+	 {"peer":"2001:DB8::1","status":"up","receive-interval":300,"transmit-interval":100,"detect-multiplier":3,
+	  "remote-receive-interval":500,"remote-transmit-interval":250,"remote-detect-multiplier":5},
+	 {"peer":"192.0.2.2","status":"down","receive-interval":300,"transmit-interval":300,"detect-multiplier":3},
+	 {"peer":"192.0.2.3","status":"up"},
+	 {"peer":"192.0.2.4","status":"up","receive-interval":300,"transmit-interval":300,"detect-multiplier":3,
+	  "remote-receive-interval":300,"remote-transmit-interval":300},
+	 {"peer":"not an address","status":"up"}]`
+	got, err := parseBFDSessions([]byte(raw))
+	if err != nil || len(got) != 5 {
+		t.Fatalf("%v %v", got, err)
+	}
+	// both ends at 300 ms x 3: 900 ms each way
+	a := got["192.0.2.1"]
+	if a.Status != "up" || a.Timers == nil || a.Timers.DetectMs != 900 || a.Timers.PeerDetectMs != 900 || a.Timers.Mult != 3 || a.Timers.TxMs != 300 || a.Timers.RemoteRxMs != 300 {
+		t.Fatalf("%+v %+v", a, a.Timers)
+	}
+	// the slower end wins: the router accepts one packet per 500 ms, this node would send every 100, so 3 x 500;
+	// this node accepts 300 against the router's 250, so the router's multiplier 5 x 300
+	b := got["2001:db8::1"]
+	if b.Timers == nil || b.Timers.DetectMs != 1500 || b.Timers.PeerDetectMs != 1500 {
+		t.Fatalf("%+v", b.Timers)
+	}
+	// a faster router cannot beat this node's own interval
+	fast := `[{"peer":"192.0.2.1","status":"up","receive-interval":300,"transmit-interval":300,"detect-multiplier":3,"remote-receive-interval":50,"remote-transmit-interval":50,"remote-detect-multiplier":3}]`
+	if f, _ := parseBFDSessions([]byte(fast)); f["192.0.2.1"].Timers.DetectMs != 900 {
+		t.Fatalf("%+v", f["192.0.2.1"].Timers)
+	}
+	// no timers for a session that is not up, or when FRR gave no intervals; the status stays
+	if d := got["192.0.2.2"]; d.Status != "down" || d.Timers != nil {
+		t.Fatalf("down: %+v", d)
+	}
+	if u := got["192.0.2.3"]; u.Status != "up" || u.Timers != nil {
+		t.Fatalf("no numbers: %+v", u)
+	}
+	// the neighbor's multiplier is missing: only the time it takes to drop this node is known
+	if c := got["192.0.2.4"]; c.Timers == nil || c.Timers.DetectMs != 900 || c.Timers.PeerDetectMs != 0 {
+		t.Fatalf("no remote multiplier: %+v", c.Timers)
+	}
+	// parseBFDPeers (OSPF uses it) still gives the plain status
+	if st, err := parseBFDPeers([]byte(raw)); err != nil || st["192.0.2.1"] != "up" || st["192.0.2.2"] != "down" {
+		t.Fatalf("%v %v", st, err)
+	}
+}
+
+func TestAddBFD(t *testing.T) {
+	peers := []BGPPeer{{Peer: "192.0.2.1"}, {Peer: "2001:db8::1"}, {Peer: "192.0.2.77"}}
+	addBFD(peers, []byte(`[{"peer":"192.0.2.1","status":"up","receive-interval":300,"transmit-interval":300,"detect-multiplier":3},{"peer":"2001:db8::1","status":"down"}]`))
+	if peers[0].BFD != "up" || peers[0].BFDTimers == nil || peers[0].BFDTimers.DetectMs != 900 {
+		t.Fatalf("%+v", peers[0])
+	}
+	if peers[1].BFD != "down" || peers[1].BFDTimers != nil || peers[2].BFD != "" || peers[2].BFDTimers != nil {
+		t.Fatalf("%+v %+v", peers[1], peers[2])
+	}
+	// unreadable output leaves what was there
+	addBFD(peers, []byte("not json"))
+	if peers[0].BFD != "up" || peers[0].BFDTimers == nil {
+		t.Fatalf("garbage cleared the state: %+v", peers[0])
+	}
+	// the timers are left out of the JSON when there are none, and named as the page reads them
+	b, _ := json.Marshal(peers[1])
+	if strings.Contains(string(b), "bfd_timers") {
+		t.Fatalf("%s", b)
+	}
+	b, _ = json.Marshal(peers[0])
+	if !strings.Contains(string(b), `"bfd_timers":{"tx_ms":300,"rx_ms":300,"mult":3,`) || !strings.Contains(string(b), `"detect_ms":900`) {
+		t.Fatalf("%s", b)
+	}
+}
+
 func TestBGPApplyWithoutReloadScript(t *testing.T) {
 	calls, dir := fakeFRR(t, nil)
 	m := NewBGPManager(t.TempDir())

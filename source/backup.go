@@ -525,13 +525,8 @@ func readBackupArchive(r io.Reader, password, dir string) (*backupManifest, erro
 		if man == nil {
 			return nil, errors.New("the backup has no manifest")
 		}
-		// the entry must land inside dir: a local path (no "..", not absolute), and the joined path checked once more
-		// against dir itself (CodeQL's zip-slip rule looks for this test)
-		if !filepath.IsLocal(filepath.FromSlash(name)) {
-			return nil, fmt.Errorf("the backup holds an entry that is not allowed: %q", h.Name)
-		}
-		dst := filepath.Join(dir, filepath.FromSlash(name))
-		if root := filepath.Clean(dir) + string(os.PathSeparator); !strings.HasPrefix(dst, root) {
+		dst, err := backupDest(dir, name)
+		if err != nil {
 			return nil, fmt.Errorf("the backup holds an entry that is not allowed: %q", h.Name)
 		}
 		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
@@ -549,6 +544,27 @@ func readBackupArchive(r io.Reader, password, dir string) (*backupManifest, erro
 		return nil, errors.New("the backup has no manifest")
 	}
 	return man, nil
+}
+
+// backupDest maps an archive entry name to its path under dir, and refuses any name that would land outside dir
+// (absolute, "..", or anything that does not resolve below dir after cleaning).
+func backupDest(dir, name string) (string, error) {
+	if !filepath.IsLocal(filepath.FromSlash(name)) {
+		return "", errors.New("path leaves the target directory")
+	}
+	base, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	dst := filepath.Join(base, filepath.FromSlash(name))
+	if !strings.HasPrefix(dst, base+string(filepath.Separator)) {
+		return "", errors.New("path leaves the target directory")
+	}
+	rel, err := filepath.Rel(base, dst)
+	if err != nil || !filepath.IsLocal(rel) {
+		return "", errors.New("path leaves the target directory")
+	}
+	return dst, nil
 }
 
 // restoreBackup unpacks a backup file and puts its contents in place of the state directory's own.  The daemon must not be

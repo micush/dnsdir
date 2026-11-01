@@ -41,7 +41,7 @@ type cliFlags struct {
 	ospf, ospfDisable, ospfEnable                                                                                                                                                                                                                                *bool
 	ospfRouterID, ospfIfAdd, ospfIfDel, ospfIfDisable, ospfIfEnable, ospfArea, ospfNetwork, ospfKey, ospfHello, ospfDead, ospfMetric                                                                                                                             *string
 	asn, routerID, asPrepend, nbrAdd, nbrDel, nbrDisable, nbrEnable, remoteAS, descr, passwd, multihop, keepalive, hold                                                                                                                                          *string
-	updateUpload, updatePush, updateCancel, updateAuto, updateRepo, clusterFailover                                                                                                                                                                              *string
+	updateUpload, updatePush, updateCancel, updateAuto, updateRepo                                                                                                                                                                                               *string
 	canvas, vmacTest, tshoot, tshootCapture                                                                                                                                                                                                                      *bool
 	canvasPause, canvasResume, canvasMove, canvasAdd, canvasDel, canvasSet, vip, vip6, ifname, server, name, qtype, ecs, label, anycast, address, scope, node, realMACs                                                                                          *string
 	pos, group, ecsV4, ecsV6, spreadBand, downPercent, failThreshold, maxAttempts                                                                                                                                                                                *int
@@ -92,7 +92,7 @@ func registerCLIFlags(fs *flag.FlagSet) *cliFlags {
 		multihop:     s("multihop"),
 		keepalive:    s("keepalive"),
 		hold:         s("hold"),
-		updateUpload: s("update-upload"), updatePush: s("update-push"), updateCancel: s("update-cancel"), updateAuto: s("update-auto"), updateRepo: s("update-repo"), clusterFailover: s("cluster-failover"),
+		updateUpload: s("update-upload"), updatePush: s("update-push"), updateCancel: s("update-cancel"), updateAuto: s("update-auto"), updateRepo: s("update-repo"),
 	}
 }
 
@@ -439,10 +439,6 @@ func (f *cliFlags) run(sock string) bool {
 		decode(op(sock, "cluster.join", map[string]any{"code": *f.clusterJoin}), &v)
 		fmt.Println("Joined.")
 		printCluster(v)
-	case *f.clusterFailover != "":
-		var v ClusterView
-		decode(op(sock, "cluster.failover", map[string]any{"failover": *f.clusterFailover}), &v)
-		fmt.Println("Automatic failover:", failoverWords(v))
 	case *f.clusterPromote:
 		askYes("Promote THIS node to primary? Do this only if the current primary is gone (or you are moving the primary role on purpose).", *f.yes)
 		var r struct {
@@ -803,13 +799,9 @@ func printCertFor(i CertInfo, installFlag string) {
 	}
 }
 
-// failoverWords says what the automatic failover setting means now.
+// failoverWords says whether automatic failover is in force: always automatic, on from three members.
 func failoverWords(v ClusterView) string {
-	set := map[string]string{"": "automatic", "on": "on", "off": "off"}[v.Failover]
-	if v.Failover == "" {
-		return set + " (" + map[bool]string{true: "on", false: "off"}[v.FailoverOn] + " with " + itoa(len(v.Peers)) + " members; on from three)"
-	}
-	return set
+	return map[bool]string{true: "on", false: "off"}[v.FailoverOn] + " with " + itoa(len(v.Peers)) + " members (automatic, on from three)"
 }
 
 func printCluster(v ClusterView) {

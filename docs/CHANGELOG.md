@@ -1,5 +1,66 @@
 # Changelog
 
+## [v627] - 2026-11-01 — Failover is no longer a setting; the archive-path check is a tested function
+
+### Changed
+- **Failover is always automatic.** It is on when the cluster has three or more members and off with two (two members cannot make a majority), as before when the setting was "auto". The Failover drop-down, `--cluster-failover`, `POST /api/cluster/failover`, the `cluster.failover` operation (MCP/ops) and the `update-failover` management call are removed. Old config files and cluster state that still carry a `failover` value load without error (the field is kept and ignored). `ClusterView` no longer reports the setting; `FailoverOn` is computed from the member count. Help, README and `--help` are updated.
+- **`backupDest`** (`backup.go`): the check that an archive member's path stays inside the restore directory is now a function of its own, used by the extraction code, with `TestBackupDestStaysInsideTheDirectory` (parent-directory climbs, absolute paths, odd separators, the directory itself).
+
+### Fixed
+- **Gateway capture summary was written twice** in `capops.go` ("Gateway N, its nodes only"); the duplicate block is removed.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .` (native, with the PAM headers), `go vet ./...` (also with `CGO_ENABLED=0`), `go test -race -count=1 ./...` (ok), `CGO_ENABLED=0 go test ./...` (ok), `GOOS=linux GOARCH=… go build` for amd64, arm64, arm, 386 and riscv64, `node --check` on `app.js` and `help.js`.
+- **New and rewritten tests:** `TestFailoverEnabled` (two members off, three and more on), `TestOldFailoverValueStillLoads` (a file with `"failover": "off"` or `"on"` still decodes), `TestBackupDestStaysInsideTheDirectory`.
+
+### Not verified
+- **A live cluster run** of failover with the setting gone, and the Settings ▸ Cluster page in a browser (the drop-down is removed; no page was loaded for this release).
+- **The PAM and authentication checks** of the web GUI were not repeated; only the failover route and handler were removed from `web_mgmt.go` and `apiroutes.go`.
+- **Known flaky test:** `TestStreamMessageIsReadIncrementally` (a measurement of the process's allocations) can fail in a `CGO_ENABLED=0` full run and passes on its own.
+- dnsdir has no CLI for gateway capture (ntpdir now has `--capture - --group N`); not changed here.
+
+## [v626] - 2026-11-01 — README: the second half of the document was in the file twice; one copy is gone
+
+### Fixed
+- **`README.md` had the sections from "Anycast addresses and BGP" down to "Monitoring" twice** (ten `##` sections, 575 lines at lines 504–1078, and again from 1079). The second copy was the complete one: it runs on into "Operating a node", "Scheduled tasks", "Upgrading a running cluster", "Build from source" and "License". The first copy is removed. It was already like that at v624.
+- **Nothing was lost.** Every non-blank line of the removed copy exists elsewhere in the file except five paragraphs of the Backup text in "Monitoring", where the two copies differed. The removed copy had the current wording (several servers, **Install key…**, **Restore** on the Backup page and from the command line, all of which are in `backup.go` and `app.js`), and the kept copy had an older one ("a server of yours", one short "Restore:" paragraph). Those five paragraphs now replace the older three in the kept copy.
+- The file goes from 1845 to 1274 lines. No `##` heading appears twice, and all 20 in-page links (`](#…)`) still resolve.
+- The v625 note about the section being in the README twice (and both copies being updated) described the file as it was then.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...` and `go test -count=1 ./...` (ok). Only `README.md`, `docs/CHANGELOG.md` and `source/VERSION` changed since v625, whose full run (`go test -race`, `CGO_ENABLED=0`, the five cross-compiles, `node --check`) is in its entry.
+- The duplicate-heading and link checks above, run on the new file and, for the links, on the file at v624 (also all resolved).
+
+### Not verified
+- How the README renders on GitLab or GitHub; only its text and links were checked.
+
+## [v625] - 2026-11-01 — Monitor ▸ Anycast shows how fast a BGP neighbor drops a dead node (the BFD timers)
+
+### Added
+- **The BFD timers of every BGP session, and the time a dead node keeps getting traffic.** FRR already printed each session's intervals in `show bfd peers json`; only the state was read from it. `parseBFDSessions` (`bgp.go`) now also reads `receive-interval`, `transmit-interval` and `detect-multiplier`, and the neighbor's `remote-receive-interval`, `remote-transmit-interval` and `remote-detect-multiplier`, and for a session that is **up** works out, as RFC 5880 asynchronous mode defines it:
+  - **`detect_ms`, the time the neighbor takes to drop this node when it goes silent**: this node's detect multiplier times the slower of this node's transmit interval and the neighbor's receive interval. This is how long a dead node keeps being sent traffic, and so the number that matters for failover.
+  - **`peer_detect_ms`, the time this node takes to drop the neighbor**: the neighbor's multiplier times the slower of the neighbor's transmit interval and this node's receive interval. Left out when FRR does not print the neighbor's multiplier.
+- **Where it shows.**
+  - `/api/bgp`: each peer has `bfd_timers` (`tx_ms`, `rx_ms`, `mult`, `remote_tx_ms`, `remote_rx_ms`, `remote_mult`, `detect_ms`, `peer_detect_ms`). It is left out when the session is not up or FRR gave no intervals, so a session that is down never shows a made-up time.
+  - **Monitor ▸ Anycast ▸ BGP**: `detect_ms` in small text beside the BFD pill; the hover has the multiplier and interval behind it, and the other direction.
+  - `dnsdir --bgp`: `bfd up (drops this node after 900 ms)` after the BFD state.
+  - The OSPF tab and `--ospf` are unchanged; OSPF reads the BFD state through the same `parseBFDPeers`, which still returns the plain status.
+
+### Changed
+- **The help said to lower the timers on the router to notice a dead node sooner. That is only half true, and the text now says so.** BFD is on for every neighbor with no profile, so this node sends at FRR's defaults (every 300 ms, detect multiplier 3 = 900 ms). A router with slower timers makes the time longer; a faster one cannot make it shorter than this node's own. Changed in the BGP help topic (Configure ▸ Anycast) and the Monitor ▸ Anycast topic, and in the README. The same sentence in the OSPF help topic is left as it was.
+- **README:** the "Anycast addresses and BGP" section is in the README twice (it was before this change); both copies are updated and are still identical.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .` (native, with the PAM headers), `go vet ./...` (also with `CGO_ENABLED=0`), `go test -race -count=1 ./...` (ok), `CGO_ENABLED=0 go test ./...` (ok), `GOOS=linux GOARCH=… go build` for amd64, arm64, arm, 386 and riscv64, `node --check` on `app.js` and `help.js`.
+- The first `CGO_ENABLED=0 go test ./...` run failed `TestStreamMessageIsReadIncrementally` (`hardening2_test.go`: "39544 bytes allocated for a message of which 100 bytes arrived", a measurement of the whole process's allocations). It passed five times on its own and in a full re-run, and it has nothing to do with BGP.
+- **New tests** (`bgp_test.go`): `TestParseBFDSessionsTimers` (the field names as FRR prints them; both ends at 300 ms × 3 = 900 ms each way; the slower end wins, 3 × 500 and 5 × 300 = 1500 ms; a router faster than this node's own interval still gives 900 ms; a session that is down, or up with no intervals, has no timers; the neighbor's multiplier missing gives only `detect_ms`; an address that is not an address is skipped; `parseBFDPeers` still gives the plain status) and `TestAddBFD` (state and timers set on the matching peers only, unreadable output leaves what was there, the JSON names and the timers left out when there are none).
+- **UI, live:** the real `webui/app.js` in headless Chromium (Playwright, light and dark) against a mocked API with three neighbors: an up session with both times (`up 900 ms`, hover with both directions), an up session where the router is the slower end (`up 1500 ms`), and a down session with no time. No script errors.
+
+### Not verified
+- **Against a real FRR and router.** The field names are the ones `show bfd peers json` prints as far as I know them, and the new tests use JSON of that shape, but no FRR was run for this change. If FRR leaves out `remote-detect-multiplier`, only `detect_ms` is shown (tested). Compare the figure on Monitor ▸ Anycast with `vtysh -c "show bfd peers"` on a real node after the update.
+- **The PAM and authentication checks** of the web GUI were not repeated: `web.go`, `webtls.go`, `pam_*.go` and every auth, CSRF and lockout path are untouched; only `webui/app.js` and `webui/help.js` changed.
+- **The cross-compiles** run with cgo off and so build the fail-closed PAM stub; only the native amd64 build was checked with PAM.
+
 ## [v624] - 2026-10-31 — Certificate checking is set per tls:// and https:// server, not for the whole pool
 
 ### Changed

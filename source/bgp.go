@@ -589,6 +589,24 @@ type BGPPeer struct {
 	Sent     int    `json:"sent"`          // prefixes announced to it
 	Received int    `json:"received"`      // prefixes received (always 0 here: inbound is denied)
 	BFD      string `json:"bfd,omitempty"` // up | down | init | shutdown; empty = FRR has no BFD session for it
+	// BFDTimers are what the session negotiated; only for a session that is up and reports its intervals.
+	BFDTimers *BFDTimers `json:"bfd_timers,omitempty"`
+}
+
+// BFDTimers are the timers a BFD session negotiated, in milliseconds, read from FRR.  They decide how fast a dead
+// node is noticed: a system declares its neighbor down after Mult packets in a row are missed, and the neighbor sends
+// at the slower of what it wants to send and what the receiver accepts (RFC 5880, asynchronous mode).
+type BFDTimers struct {
+	TxMs       int `json:"tx_ms"`                  // how often this node wants to send
+	RxMs       int `json:"rx_ms"`                  // the fastest it accepts packets
+	Mult       int `json:"mult"`                   // packets missed in a row before the neighbor declares this node down
+	RemoteTxMs int `json:"remote_tx_ms,omitempty"` // the same three, as the neighbor announced them
+	RemoteRxMs int `json:"remote_rx_ms,omitempty"`
+	RemoteMult int `json:"remote_mult,omitempty"`
+	// DetectMs is how long the neighbor takes to notice that THIS node went silent (so how long a dead node keeps
+	// getting traffic); PeerDetectMs is how long this node takes to notice that the NEIGHBOR did (0 = not reported).
+	DetectMs     int `json:"detect_ms"`
+	PeerDetectMs int `json:"peer_detect_ms,omitempty"`
 }
 
 // BGPStatus is the BGP page / --bgp view.
@@ -609,22 +627,84 @@ var vtyshBGP = func() ([]byte, error) { return frrRun("vtysh", "-c", "show bgp s
 // vtyshBFD asks FRR for its BFD sessions (replaceable in tests).
 var vtyshBFD = func() ([]byte, error) { return frrRun("vtysh", "-c", "show bfd peers json") }
 
-// parseBFDPeers reads `show bfd peers json` into peer address -> status.
-func parseBFDPeers(raw []byte) (map[string]string, error) {
+// BFDSession is one session of `show bfd peers json`.
+type BFDSession struct {
+	Status string     // up | down | init | shutdown
+	Timers *BFDTimers // nil unless the session is up and FRR reported its intervals
+}
+
+// bfdDetectMs is the time to declare a neighbor down: its multiplier times the slower of the interval it wants to send
+// at and the interval the receiver accepts.
+func bfdDetectMs(mult, send, accept int) int {
+	if mult <= 0 {
+		return 0
+	}
+	if accept > send {
+		send = accept
+	}
+	return mult * send
+}
+
+// parseBFDSessions reads `show bfd peers json` into peer address -> session.
+func parseBFDSessions(raw []byte) (map[string]BFDSession, error) {
 	var l []struct {
-		Peer   string `json:"peer"`
-		Status string `json:"status"`
+		Peer       string `json:"peer"`
+		Status     string `json:"status"`
+		Rx         int    `json:"receive-interval"`
+		Tx         int    `json:"transmit-interval"`
+		Mult       int    `json:"detect-multiplier"`
+		RemoteRx   int    `json:"remote-receive-interval"`
+		RemoteTx   int    `json:"remote-transmit-interval"`
+		RemoteMult int    `json:"remote-detect-multiplier"`
 	}
 	if err := json.Unmarshal(raw, &l); err != nil {
 		return nil, err
 	}
-	out := map[string]string{}
+	out := map[string]BFDSession{}
 	for _, p := range l {
-		if a, err := netip.ParseAddr(p.Peer); err == nil {
-			out[a.Unmap().String()] = p.Status
+		a, err := netip.ParseAddr(p.Peer)
+		if err != nil {
+			continue
 		}
+		x := BFDSession{Status: p.Status}
+		if p.Status == "up" && p.Tx > 0 && p.Mult > 0 {
+			x.Timers = &BFDTimers{
+				TxMs: p.Tx, RxMs: p.Rx, Mult: p.Mult,
+				RemoteTxMs: p.RemoteTx, RemoteRxMs: p.RemoteRx, RemoteMult: p.RemoteMult,
+				DetectMs: bfdDetectMs(p.Mult, p.Tx, p.RemoteRx),
+			}
+			if p.RemoteMult > 0 && p.Rx > 0 && p.RemoteTx > 0 {
+				x.Timers.PeerDetectMs = bfdDetectMs(p.RemoteMult, p.RemoteTx, p.Rx)
+			}
+		}
+		out[a.Unmap().String()] = x
 	}
 	return out, nil
+}
+
+// parseBFDPeers reads `show bfd peers json` into peer address -> status.
+func parseBFDPeers(raw []byte) (map[string]string, error) {
+	sessions, err := parseBFDSessions(raw)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(sessions))
+	for a, x := range sessions {
+		out[a] = x.Status
+	}
+	return out, nil
+}
+
+// addBFD sets each peer's BFD state and timers from `show bfd peers json`; peers are left alone if it cannot be read.
+func addBFD(peers []BGPPeer, raw []byte) {
+	sessions, err := parseBFDSessions(raw)
+	if err != nil {
+		return
+	}
+	for i := range peers {
+		x := sessions[peers[i].Peer]
+		peers[i].BFD, peers[i].BFDTimers = x.Status, x.Timers
+	}
 }
 
 // parseBGPSummary reads `show bgp summary json`, which has one object per
@@ -698,11 +778,7 @@ func (m *Mgmt) BGPStatus() (*BGPStatus, error) {
 				st.Running = true
 				st.Peers = peers
 				if raw, err := vtyshBFD(); err == nil {
-					if bfd, err := parseBFDPeers(raw); err == nil {
-						for i := range st.Peers {
-							st.Peers[i].BFD = bfd[st.Peers[i].Peer]
-						}
-					}
+					addBFD(st.Peers, raw)
 				}
 			}
 		}

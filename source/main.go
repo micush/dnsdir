@@ -149,8 +149,6 @@ the web GUI):
                    --lldp-enable | --lldp-disable   (every node of the cluster runs lldpd, or none does; off by default)
   Cluster          --cluster-status  --cluster-token  --cluster-join CODE
                    --cluster-promote  --cluster-remove ADDR
-                   --cluster-failover auto|on|off   (the primary promotes a replica by itself
-                                                 after 5 minutes offline; auto = on from 3 members)
                    --cluster-delete ADDR  --cluster-unremove ADDR  --cluster-leave  --cluster-sync
                    (GUI: the Node menu, top right, configures any member)
   Block lists      --block-status  --block-update ID|all  --block-test NAME
@@ -297,7 +295,7 @@ Cluster ("cluster" block; management only, independent of the AGC/AFN election):
   per node. Create a join code on a member (--cluster-token), use it on the new
   node (--cluster-join). Nodes pin each other's certificates and sign requests;
   a code works once for an hour. Promotion is explicit (--cluster-promote), apart from the
-  automatic failover (--cluster-failover) and the hand-over before a planned restart.
+  automatic failover (from three members, after 5 minutes) and the hand-over before a planned restart.
   The primary's GUI certificate is replicated to every member.
 
 Updates: upload dnsdir_vN.tgz (or .zip) on any node (--update-upload); the node

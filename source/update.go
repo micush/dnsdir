@@ -54,7 +54,7 @@ type UpdateIntent struct {
 	// Repo is the GitHub repository "Fetch from online" downloads releases from, as owner/repo; empty means the default
 	// (defaultRepo).  Part of the intent, so it is shared by the cluster and set on the primary.
 	Repo string `json:"repo,omitempty"`
-	// Failover is the cluster's automatic primary failover: "" (automatic: on from three members), "on" or "off".  Shared like
+	// Failover is no longer a setting (failover is always automatic, on from three members); old files may still carry it.  Shared like
 	// the rest of the intent, so a replica still has it when the primary is gone.
 	Failover string `json:"failover,omitempty"`
 }
@@ -220,20 +220,6 @@ func (u *Updater) SetRepo(repo, by, self string) {
 	}
 	infof("update: online repository set to %s by %s", shown, by)
 	u.addEventLocked(UpdateEvent{Node: self, Kind: "repo", Detail: shown, By: by})
-}
-
-// SetFailover sets the automatic failover mode ("", "on" or "off").
-func (u *Updater) SetFailover(mode, by, self string) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	if u.intent.Failover == mode {
-		return
-	}
-	u.intent.Failover = mode
-	u.saveIntentLocked()
-	shown := map[string]string{"": "automatic (on from three members)", "on": "on", "off": "off"}[mode]
-	infof("cluster: automatic failover set to %s by %s", shown, by)
-	u.addEventLocked(UpdateEvent{Node: self, Kind: "failover", Detail: shown, By: by})
 }
 
 func (u *Updater) Push(nodes []string, by string) {

@@ -536,17 +536,6 @@ func (m *Mgmt) UpdateRepo(repo, by string) error {
 	return err
 }
 
-// UpdateFailover sets the cluster's automatic failover: auto (the default: on from three members), on or off; shared by the
-// cluster and set on the primary.
-func (m *Mgmt) UpdateFailover(mode, by string) error {
-	norm, err := normalizeFailover(mode)
-	if err != nil {
-		return err
-	}
-	_, err = m.runOnPrimary("update-failover", by, adminNodes{Failover: norm})
-	return err
-}
-
 func (m *Mgmt) UpdateAuto(on bool, by string) error {
 	_, err := m.runOnPrimary("update-auto", by, adminNodes{Enabled: on})
 	return err
@@ -692,7 +681,7 @@ func (m *Mgmt) execAdminOp(op, by string, payload json.RawMessage) (json.RawMess
 			return nil, err
 		}
 		return ok(map[string]any{})
-	case "update-push", "update-cancel", "update-auto", "update-done", "update-repo", "update-failover":
+	case "update-push", "update-cancel", "update-auto", "update-done", "update-repo":
 		var p adminNodes
 		if err := json.Unmarshal(payload, &p); err != nil {
 			return nil, err
@@ -704,8 +693,6 @@ func (m *Mgmt) execAdminOp(op, by string, payload json.RawMessage) (json.RawMess
 			m.upd.Cancel(p.Nodes, by)
 		case "update-auto":
 			m.upd.SetAuto(p.Enabled, by, m.cl.selfAddrForEvents())
-		case "update-failover":
-			m.upd.SetFailover(p.Failover, by, m.cl.selfAddrForEvents())
 		case "update-repo":
 			norm, err := normalizeRepo(p.Repo)
 			if err != nil {

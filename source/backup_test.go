@@ -679,3 +679,18 @@ func TestSFTPErrorSaysWhy(t *testing.T) {
 		t.Errorf("%q", got)
 	}
 }
+
+func TestBackupDestStaysInsideTheDirectory(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"conf", "a/b/c.json", "a..b", "x/..y"} {
+		dst, err := backupDest(dir, name)
+		if err != nil || !strings.HasPrefix(dst, dir+string(filepath.Separator)) {
+			t.Errorf("%q: got %q, %v", name, dst, err)
+		}
+	}
+	for _, name := range []string{"..", "../x", "a/../../x", "/etc/passwd", "", "."} {
+		if dst, err := backupDest(dir, name); err == nil {
+			t.Errorf("%q was accepted as %q", name, dst)
+		}
+	}
+}

@@ -1511,9 +1511,8 @@ type ClusterView struct {
 	LastSyncError string     `json:"last_sync_error,omitempty"`
 	Conflict      string     `json:"conflict,omitempty"`
 	Warnings      []string   `json:"warnings"`
-	// Failover is the setting ("" automatic, "on", "off") and FailoverOn whether it is in force with this many members
-	Failover   string `json:"failover"`
-	FailoverOn bool   `json:"failover_on"`
+	// FailoverOn says whether automatic failover is in force with this many members (from three)
+	FailoverOn bool `json:"failover_on"`
 }
 
 func (c *Cluster) View() ClusterView {
@@ -1528,8 +1527,7 @@ func (c *Cluster) View() ClusterView {
 		Conflict: c.conflict, Peers: []PeerView{}, Warnings: []string{},
 	}
 	v.Joinable = snap.Role == RolePrimary && len(snap.Peers) == 0 && snap.Epoch == 1
-	v.Failover = c.mg.upd.Intent().Failover
-	v.FailoverOn = failoverEnabled(v.Failover, len(snap.Peers)+1)
+	v.FailoverOn = failoverEnabled(len(snap.Peers) + 1)
 	v.Peers = append(v.Peers, PeerView{
 		Addr: snap.SelfAddr, NodeID: snap.NodeID, Fingerprint: c.node.Fingerprint(), Self: true, Reachable: true,
 		Role: snap.Role, Epoch: snap.Epoch, IsPrimary: snap.Role == RolePrimary, Version: version(),

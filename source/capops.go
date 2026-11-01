@@ -457,9 +457,6 @@ func (j *CaptureJob) bundle() {
 	}
 	summary := fmt.Sprintf("Capture on %s for %d s, filter %q, started %s\n", j.Iface, j.Seconds, j.Filter, j.Started.Format(time.RFC3339))
 	if j.Gateway > 0 {
-		summary = fmt.Sprintf("Gateway %d, its nodes only\n", j.Gateway) + summary
-	}
-	if j.Gateway > 0 {
 		summary = fmt.Sprintf("Gateway %d (its nodes only)\n", j.Gateway) + summary
 	}
 	for _, n := range nodes {

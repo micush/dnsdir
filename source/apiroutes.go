@@ -49,7 +49,6 @@ var mcpRoutes = []apiRoute{
 	{Method: "POST", Path: "/api/capture/start"},
 	{Method: "POST", Path: "/api/capture/stop"},
 	{Method: "GET", Path: "/api/cluster"},
-	{Method: "POST", Path: "/api/cluster/failover"},
 	{Method: "POST", Path: "/api/cluster/join"},
 	{Method: "POST", Path: "/api/cluster/leave"},
 	{Method: "POST", Path: "/api/cluster/peers/delete"},

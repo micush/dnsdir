@@ -183,6 +183,9 @@ func printBGP(st BGPStatus) {
 		}
 		if p, ok := live[n.Peer]; ok && p.BFD != "" {
 			line += " bfd " + p.BFD
+			if t := p.BFDTimers; t != nil {
+				line += fmt.Sprintf(" (drops this node after %d ms)", t.DetectMs)
+			}
 		}
 		if n.Disabled {
 			line += " disabled"

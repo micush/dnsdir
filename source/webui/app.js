@@ -6311,6 +6311,9 @@
     const stateKind = (st) => (st === "Established" ? "ok" : st === "Active" || st === "Connect" || st === "OpenSent" || st === "OpenConfirm" ? "warn" : "bad");
     const ospfKind = (st) => (st === "Full" ? "ok" : st === "Down" || st === "Attempt" ? "bad" : "warn");
     const bfdKind = (st) => (st === "up" ? "ok" : st === "init" ? "warn" : st === "down" ? "bad" : "");
+    // the time beside a BFD pill: how long the router takes to drop this node once it goes silent
+    const bfdTip = (t) => "The router drops this node after " + t.detect_ms + " ms without a BFD packet (" + t.mult + " × " + Math.round(t.detect_ms / t.mult) + " ms)." +
+      (t.peer_detect_ms ? " This node drops the router after " + t.peer_detect_ms + " ms." : "");
     const applied = (a) => ["Last apply", h("span", {}, pill(a.ok ? "ok" : "failed", a.ok ? "ok" : "bad"), ...(a.ok ? [] : [" ", a.detail || "–"]))];
 
     function draw(st, os) {
@@ -6345,7 +6348,7 @@
         const p = live.get(n.peer);
         return h("tr", {}, h("td", { class: "mono" }, n.peer), h("td", {}, String(n.remote_as)), h("td", {}, n.description || ""),
           h("td", {}, n.disabled ? pill("disabled", "") : p ? pill(p.state, stateKind(p.state)) : pill(st.running ? "not known yet" : "–", "")),
-          h("td", {}, p && p.bfd ? pill(p.bfd, bfdKind(p.bfd)) : "–"),
+          h("td", {}, p && p.bfd ? pill(p.bfd, bfdKind(p.bfd)) : "–", p && p.bfd_timers ? h("span", { class: "hint", title: bfdTip(p.bfd_timers) }, " " + p.bfd_timers.detect_ms + " ms") : null),
           h("td", {}, p && p.state === "Established" ? p.uptime : "–"),
           h("td", {}, p && p.state === "Established" ? String(p.sent) : "–"));
       };

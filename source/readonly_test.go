@@ -87,3 +87,63 @@ func TestRedactSecrets(t *testing.T) {
 		t.Fatal("the real config was changed")
 	}
 }
+
+// A read-only account sees the BGP and OSPF pages but not the passwords in them: the status the pages read (also when it
+// comes through the node picker, which runs the same handler) has them hidden, a full account still sees them, and the
+// secrets FRR can echo in the result of an apply are taken out of the text.
+func TestReadOnlyDoesNotSeeRoutingPasswords(t *testing.T) {
+	e := bgpEnv(t)
+	e.ws.auth = &roAuth{}
+	pol := *e.ws.policy.Load()
+	pol.ReadGroup = "view"
+	e.ws.policy.Store(&pol)
+	if err := e.mg.BGPSet(BGPConfig{ASN: 64512, Neighbors: []BGPNeighbor{{Peer: "192.0.2.1", RemoteAS: 64500, Password: "bgp-sekrit-1"}}}, "t"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.mg.OSPFSet(OSPFConfig{RouterID: "192.0.2.10", Interfaces: []OSPFInterface{{Name: "eth0", Password: "ospfpw1"}}}, "t"); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.login("alice", "pw"); r.code != 200 {
+		t.Fatalf("alice: %d", r.code)
+	}
+	full := withAuth(e, false)
+	if r := e.do("GET", "/api/bgp", nil, full); r.code != 200 || !strings.Contains(string(r.raw), "bgp-sekrit-1") {
+		t.Fatalf("a full account must see the BGP settings as they are (the form needs them): %d %s", r.code, r.raw)
+	}
+	if r := e.do("GET", "/api/ospf", nil, full); r.code != 200 || !strings.Contains(string(r.raw), "ospfpw1") {
+		t.Fatalf("a full account must see the OSPF settings as they are: %d %s", r.code, r.raw)
+	}
+	if r := e.login("bob", "pw"); r.code != 200 || r.body["read_only"] != true {
+		t.Fatalf("bob: %d %v", r.code, r.body)
+	}
+	ro := withAuth(e, false)
+	for _, c := range []struct{ path, secret string }{{"/api/bgp", "bgp-sekrit-1"}, {"/api/ospf", "ospfpw1"}} {
+		r := e.do("GET", c.path, nil, ro)
+		if r.code != 200 {
+			t.Fatalf("GET %s as read-only: %d %s (the page must still load)", c.path, r.code, r.raw)
+		}
+		if strings.Contains(string(r.raw), c.secret) || !strings.Contains(string(r.raw), `"password":"(hidden)"`) {
+			t.Errorf("GET %s as read-only shows the password: %s", c.path, r.raw)
+		}
+	}
+	if r := e.do("GET", "/api/bgp", nil, ro); !strings.Contains(string(r.raw), `"peer":"192.0.2.1"`) || !strings.Contains(string(r.raw), `"remote_as":64500`) {
+		t.Errorf("the rest of the BGP settings must still be there: %s", r.raw)
+	}
+}
+
+func TestRedactRoutingTakesSecretsOutOfTheApplyText(t *testing.T) {
+	st := BGPStatus{Config: BGPConfig{ASN: 64512, Neighbors: []BGPNeighbor{{Peer: "192.0.2.1", RemoteAS: 64500, Password: "bgp-sekrit-1"}}},
+		Applied: BGPApplied{OK: false, Detail: "reloading FRR failed: exit status 1  neighbor 192.0.2.1 password bgp-sekrit-1\n ip ospf message-digest-key 1 md5 ospfpw1"}}
+	b, _ := json.Marshal(redactRouting(st))
+	for _, s := range []string{"bgp-sekrit-1", "ospfpw1"} {
+		if strings.Contains(string(b), s) {
+			t.Errorf("%q is still in %s", s, b)
+		}
+	}
+	if !strings.Contains(string(b), "reloading FRR failed") || !strings.Contains(string(b), `"peer":"192.0.2.1"`) {
+		t.Errorf("the rest must stay: %s", b)
+	}
+	if st.Config.Neighbors[0].Password != "bgp-sekrit-1" {
+		t.Error("the status itself must not be changed")
+	}
+}

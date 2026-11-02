@@ -43,8 +43,10 @@ const (
 // A key whose value is a secret: passwords, the gateway key, tokens, join codes, private keys.
 var tshootSecretKey = regexp.MustCompile(`(?i)(^|_)(pass|passwd|password|secret|token|key|psk|private|cookie|csrf|code|auth|community|communities)($|_)`)
 
-// A secret written in free text (an FRR configuration, a command's output).
-var tshootSecretText = regexp.MustCompile(`(?i)\b(password|passwd|secret|md5|community|key|auth-key)([ =:]+)(?:[0-9] )?(\S+)`)
+// A secret written in free text (an FRR configuration, a command's output).  After the word may come a key id and "md5"
+// (ip ospf message-digest-key 1 md5 SECRET) and an encryption type (password 7 HASH): they are skipped, the secret is
+// what follows.
+var tshootSecretText = regexp.MustCompile(`(?i)\b(password|passwd|secret|md5|community|key|auth-key)([ =:]+)(?:[0-9]{1,3} )?(?:md5 )?(?:[0-9] )?(\S+)`)
 
 // redactJSON returns v with the value of every secret key replaced, however deep.
 func redactJSON(v any) (any, int) {

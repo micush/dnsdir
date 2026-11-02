@@ -35,10 +35,16 @@ func TestTshootRedactsSecrets(t *testing.T) {
 }
 
 func TestTshootRedactsText(t *testing.T) {
-	in := "router bgp 65001\n neighbor 192.0.2.1 password hunter2\n neighbor 192.0.2.2 password 7 0822455D0A16\n ip prefix-list x\nsnmp community public\n"
+	in := "router bgp 65001\n neighbor 192.0.2.1 password hunter2\n neighbor 192.0.2.2 password 7 0822455D0A16\n ip prefix-list x\nsnmp community public\n" +
+		"interface eth0\n ip ospf message-digest-key 1 md5 ospfpw1\n ip ospf message-digest-key 22 md5 7 0ABCDEF123\n ip ospf authentication-key simplepw\n"
 	out, n := redactText(in)
 	if strings.Contains(out, "hunter2") || strings.Contains(out, "0822455D0A16") || n < 2 {
 		t.Fatalf("secrets left (%d): %s", n, out)
+	}
+	for _, s := range []string{"ospfpw1", "0ABCDEF123", "simplepw"} {
+		if strings.Contains(out, s) {
+			t.Fatalf("the OSPF key %q is left: %s", s, out)
+		}
 	}
 	if !strings.Contains(out, "router bgp 65001") || !strings.Contains(out, "ip prefix-list x") {
 		t.Fatalf("too much removed: %s", out)

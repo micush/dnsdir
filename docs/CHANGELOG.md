@@ -1,5 +1,20 @@
 # Changelog
 
+## [v630] - 2026-11-02 — A read-only account no longer sees the BGP and OSPF passwords
+
+### Fixed
+- **`GET /api/bgp` and `GET /api/ospf` handed the passwords to read-only accounts.** Both return the node's whole routing settings (Monitor, Configure and Operate ▸ Anycast read them), so a read-only sign-in could read every BGP neighbor's MD5 password and every OSPF interface's MD5 key in the page's data, although `GET /api/config` and the version pages already kept them back. The web handler now passes every `bgp.*` and `ospf.*` answer through `redactRouting` (`readonly.go`) for a read-only session: the passwords read `(hidden)` (an unset one stays empty), the rest of the settings are as before, and the pages still load. A full-access account is unchanged, and the node picker (which runs the same handler on the other node with the caller's read-only flag) is covered by the same code.
+- **The result of the last FRR apply can echo configuration lines** (`reloading FRR failed: … neighbor X password …`); for a read-only account `redactRouting` takes the secrets out of that text too.
+- **The troubleshooting bundle (`GET /api/tshoot/download`, which a read-only account may fetch) left the OSPF MD5 key in `frr.conf.txt` and `running-config.txt`.** Its free-text rule took `ip ospf message-digest-key 1 md5 SECRET` as "key 1" and removed the word `md5`, leaving `SECRET`. The rule now skips a key id, `md5` and an encryption type before the secret (`password 7 HASH` as before), so the key, the `md5 7 HASH` form and `authentication-key SECRET` are removed. The BGP `neighbor X password SECRET` lines were already handled.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .` (native, with the PAM headers), `go vet ./...` (also with `CGO_ENABLED=0`), `go test -race -count=1 ./...` (ok), `CGO_ENABLED=0 go test -count=1 ./...` (ok), `GOOS=linux GOARCH=…  go build` for amd64, arm64, arm, 386 and riscv64.
+- **New tests:** `TestReadOnlyDoesNotSeeRoutingPasswords` (a full account sees the passwords on both routes, a read-only one gets `(hidden)` and still gets the peer, AS and the rest; it fails with the new line in `web_mgmt.go` removed), `TestRedactRoutingTakesSecretsOutOfTheApplyText`, and `TestTshootRedactsText` extended with the OSPF key lines (it failed on the old rule).
+
+### Not verified
+- **Against a live daemon** and in a browser: the Anycast pages for a read-only account were not looked at (the password field now holds `(hidden)`); no FRR was run; the cluster node picker was not driven between two real daemons.
+- Other pages that show settings to a read-only account (for example SNMP communities) were not audited in this release.
+
 ## [v629] - 2026-11-02 — TCP listeners are plain TCP: multipath TCP is turned off
 
 ### Changed

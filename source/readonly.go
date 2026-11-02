@@ -11,8 +11,8 @@ import (
 // Read-only accounts.  A member of web.read_group who is in none of the web.group groups signs in and sees
 // everything the GUI shows, but cannot change anything: the one gate every request passes (authedCT) refuses
 // every method but GET and HEAD, and keeps three things back that a GET would hand over whole: the
-// configuration versions (the whole file, keys and passwords included) and the keys and passwords inside the
-// configuration the Configure pages read.  Logging out stays possible.
+// configuration versions (the whole file, keys and passwords included), the keys and passwords inside the
+// configuration the Configure pages read and the BGP and OSPF passwords of their own pages.  Logging out stays possible.
 
 const readOnlyMsg = "This account is read-only: it can look at everything but cannot change anything."
 
@@ -50,6 +50,21 @@ func readOnlyDenied(r *http.Request) bool {
 		return p != "/api/logout"
 	}
 	return p == "/api/versions/get" || p == "/api/versions/diff" || p == "/api/versions/download"
+}
+
+// redactRouting is what a read-only account is shown of the BGP and OSPF pages (bgp.* and ospf.*): the status with the
+// neighbors' and interfaces' passwords hidden, as in the configuration the Configure pages read, and the secrets that
+// FRR's own output can echo in the result of the last apply taken out.
+func redactRouting(v any) any {
+	out := redactSecrets(v)
+	if m, ok := out.(map[string]any); ok {
+		if ap, ok := m["applied"].(map[string]any); ok {
+			if s, ok := ap["detail"].(string); ok {
+				ap["detail"], _ = redactText(s)
+			}
+		}
+	}
+	return out
 }
 
 // secretKeys are the configuration keys whose values a read-only account is not shown.

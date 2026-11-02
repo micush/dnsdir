@@ -170,6 +170,9 @@ func (w *WebServer) op(cmd string, query []string) func(http.ResponseWriter, *ht
 			jsonError(rw, code, err.Error())
 			return
 		}
+		if (strings.HasPrefix(cmd, "bgp.") || strings.HasPrefix(cmd, "ospf.")) && w.ro(s) {
+			data = redactRouting(data) // the neighbors' and interfaces' passwords stay back from a read-only account
+		}
 		writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": data})
 	}
 }

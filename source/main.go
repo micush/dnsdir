@@ -1,6 +1,10 @@
 // dnsdir — DNS Distributed Gateway: a Distributed Gateway Load Balancing Protocol
 // daemon with a built-in DNS proxy that serves the VIP and forwards to the
 // fastest healthy upstream.
+//
+// TCP listeners stay plain TCP: Go 1.24 listens with multipath TCP by default, and nothing here uses it.
+//
+//go:debug multipathtcp=0
 package main
 
 import (

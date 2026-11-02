@@ -1,5 +1,18 @@
 # Changelog
 
+## [v629] - 2026-11-02 — TCP listeners are plain TCP: multipath TCP is turned off
+
+### Changed
+- **Multipath TCP (MPTCP) is off.** Go 1.24 listens with MPTCP by default on Linux (`net.ListenConfig`, so every `net.Listen("tcp", …)` and `http.Server`) when the module's `go` line is 1.24 or later, which this one is. `main.go` now carries `//go:debug multipathtcp=0`, so the GUI, cluster, DNS-over-TCP/TLS/HTTPS and other TCP listeners are ordinary TCP whatever the kernel's `net.mptcp.enabled` says. Nothing in dnsdir uses MPTCP; UDP is not affected. The setting is built into the binary, so an update that rebuilds from source keeps it, and `GODEBUG=multipathtcp=1` in a service's environment still turns it back on.
+
+### Verified
+- `go version -m` on the built binary shows `DefaultGODEBUG=multipathtcp=0`; a control build of the same tree without the directive shows no `DefaultGODEBUG`.
+- `gofmt -l .` (empty), `go build -o /dev/null .` (native, with the PAM headers), `go vet ./...` (also with `CGO_ENABLED=0`), `go test -race -count=1 ./...` (ok), `CGO_ENABLED=0 go test -count=1 ./...` (ok), `GOOS=linux GOARCH=…  go build` for amd64, arm64, arm, 386 and riscv64.
+
+### Not verified
+- **On a live host:** that a listener really is plain TCP (`ss -M` on a machine with MPTCP enabled) was not looked at; the binary's embedded setting was.
+- The web GUI, PAM and cluster checks were not repeated (no code besides the directive changed).
+
 ## [v628] - 2026-11-02 — Monitor ▸ Statistics and Monitor ▸ Node: a download icon on each card saves its numbers as CSV
 
 ### Added

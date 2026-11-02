@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"bytes"
 	"errors"
 	"fmt"
@@ -299,8 +300,9 @@ func (s *Server) upForLocked(zone string) bool {
 // that was accepted is up, only when fallbacks says so.
 func (p *Pool) rankedWhere(keep func(*Server) bool, fallbacks bool, zone string) []*Server {
 	type ent struct {
-		s *Server
-		l float64
+		s     *Server
+		l     float64
+		amber bool
 	}
 	var es, fbs []ent
 	for _, s := range p.servers {
@@ -310,9 +312,9 @@ func (p *Pool) rankedWhere(keep func(*Server) bool, fallbacks bool, zone string)
 		s.mu.Lock()
 		if s.upForLocked(zone) {
 			if s.Fallback {
-				fbs = append(fbs, ent{s, s.ewma})
+				fbs = append(fbs, ent{s, s.ewma, s.amberLocked()})
 			} else {
-				es = append(es, ent{s, s.ewma})
+				es = append(es, ent{s, s.ewma, s.amberLocked()})
 			}
 		}
 		s.mu.Unlock()
@@ -320,7 +322,12 @@ func (p *Pool) rankedWhere(keep func(*Server) bool, fallbacks bool, zone string)
 	if len(es) == 0 && fallbacks { // every normal server is down: the fallback servers take over until one is back
 		es = fbs
 	}
+	// a server that is up but has a probe domain failing (amber on the Topology page) goes behind every green one: it
+	// is tried only after them, and takes no turn at the front while a green server is up
 	sort.Slice(es, func(i, j int) bool {
+		if es[i].amber != es[j].amber {
+			return !es[i].amber
+		}
 		if es[i].l != es[j].l {
 			return es[i].l < es[j].l
 		}
@@ -346,9 +353,7 @@ func (p *Pool) scopedSnap(scope string, keep func(*Server) bool, fallbacks bool)
 	sn := &rankSnap{at: now, gen: gen, list: p.rankedWhere(keep, fallbacks, scope)}
 	sn.lat = make([]float64, len(sn.list))
 	for i, s := range sn.list {
-		s.mu.Lock()
-		sn.lat[i] = s.ewma
-		s.mu.Unlock()
+		sn.lat[i] = s.bandLat()
 	}
 	p.fwd.snaps.Store(scope, sn)
 	return sn
@@ -605,4 +610,29 @@ func (d DNSConfig) probeZones(addr string, qs []DNSQuery) ([]string, map[string]
 		}
 	}
 	return zq, probed
+}
+
+// amberLocked says whether the server is up with at least one of its probe domains failing in the latest round (the
+// amber of the Topology page).  s.mu is held.
+func (s *Server) amberLocked() bool {
+	if !s.healthy {
+		return false
+	}
+	for _, t := range s.tests {
+		if !t.OK {
+			return true
+		}
+	}
+	return false
+}
+
+// bandLat is the latency the spread band is worked out from: the server's average, or infinity for an amber server, so
+// that it never counts as being within the band of a green one.
+func (s *Server) bandLat() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.amberLocked() {
+		return math.Inf(1)
+	}
+	return s.ewma
 }

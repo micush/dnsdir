@@ -3649,29 +3649,53 @@
       let rules;
       try { rules = (await api("GET", "/api/alerts")).data.rules; } catch (e) { clear(rulesBox).append(h("div", { class: "hint" }, "The rules could not be read from this node: " + e.message)); return; }
       const tbody = h("tbody", {});
-      for (const r of rules) {
-        const c = { en: h("input", { type: "checkbox", checked: r.enabled, "aria-label": "On" }), sev: sel([["info", "Info"], ["warning", "Warning"], ["critical", "Critical"]], r.severity_now),
-          clearMode: sel([["checks", "good checks in a row"], ["minutes", "minutes good"]], r.clear_mode), clear: num(r.clear) };
-        let when;
-        if (r.kind === "updown") {
-          c.mode = sel([["in_a_row", "failed checks in a row"], ["minutes", "minutes down"], ["m_of_n", "failed checks of the last"]], r.mode);
-          c.after = num(r.after); c.of = num(r.of, 100);
-          const ofBox = h("span", {}, c.of, " checks");
-          const sync = () => { ofBox.hidden = c.mode.value !== "m_of_n"; };
-          c.mode.addEventListener("change", sync); sync();
-          when = h("span", { class: "arule-when" }, "After ", c.after, " ", c.mode, " ", ofBox);
-        } else {
-          c.thr = num(r.threshold_now); c.forMin = num(r.for_minutes_now, 10080);
-          when = h("span", { class: "arule-when" }, r.below ? "When below " : "When above ", c.thr, " " + r.unit + ", for ", c.forMin, " minutes");
+      const GROUPS = [["dns", "DNS servers"], ["ntp", "NTP"], ["gateways", "Gateways"], ["stats", "Traffic"], ["cfg", "Certificates and backups"], ["host", "Host"]];
+      const groupOf = (r) => (r.go === "cfg_web" || r.go === "cfg_backup" ? "cfg" : r.go || "host");
+      const unitSpan = (t) => h("span", { class: "arule-u" }, t);
+      const cell = (...k) => h("td", {}, h("div", { class: "arule-c" }, ...k));
+      const dash = () => h("td", {}, h("span", { class: "muted", "aria-label": "Not used" }, "–"));
+      for (const [gk, gname] of GROUPS) {
+        const list = rules.filter((r) => groupOf(r) === gk);
+        if (!list.length) continue;
+        tbody.append(h("tr", { class: "agroup" }, h("th", { colspan: "7", scope: "colgroup" }, gname)));
+        for (const r of list) {
+          const c = { en: h("input", { type: "checkbox", checked: r.enabled, "aria-label": "On: " + r.title }), sev: sel([["info", "Info"], ["warning", "Warning"], ["critical", "Critical"]], r.severity_now),
+            clearMode: sel([["checks", "checks"], ["minutes", "min"]], r.clear_mode), clear: num(r.clear) };
+          c.sev.setAttribute("aria-label", "Severity: " + r.title); c.clear.setAttribute("aria-label", "Clear after: " + r.title);
+          c.clearMode.setAttribute("aria-label", "Clear after, counted in: " + r.title);
+          c.sev.className = "arule-sev";
+          const sevSync = () => { c.sev.dataset.sev = c.sev.value; };
+          c.sev.addEventListener("change", sevSync); sevSync();
+          let when, thr, forc;
+          if (r.kind === "updown") {
+            c.mode = sel([["in_a_row", "Checks in a row"], ["minutes", "Minutes down"], ["m_of_n", "Checks of last"]], r.mode);
+            c.mode.setAttribute("aria-label", "Alert when: " + r.title);
+            c.after = num(r.after); c.of = num(r.of, 100);
+            c.after.setAttribute("aria-label", "Threshold: " + r.title); c.of.setAttribute("aria-label", "Of the last checks: " + r.title);
+            const ofBox = h("span", { class: "arule-c" }, unitSpan("of"), c.of);
+            const unit = unitSpan("");
+            const sync = () => { ofBox.hidden = c.mode.value !== "m_of_n"; unit.textContent = c.mode.value === "minutes" ? "min" : "checks"; };
+            c.mode.addEventListener("change", sync); sync();
+            when = cell(c.mode); thr = cell(c.after, ofBox, unit); forc = dash();
+          } else {
+            c.thr = num(r.threshold_now); c.forMin = num(r.for_minutes_now, 10080);
+            c.thr.setAttribute("aria-label", "Threshold: " + r.title); c.forMin.setAttribute("aria-label", "For minutes: " + r.title);
+            when = h("td", {}, h("span", { class: "arule-dir" }, r.below ? "Value below" : "Value above")); thr = cell(c.thr, unitSpan(r.unit)); forc = cell(c.forMin, unitSpan("min"));
+          }
+          const tr = h("tr", { "data-rule": r.id }, h("td", { class: "arule-on" }, c.en),
+            h("td", {}, h("div", { class: "arule-t" }, r.title), h("div", { class: "muted small" }, r.subject ? "One alert per " + r.subject : "This node")),
+            h("td", {}, c.sev), when, thr, forc, cell(c.clear, c.clearMode));
+          const offSync = () => tr.classList.toggle("off", !c.en.checked);
+          c.en.addEventListener("change", offSync); offSync();
+          tr.addEventListener("change", () => dirty.add(r.id));
+          rows[r.id] = { r, c };
+          tbody.append(tr);
         }
-        const tr = h("tr", { "data-rule": r.id }, h("td", {}, c.en), h("td", {}, h("div", {}, r.title), h("div", { class: "muted small" }, r.subject ? "One alert per " + r.subject : "")),
-          h("td", {}, c.sev), h("td", {}, when), h("td", {}, h("span", { class: "arule-when" }, "Clear after ", c.clear, c.clearMode)));
-        tr.addEventListener("change", () => dirty.add(r.id));
-        rows[r.id] = { r, c };
-        tbody.append(tr);
       }
-      clear(rulesBox).append(h("div", { class: "scroll" }, h("table", { class: "tight arules" },
-        h("thead", {}, h("tr", {}, ["On", "Rule", "Severity", "Alert when", "Clear"].map((x) => h("th", {}, x)))), tbody)));
+      const cols = ["2.4rem", "", "8.6rem", "12.5rem", "10.5rem", "6rem", "11rem"];
+      clear(rulesBox).append(h("div", { class: "scroll" }, h("table", { class: "arules" },
+        h("colgroup", {}, cols.map((w) => h("col", w ? { class: "w-" + w.replace(".", "_") } : {}))),
+        h("thead", {}, h("tr", {}, ["On", "Rule", "Severity", "Alert when", "Threshold", "For", "Clear after"].map((x) => h("th", {}, x)))), tbody)));
       if (state.alertRule && rows[state.alertRule]) {
         const tr = rulesBox.querySelector('tr[data-rule="' + state.alertRule + '"]');
         if (tr) { tr.classList.add("flash"); tr.scrollIntoView({ block: "center" }); }

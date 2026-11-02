@@ -1,5 +1,17 @@
 # Changelog
 
+## [v631] - 2026-11-02 — Configure ▸ Alerts is a grouped, aligned grid
+
+### Changed
+- **The rules on Configure ▸ Alerts are grouped by what they watch** (DNS servers, Gateways, Traffic, Certificates and backups, Host) and laid out in columns that line up from row to row: On, Rule (with what one alert is about, or "This node"), Severity (a coloured pill), Alert when, Threshold (with its unit), For (value rules only) and Clear after. Switching a rule off dims its row. Every control is still a real setting; nothing was added or removed, and the saved settings are unchanged. The Alerts help topic describes the layout.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...` (also with `CGO_ENABLED=0`), `go test -race -count=1 ./...` and `CGO_ENABLED=0 go test -count=1 ./...` (ok), `GOOS=linux GOARCH=…  go build` for amd64, arm64, arm, 386 and riscv64, `node --check` on `app.js` and `help.js`.
+- In Chromium (light and dark) with a mocked `/api/alerts`: the groups and rows draw, nothing scrolls the page sideways at 1280 px, a switched-off rule is dimmed, the severity pill changes colour with the choice, and for an up/down rule the threshold unit follows the "Alert when" choice (checks or min; "of N" shows for "Checks of last").
+
+### Not verified
+- Against a live daemon; saving after editing was not driven in the browser (the code that reads the rows back is unchanged). Narrow windows below about 900 px scroll the table sideways.
+
 ## [v630] - 2026-11-02 — A read-only account no longer sees the BGP and OSPF passwords
 
 ### Fixed

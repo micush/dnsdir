@@ -661,9 +661,7 @@ func (p *Pool) rankedSnap() *rankSnap {
 	sn := &rankSnap{at: now, gen: gen, list: p.Ranked()}
 	sn.lat = make([]float64, len(sn.list))
 	for i, s := range sn.list {
-		s.mu.Lock()
-		sn.lat[i] = s.ewma
-		s.mu.Unlock()
+		sn.lat[i] = s.bandLat()
 	}
 	p.rank.Store(sn)
 	return sn
@@ -731,9 +729,7 @@ func (p *Pool) addBand(out map[*Server]bool, ranked []*Server) {
 	}
 	lat := make([]float64, len(ranked))
 	for i, s := range ranked {
-		s.mu.Lock()
-		lat[i] = s.ewma
-		s.mu.Unlock()
+		lat[i] = s.bandLat()
 	}
 	for _, s := range ranked[:bandCount(lat, p.cfg.SpreadBand)] {
 		out[s] = true

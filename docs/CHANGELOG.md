@@ -1,5 +1,22 @@
 # Changelog
 
+## [v628] - 2026-11-02 — Monitor ▸ Statistics and Monitor ▸ Node: a download icon on each card saves its numbers as CSV
+
+### Added
+- **A small download icon in the header of each card** on Monitor ▸ Statistics (the chart, Query types, Transport, Top Clients, Top Domains, Recent dynamic updates) and Monitor ▸ Node (the CPU, Memory, Disk and Network charts, Filesystems, Network interfaces, LLDP neighbors). It saves that card's numbers as a `.csv` file named after the card (`dnsdir-top-clients.csv`). The file is built in the browser from what the page already holds, so there is no new API route, no CLI flag and no change to the daemon.
+- **What each file holds.** Charts: one row per interval, times in UTC (ISO 8601); the Statistics chart has every line and the Clients count, the Node charts the busiest sample of each interval beside the average for CPU, disk I/O and network, and a gap is an empty cell. The Statistics chart leaves out the interval still filling, as the drawing does. Donuts: every name with its count and share, not folded into "Other". Top lists: every row the daemon returned for the picked range and filter, not just the page on screen. Tables: the same rows as on screen, with raw numbers (bytes, bits per second) instead of the formatted text.
+- A text cell that starts with `=`, `+`, `-` or `@` is written with a leading apostrophe, so a spreadsheet cannot read a client or host name from the network as a formula.
+- `webui/help.js`: a "Download as CSV" paragraph on the Statistics and Node topics. `webui/style.css`: the icon button and its row.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .` (native, with the PAM headers), `go vet ./...` (also with `CGO_ENABLED=0`), `go test -race -count=1 ./...` (ok), `CGO_ENABLED=0 go test -count=1 ./...` (ok), `GOOS=linux GOARCH=…  go build` for amd64, arm64, arm, 386 and riscv64, `node --check` on `app.js` and `help.js`.
+- **In Chromium (light and dark)** with the real `app.js`, `help.js` and `style.css` and the API mocked with realistic data: both pages load without console errors; every icon (6 on Statistics plus the updates card, 7 on Node) downloads a file; the contents were read back (quoting of commas and quotes, the formula guard, a gap in a series, the unfinished interval dropped, the chart's button still working in the QPS view); the icons sit in the card headers in both themes.
+
+### Not verified
+- **Against a live daemon.** The API was mocked from the Go result structs; no daemon was run, and the PAM and authentication checks were not repeated (nothing in `web.go` changed).
+- **The Cluster view** (several nodes added together) and an LLDP card with real data.
+- There is no command-line equivalent: the files are made by the page. `dnsdir --stats` and `--host` already print the same numbers as text.
+
 ## [v627] - 2026-11-01 — Failover is no longer a setting; the archive-path check is a tested function
 
 ### Changed

@@ -173,6 +173,9 @@ func (w *WebServer) op(cmd string, query []string) func(http.ResponseWriter, *ht
 		if (strings.HasPrefix(cmd, "bgp.") || strings.HasPrefix(cmd, "ospf.")) && w.ro(s) {
 			data = redactRouting(data) // the neighbors' and interfaces' passwords stay back from a read-only account
 		}
+		if (cmd == "update.status" || cmd == "update.history") && w.ro(s) {
+			data = redactUpdate(data) // a read-only account is not shown the online repository beyond its host name
+		}
 		writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": data})
 	}
 }

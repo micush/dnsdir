@@ -4212,7 +4212,9 @@
         });
         // the repository "Fetch from online" downloads from: shared, saved when the field is left; empty goes back to the default
         const DEFAULT_REPO = "https://github.com/micush/dnsdir";
-        const repoIn = h("input", { type: "text", value: state.updateRepo ? "https://github.com/" + state.updateRepo : DEFAULT_REPO, spellcheck: "false", autocomplete: "off", "aria-label": "Online repository" });
+        // a read-only account is sent "(hidden)" for the repository and sees its host name only
+        const repoHidden = state.updateRepo === "(hidden)";
+        const repoIn = h("input", { type: "text", value: repoHidden ? "https://github.com" : state.updateRepo ? "https://github.com/" + state.updateRepo : DEFAULT_REPO, readonly: repoHidden, spellcheck: "false", autocomplete: "off", "aria-label": "Online repository" });
         const repoErr = h("span", { class: "notice bad", role: "alert" });
         repoIn.addEventListener("change", async (ev) => {
           ev.stopPropagation(); // not a config edit

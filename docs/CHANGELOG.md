@@ -1,5 +1,17 @@
 # Changelog
 
+## [v633] - 2026-11-02 — A read-only account sees only the host name of the online repository
+
+### Changed
+- **Configure ▸ Settings ▸ Upgrades shows a read-only account only the first part of the repository address**, `https://github.com`, and not the owner and name after it. The node does the hiding: `GET /api/update` sends `(hidden)` for the repository and `GET /api/update/history` leaves out the text of the repository-change events, so the rest of the address is not in anything the account can fetch. The field is read-only for it. A full account sees and edits the address as before.
+
+### Verified
+- `gofmt -l .` (empty), `go vet ./...` (also with `CGO_ENABLED=0`), `go test -race -count=1 ./...` and `CGO_ENABLED=0 go test -count=1 ./...` (ok; one race run clashed on a fixed test port with the other product's suite running at the same time and passed when run alone), `GOOS=linux GOARCH=…  go build` for amd64, arm64, arm, 386 and riscv64, `node --check app.js`.
+- **New test:** `TestReadOnlyDoesNotSeeTheRepositoryPath` (a full account sees the repository on `/api/update` and `/api/update/history`; a read-only one gets `(hidden)` and nothing of the owner or name).
+
+### Not verified
+- Against a live daemon and in a browser. Error messages of "Fetch from online" can still name the address; they were not changed.
+
 ## [v632] - 2026-11-02 — Green servers are preferred to amber ones
 
 ### Changed

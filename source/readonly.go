@@ -128,3 +128,38 @@ func ensureReadGroup(cfg WebConfig) {
 	}
 	infof("web: created the read-only group %q (add people on the Users page)", def)
 }
+
+// hiddenRepo is what a read-only account gets for the online repository; the page shows only "https://github.com".
+const hiddenRepo = "(hidden)"
+
+// redactUpdate takes the online repository out of the upgrade status or history: a read-only account sees the host
+// name of the repository, not the owner and name after it.  The "repo" events of the history name the repository, so
+// their text goes too.  The value given in is not changed.
+func redactUpdate(v any) any {
+	hide := func(evs []UpdateEvent) []UpdateEvent {
+		if evs == nil {
+			return nil
+		}
+		out := append([]UpdateEvent(nil), evs...)
+		for i := range out {
+			if out[i].Kind == "repo" {
+				out[i].Detail = ""
+			}
+		}
+		return out
+	}
+	switch t := v.(type) {
+	case UpdateView:
+		t.Intent.Repo = hiddenRepo
+		t.History = hide(t.History)
+		if t.Last != nil && t.Last.Kind == "repo" {
+			l := *t.Last
+			l.Detail = ""
+			t.Last = &l
+		}
+		return t
+	case []UpdateEvent:
+		return hide(t)
+	}
+	return v
+}

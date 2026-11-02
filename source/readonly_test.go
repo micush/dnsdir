@@ -147,3 +147,39 @@ func TestRedactRoutingTakesSecretsOutOfTheApplyText(t *testing.T) {
 		t.Error("the status itself must not be changed")
 	}
 }
+
+func TestReadOnlyDoesNotSeeTheRepositoryPath(t *testing.T) {
+	e := bgpEnv(t)
+	e.ws.auth = &roAuth{}
+	pol := *e.ws.policy.Load()
+	pol.ReadGroup = "view"
+	e.ws.policy.Store(&pol)
+	if err := e.mg.UpdateRepo("https://github.com/someone/secretrepo", "t"); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.login("alice", "pw"); r.code != 200 {
+		t.Fatalf("alice: %d", r.code)
+	}
+	full := withAuth(e, false)
+	for _, p := range []string{"/api/update", "/api/update/history"} {
+		if r := e.do("GET", p, nil, full); r.code != 200 || !strings.Contains(string(r.raw), "someone/secretrepo") {
+			t.Fatalf("a full account must see the repository on %s: %d %s", p, r.code, r.raw)
+		}
+	}
+	if r := e.login("bob", "pw"); r.code != 200 || r.body["read_only"] != true {
+		t.Fatalf("bob: %d %v", r.code, r.body)
+	}
+	ro := withAuth(e, false)
+	for _, p := range []string{"/api/update", "/api/update/history"} {
+		r := e.do("GET", p, nil, ro)
+		if r.code != 200 {
+			t.Fatalf("GET %s as read-only: %d %s (the page must still load)", p, r.code, r.raw)
+		}
+		if strings.Contains(string(r.raw), "someone") || strings.Contains(string(r.raw), "secretrepo") {
+			t.Errorf("GET %s as read-only shows the repository: %s", p, r.raw)
+		}
+	}
+	if r := e.do("GET", "/api/update", nil, ro); !strings.Contains(string(r.raw), `"repo":"(hidden)"`) {
+		t.Errorf("the repository must read (hidden): %s", r.raw)
+	}
+}

@@ -1,5 +1,17 @@
 # Changelog
 
+## [v632] - 2026-11-02 — Green servers are preferred to amber ones
+
+### Changed
+- **A server that is up but has a probe domain failing (amber on the Topology page) is now tried only after the green servers**, however fast it is. Before, the ranking looked at latency alone, so a fast amber server could take the first try, or a turn at the front of the spread band, while healthy servers waited. Now the order is green servers by latency, then amber ones by latency; with spread on, an amber server is never counted as within the band of a green one. When no green server is up, the amber ones are used as before. Nothing else about down/up is changed (a server is still down only when the **down at** share of its tests fail), and fallback servers still wait for every normal server to be down. Applies to ordinary names and to the zone servers of conditional forwarding alike. The help topic says so.
+
+### Verified
+- `gofmt -l .` (empty), `go vet ./...` (also with `CGO_ENABLED=0`), `go test -race -count=1 ./...` (ok), `CGO_ENABLED=0 go test -count=1 ./...` (ok), `GOOS=linux GOARCH=…  go build` for amd64, arm64, arm, 386 and riscv64.
+- **New test:** `TestAmberServerComesAfterGreen` (a faster amber server is last with spread off and takes no turns with spread on; with only amber servers up they are ranked by latency).
+
+### Not verified
+- Against a live daemon and real servers; the tests drive a pool with set latencies and failing probe results.
+
 ## [v631] - 2026-11-02 — Configure ▸ Alerts is a grouped, aligned grid
 
 ### Changed

@@ -1,10 +1,10 @@
 package main
 
 import (
-	"math"
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -351,10 +351,7 @@ func (p *Pool) scopedSnap(scope string, keep func(*Server) bool, fallbacks bool)
 		}
 	}
 	sn := &rankSnap{at: now, gen: gen, list: p.rankedWhere(keep, fallbacks, scope)}
-	sn.lat = make([]float64, len(sn.list))
-	for i, s := range sn.list {
-		sn.lat[i] = s.bandLat()
-	}
+	sn.lat = bandLats(sn.list)
 	p.fwd.snaps.Store(scope, sn)
 	return sn
 }
@@ -626,13 +623,23 @@ func (s *Server) amberLocked() bool {
 	return false
 }
 
-// bandLat is the latency the spread band is worked out from: the server's average, or infinity for an amber server, so
-// that it never counts as being within the band of a green one.
-func (s *Server) bandLat() float64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.amberLocked() {
-		return math.Inf(1)
+// bandLats are the latencies the spread band is worked out from, for ranked (fastest first, green servers ahead of
+// amber ones): each server's average, but infinity for an amber server while a green one leads the list, so that an
+// amber server never counts as being within the band of a green one.
+func bandLats(ranked []*Server) []float64 {
+	lat := make([]float64, len(ranked))
+	amber := make([]bool, len(ranked))
+	for i, s := range ranked {
+		s.mu.Lock()
+		lat[i], amber[i] = s.ewma, s.amberLocked()
+		s.mu.Unlock()
 	}
-	return s.ewma
+	if len(ranked) > 0 && !amber[0] {
+		for i := range lat {
+			if amber[i] {
+				lat[i] = math.Inf(1)
+			}
+		}
+	}
+	return lat
 }

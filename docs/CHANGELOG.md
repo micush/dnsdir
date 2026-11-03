@@ -1,5 +1,22 @@
 # Changelog
 
+## [v634] - 2026-11-02 — Copy anycast addresses and servers to another gateway, and one Add menu on the gateway
+
+### Added
+- **Topology: right-click an anycast address ▸ Copy ▸ Anycast address / All anycast addresses, then right-click another gateway ▸ Paste ▸ Anycast address / All anycast addresses.** *All* is every anycast address on the gateway the pill is on. They are added to the other gateway's own list and the first is selected; an address that gateway already has, or that is some gateway's shared address, is left out. Copy also puts them on the system clipboard as plain text. Paste is greyed out, with the reason as its tooltip, on the gateway they were copied from, when nothing is left to add, and before anything was copied. A pause is not copied. *Paste* on a gateway offers *Server*, *Anycast address* and *All anycast addresses*. The Topology help says so.
+
+### Changed
+- **Topology: the gateway's right-click menu has one *Add* item** with *Anycast address*, *DNS server* and *Node* (one entry for each node that was removed from the gateway; greyed out, with the reason, when none was) in place of the separate *Add* items and *Add node*. The help says so.
+- **Topology: right-click a server ▸ Copy ▸ All servers, then right-click another gateway ▸ Paste ▸ All servers.** Every server of the gateway is copied with its name, zone lists, test domains and certificate settings; on the other gateway the ones it does not have yet are added as they are and the ones it has are left alone (no form opens). Paste ▸ All servers is greyed out, with the reason, before anything was copied, on the gateway they came from or one that has them all, and when a zone list one of them uses is gone. *Paste* offers *All servers* on a server's menu too.
+- **Configure ▸ Alerts: "Checks of last" fits on one line** (`3 of 5 checks`); the number boxes in the rules grid lose their spinner arrows and are narrower, and the Threshold column is wider.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...` (also with `CGO_ENABLED=0`), `go test -race -count=1 ./...` and `CGO_ENABLED=0 go test -count=1 ./...` (ok), `GOOS=linux GOARCH=…  go build` for amd64, arm64, arm, 386 and riscv64, `node --check` on `app.js` and `help.js`.
+- **In Chromium** (light and dark, mocked daemon, two gateways): the gateway menu offers *Add* ▸ …, *Copy* / *Paste* ▸ *Server*, *All servers*, *Anycast address*, *All anycast addresses* with the greyed-out reasons; a paste on the other gateway adds the address(es) or server(s) and the config saved with them; *All anycast addresses* puts the list on the system clipboard; the Alerts grid shows *3 of 5 checks* on one line.
+
+### Not verified
+- Against a live daemon; the browser checks used a mocked daemon. The *Node* entry of *Add* was only seen greyed out (no node was removed from a gateway in the test).
+
 ## [v633] - 2026-11-02 — A read-only account sees only the host name of the online repository
 
 ### Changed

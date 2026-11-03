@@ -747,11 +747,11 @@ table.arules .w-2_4rem { width: 2.4rem; } table.arules .w-8_6rem { width: 8.6rem
 table.arules .w-10_5rem { width: 10.5rem; } table.arules .w-6rem { width: 6rem; } table.arules .w-11rem { width: 11rem; }
 table.arules td.arule-on { text-align: center; }
 table.arules td input[type=checkbox] { width: auto; margin: 0; }
-table.arules td input[type=number] { width: 4.6rem; min-width: 0; flex: none; text-align: right; }
+table.arules td input[type=number] { width: 3.6rem; min-width: 0; flex: none; text-align: right; -moz-appearance: textfield; appearance: textfield; }
+table.arules td input[type=number]::-webkit-inner-spin-button, table.arules td input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 table.arules td select { width: 100%; min-width: 0; max-width: 100%; }
 table.arules td select { padding-left: .5rem; padding-right: .3rem; font-size: .88rem; }
 table.arules .arule-c select { width: auto; flex: 1 1 auto; }
-table.arules td:nth-child(5) .arule-c { flex-wrap: wrap; row-gap: .3rem; }
 table.arules .arule-c { display: flex; flex-wrap: nowrap; align-items: center; gap: .4rem; white-space: nowrap; }
 table.arules .arule-u, table.arules .arule-dir { font-size: .82rem; color: var(--muted); }
 table.arules td:nth-child(2) { white-space: normal; overflow-wrap: anywhere; }

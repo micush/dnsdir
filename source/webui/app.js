@@ -1342,41 +1342,66 @@
       window.removeEventListener("blur", closeMenu);
       window.removeEventListener("resize", closeMenu);
     }
-    let subEl = null;
+    let subEl = null, sub2El = null;   // the second menu, and a third one beside it for a sub-item that has sub-items of its own
+    function closeSub2() {
+      if (sub2El) { sub2El.remove(); sub2El = null; }
+      if (subEl) subEl.querySelectorAll("button.open").forEach((b) => b.classList.remove("open"));
+    }
     function closeSub() {
+      if (sub2El) { sub2El.remove(); sub2El = null; }
       if (subEl) { subEl.remove(); subEl = null; }
       // the parent item's "open" highlight must go with its submenu, or it stays lit after the pointer moves on
       if (menuEl) menuEl.querySelectorAll("button.open").forEach((b) => b.classList.remove("open"));
     }
-    const outsideClick = (e) => { if (!(menuEl && menuEl.contains(e.target)) && !(subEl && subEl.contains(e.target))) closeMenu(); };
+    const outsideClick = (e) => { if (!(menuEl && menuEl.contains(e.target)) && !(subEl && subEl.contains(e.target)) && !(sub2El && sub2El.contains(e.target))) closeMenu(); };
     function menuKey(e) {
       if (!menuEl) return;
       if (e.key === "Escape") { e.preventDefault(); closeMenu(); return; }
       const cur = document.activeElement;
       if (e.key === "ArrowRight" && cur && cur.dataset && cur.dataset.sub) { e.preventDefault(); cur.click(); return; }
+      if (e.key === "ArrowLeft" && sub2El && sub2El.contains(cur)) { e.preventDefault(); const p = subEl.querySelector("button.open"); closeSub2(); if (p) p.focus(); return; }
       if (e.key === "ArrowLeft" && subEl && subEl.contains(cur)) { e.preventDefault(); const p = menuEl.querySelector("button.open"); closeSub(); if (p) p.focus(); return; }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        const box = subEl && subEl.contains(cur) ? subEl : menuEl;
+        const box = sub2El && sub2El.contains(cur) ? sub2El : subEl && subEl.contains(cur) ? subEl : menuEl;
         const items = [...box.querySelectorAll("button")];
         const i = items.indexOf(cur);
         items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
       }
     }
     // items: [label, handler, "danger"?, subitems?]. An item with subitems opens a second menu beside the first
-    // when the pointer rests on it (or on click / the right arrow key); the sub-items are [label, handler, why-not?] (a reason greys one out).
+    // when the pointer rests on it (or on click / the right arrow key); the sub-items are [label, handler, why-not?, subitems?] (a reason greys one out; a sub-item with subitems opens a third menu).
     let menuAt = { x: 0, y: 0 };
     function openMenu(e, items) {
       e.preventDefault(); e.stopPropagation();
       closeMenu();
       menuAt = { x: e.clientX || 0, y: e.clientY || 0 };
+      const openSub2 = (btn, subs2) => {
+        closeSub2();
+        btn.classList.add("open");
+        sub2El = h("div", { class: "cv-menu cv-sub", role: "menu" }, subs2.map(([label, fn, off]) => off
+          ? h("button", { type: "button", role: "menuitem", disabled: true, title: off }, plain(label))
+          : h("button", { type: "button", role: "menuitem", onclick: () => { closeMenu(); fn(); } }, plain(label))));
+        root.append(sub2El);
+        const pr = subEl.getBoundingClientRect(), br = btn.getBoundingClientRect(), sr = sub2El.getBoundingClientRect();
+        const left = pr.right + sr.width + 4 <= window.innerWidth ? pr.right - 2 : Math.max(4, pr.left - sr.width + 2);
+        sub2El.style.left = left + "px";
+        sub2El.style.top = Math.max(4, Math.min(br.top - 4, window.innerHeight - sr.height - 4)) + "px";
+      };
       const openSub = (btn, subs) => {
         closeSub();
         menuEl.querySelectorAll("button.open").forEach((b) => b.classList.remove("open"));
         btn.classList.add("open");
-        subEl = h("div", { class: "cv-menu cv-sub", role: "menu" }, subs.map(([label, fn, off]) => off
-          ? h("button", { type: "button", role: "menuitem", disabled: true, title: off }, plain(label))
-          : h("button", { type: "button", role: "menuitem", onclick: () => { closeMenu(); fn(); } }, plain(label))));
+        subEl = h("div", { class: "cv-menu cv-sub", role: "menu" }, subs.map(([label, fn, off, subs2]) => {
+          if (subs2 && !off) {
+            const b = h("button", { type: "button", role: "menuitem", class: "has-sub", "aria-haspopup": "true", "data-sub": "1", onclick: () => { openSub2(b, subs2); sub2El.querySelector("button").focus(); } }, plain(label), h("span", { class: "arrow" }, "▸"));
+            b.addEventListener("mouseenter", () => openSub2(b, subs2));
+            return b;
+          }
+          return off
+            ? h("button", { type: "button", role: "menuitem", disabled: true, title: off, onmouseenter: closeSub2 }, plain(label))
+            : h("button", { type: "button", role: "menuitem", onmouseenter: closeSub2, onclick: () => { closeMenu(); fn(); } }, plain(label));
+        }));
         root.append(subEl);
         const pr = menuEl.getBoundingClientRect(), br = btn.getBoundingClientRect(), sr = subEl.getBoundingClientRect();
         const left = pr.right + sr.width + 4 <= window.innerWidth ? pr.right - 2 : Math.max(4, pr.left - sr.width + 2);
@@ -1806,7 +1831,7 @@
     };
     const addNodeSubs = (g) => {
       const l = removedNodes(g);
-      return l.length ? l.map((r) => ["Node: " + r.label, () => quick(() => toggleIn(g, "excluded_nodes", r.id, false))]) : [["Node", null, "Every node already serves this gateway"]];
+      return l.length ? [["Node", null, "", l.map((r) => [r.label, () => quick(() => toggleIn(g, "excluded_nodes", r.id, false))])]] : [["Node", null, "Every node already serves this gateway"]];
     };
     // The last node in service cannot be paused: the item is greyed out, with the reason as its tooltip.  A node that is not answering or
     // is paused is out of service.

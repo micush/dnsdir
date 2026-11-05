@@ -44,8 +44,8 @@ A new install has no gateways. Topology is the first page.
 2. Fill in the form:
    - **Group number**: leave the suggestion (1).
    - **Name (optional)**: a label such as "Office DNS".
-   - **Shared IPv4 address / prefix**: the free address with its prefix, for example `192.168.1.53/24`.
-   - **Network interface**: the interface that is on that network (for example `eth0`).
+   - **IPv4 address / prefix**: the free address with its prefix, for example `192.168.1.53/24`.
+   - **Listening interface**: the interface that is on that network (for example `eth0`).
 3. Save. A **circle** appears: that is the gateway. It is amber at first because it has no DNS server yet. Everything you change is saved at once; there is no Apply button.
 4. **Right-click the circle** and choose **Add DNS server…**
    - **IP address or host name**: for example `8.8.8.8` (add `:port` for a port other than 53, or `tls://host` for DNS over TLS).
@@ -74,7 +74,7 @@ Install AnyName on a second machine the same way (step 1 and 2), then:
 
 1. On the first node: **Operate ▸ Cluster** ▸ **Create join code** and copy it. It works once and expires in an hour.
 2. On the new node: **Operate ▸ Cluster** ▸ paste the code ▸ **Join**.
-3. The new node takes over the shared settings (the drawing); only its interface, priority and similar per-node settings stay local. Check the **Network interface** for the gateway on that node (Topology ▸ right-click the circle ▸ **Edit gateway…**).
+3. The new node takes over the shared settings (the drawing); only its interface, priority and similar per-node settings stay local. Check the **Listening interface** for the gateway on that node (Topology ▸ right-click the circle ▸ **Edit gateway…**).
 
 Both nodes now answer on the shared address and one of them is the controller (see **Monitor ▸ Gateways**). Open TCP port 53854 between the nodes. With a cluster, a drop-down at the top right lets you look at and configure any node from the one you are logged in to.
 

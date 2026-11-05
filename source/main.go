@@ -156,6 +156,7 @@ the web GUI):
                    --cluster-delete ADDR  --cluster-unremove ADDR  --cluster-leave  --cluster-sync
                    (GUI: the Node menu, top right, configures any member)
   Block lists      --block-status  --block-update ID|all  --block-test NAME
+                   --block-pause  --block-resume   (stop blocking on every node for 1 hour and empty the answer cache; or end the pause)
                    (lists, their answer, and the always-allow names are set in the GUI:
                    Configure > DNS proxy > Resolution > Block Lists)
   Upgrade          --update-status  --update-history  --update-upload FILE

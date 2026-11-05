@@ -320,10 +320,14 @@ type BlockManager struct {
 	built   string          // the lists (and addresses) the set in memory was built from
 
 	snap atomic.Pointer[blockSnap]
-	kick chan struct{}
-	stop chan struct{}
-	once sync.Once
-	done sync.WaitGroup
+
+	pausedUntil atomic.Int64 // unix time (seconds) until which no list blocks; 0 = blocking
+	pauseMu     sync.Mutex
+	pauseTimer  *time.Timer // ends the pause (and flushes the cache) when it runs out
+	kick        chan struct{}
+	stop        chan struct{}
+	once        sync.Once
+	done        sync.WaitGroup
 }
 
 // theBlocks is this node's block list manager, read by the DNS pools.
@@ -724,6 +728,9 @@ func blocksLoaded() bool {
 
 // Lookup says which list (its key) has name, a lower case name without the final dot.
 func (m *BlockManager) Lookup(name string) (string, bool) {
+	if m.Paused() {
+		return "", false
+	}
 	s := m.snap.Load()
 	if s == nil || len(s.names) == 0 {
 		return "", false
@@ -750,10 +757,11 @@ type BlockStatus struct {
 
 // BlockReport is what the page and the command line show.
 type BlockReport struct {
-	Catalog []BlockCatalogItem `json:"catalog"`
-	Lists   []BlockStatus      `json:"lists"`
-	Domains int                `json:"domains"` // different domains in use, all lists together
-	Error   string             `json:"error,omitempty"`
+	Catalog     []BlockCatalogItem `json:"catalog"`
+	Lists       []BlockStatus      `json:"lists"`
+	Domains     int                `json:"domains"`                // different domains in use, all lists together
+	PausedUntil int64              `json:"paused_until,omitempty"` // unix time blocking resumes; absent when it is not paused
+	Error       string             `json:"error,omitempty"`
 }
 
 // Report is the state of every list in use.
@@ -770,6 +778,9 @@ func (m *BlockManager) Report() BlockReport {
 		}
 	}
 	rep.Error = m.loadErr
+	if t := m.PausedUntil(); !t.IsZero() {
+		rep.PausedUntil = t.Unix()
+	}
 	for _, r := range m.refs {
 		k := r.key()
 		st := BlockStatus{ID: k, Name: r.title(), URL: r.address(), Custom: r.ID == "", Loaded: loaded[k]}

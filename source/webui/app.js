@@ -1917,12 +1917,12 @@
       const base = g || groups()[0];
       form(g ? "Edit gateway" : "New gateway", [
         { k: "id", l: "Group number", v: String(g ? g.group_id : nextGroupId()), disabled: !!g },
-        { k: "name", l: "Name (optional)", v: g ? (g.name || "") : "", ph: "e.g. Office DNS" },
-        { k: "vip4", l: "Shared IPv4 address / prefix", v: g ? g.vip4 : "", ph: "10.0.0.1/24" },
-        { k: "vip6", l: "Shared IPv6 address / prefix (optional)", v: g ? g.vip6 : "", ph: "2001:db8::1/64" },
-        { k: "more4", l: "More IPv4 addresses (same subnet, optional)", v: g ? (g.more_vip4 || []).join(", ") : "", ph: "10.0.0.2, 10.0.0.3" },
-        { k: "more6", l: "More IPv6 addresses (same subnet, optional)", v: g ? (g.more_vip6 || []).join(", ") : "", ph: "2001:db8::2" },
-        { k: "iface", l: "Network interface", v: g ? g.interface : (base ? base.interface : "eth0") },
+        { k: "name", l: "Name", v: g ? (g.name || "") : "", ph: "optional, e.g. Core" },
+        { k: "vip4", l: "IPv4 address / prefix", v: g ? g.vip4 : "", ph: "10.0.0.1/24" },
+        { k: "vip6", l: "IPv6 address / prefix", v: g ? g.vip6 : "", ph: "optional, 2001:db8::1/64" },
+        { k: "more4", l: "More IPv4 addresses", v: g ? (g.more_vip4 || []).join(", ") : "", ph: "optional, same subnet: 10.0.0.2, 10.0.0.3" },
+        { k: "more6", l: "More IPv6 addresses", v: g ? (g.more_vip6 || []).join(", ") : "", ph: "optional, same subnet: 2001:db8::2" },
+        { k: "iface", l: "Listening interface", v: g ? g.interface : (base ? base.interface : "eth0") },
         { k: "ecs", l: "Tell the DNS servers which network the client is on (ECS)", v: ecsOn(g) ? "on" : "off", options: ["off", "on"] },
         { k: "fb", l: "Fallback DNS servers (optional)", v: fallbackOf(g).join(", "), ph: "e.g. 1.1.1.1, 9.9.9.9" },
         { k: "lbmode", l: "Load balancing", v: lbNow(g).own ? LB_OWN : LB_FOLLOW, options: [LB_FOLLOW, LB_OWN], initOn: true, on: (els) => showLB(els) },
@@ -2500,7 +2500,7 @@
     { shared: true, k: "policy", l: "Policy rows", t: "policy", wide: true },
     { section: "Conditional Forwarding" },
     { shared: true, k: "forward_lists", l: "Zone lists", t: "zones", wide: true },
-    { section: "Block Lists", note: "Tick the lists to block. Every node downloads its own copy (and keeps the last good one if a download fails). A listed domain and every name below it gets the answer chosen below. Order for a query: Always allow, then the policy rows (a row that blocks is skipped for an allowed name), then the block lists, then the servers." },
+    { section: "Block Lists", hdr: "blockpause", note: "Tick the lists to block. Every node downloads its own copy (and keeps the last good one if a download fails). A listed domain and every name below it gets the answer chosen below. Order for a query: Always allow, then the policy rows (a row that blocks is skipped for an allowed name), then the block lists, then the servers." },
     { shared: true, k: "block_lists", l: "Lists", t: "blocklists", wide: true },
     { shared: true, k: "block_action", l: "Blocked answer", t: "select", options: ["null", "nxdomain", "nodata", "refused"], hint: "null = 0.0.0.0 and ::, the default. nxdomain = the name does not exist. nodata = no records. refused = REFUSED." },
     { shared: true, k: "block_update_hours", l: "Update every (hours)", t: "int", min: 0, max: 720, hint: "0 = 24" },
@@ -2930,6 +2930,38 @@
   function blockVerdictText(t) {
     if (t.allowed) return t.list ? t.name + " is on the Always allow list, so " + t.title + " does not block it." : t.name + " is on the Always allow list; no block list has it.";
     return t.list ? t.name + " is blocked by " + t.title + " (answer: " + t.action + ")." : t.name + " is on no block list.";
+  }
+  // The button in the Block Lists header: Pause stops every list blocking on every node for an hour and empties the answer caches;
+  // while paused it reads Resume (the time blocking comes back is its tooltip).  The state is read from /api/blocklists.
+  function blockPauseButton() {
+    let until = 0, busy = false, err = "", timer = 0;
+    const btn = h("button", { type: "button", class: "btn hdr" }, "Pause");
+    const paint = () => {
+      btn.disabled = busy;
+      btn.textContent = until ? "Resume" : "Pause";
+      btn.title = err || (until ? "Paused until " + new Date(until * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "");
+    };
+    const arm = () => {
+      clearTimeout(timer);
+      if (until) timer = setTimeout(load, Math.max(1000, until * 1000 - Date.now() + 1500));
+    };
+    async function load() {
+      if (!btn.isConnected && timer) return;
+      try { until = Number(((await api("GET", "/api/blocklists")).data || {}).paused_until || 0); } catch (e) { /* the editor below shows read errors */ }
+      if (until * 1000 <= Date.now()) until = 0;
+      paint(); arm();
+    }
+    btn.addEventListener("click", async () => {
+      busy = true; err = ""; paint();
+      try {
+        const r = (await api("POST", "/api/blocklists/pause", until ? { paused: false } : { paused: true, seconds: 3600 })).data || {};
+        until = r.paused ? Number(r.paused_until || 0) : 0;
+      } catch (e) { err = e.message; }
+      busy = false; paint(); arm();
+    });
+    paint();
+    load();
+    return btn;
   }
   function blockListsEditor(refs) {
     const sel = new Set(), urls = {}, customs = [];
@@ -3615,7 +3647,7 @@
           continue;
         }
         grid = h("div", { class: f.cols === 3 ? "grid c3" : "grid" });
-        wrap.append(h("div", { class: "card" }, h("header", {}, h("h2", {}, tc(f.section))),
+        wrap.append(h("div", { class: "card" }, f.hdr === "blockpause" ? h("header", { class: "bar" }, h("h2", {}, tc(f.section)), h("span", { class: "grow" }), blockPauseButton()) : h("header", {}, h("h2", {}, tc(f.section))),
           h("div", { class: "body" }, f.note ? h("p", { class: "hint" }, f.note) : null, grid)));
         continue;
       }

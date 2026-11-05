@@ -32,6 +32,8 @@ var mcpRoutes = []apiRoute{
 	{Method: "PUT", Path: "/api/bgp"},
 	{Method: "POST", Path: "/api/bgp/operate"},
 	{Method: "GET", Path: "/api/blocklists"},
+	{Method: "POST", Path: "/api/blocklists/pause"},
+	{Method: "POST", Path: "/api/blocklists/pause-node"},
 	{Method: "POST", Path: "/api/blocklists/update"},
 	{Method: "GET", Path: "/api/blocktest", Query: []string{"name"}},
 	{Method: "POST", Path: "/api/cache/clear"},

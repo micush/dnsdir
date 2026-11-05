@@ -33,7 +33,7 @@ type cliFlags struct {
 	userAdd, userPasswd, userExpiry, userDel, userGrant, userRevoke, expires, hostname                                                                                                                                                                           *string
 	power, powerAt                                                                                                                                                                                                                                               *string
 	powerIn                                                                                                                                                                                                                                                      *int
-	blockStatus, bgp, bgpDisable, bgpEnable, logShow, statsShow, statsClear, cacheClear, hostShow, dnsUpdates, nodePause, nodeResume, nodeStatus, allNodes, captureList                                                                                          *bool
+	blockStatus, blockPause, blockResume, bgp, bgpDisable, bgpEnable, logShow, statsShow, statsClear, cacheClear, hostShow, dnsUpdates, nodePause, nodeResume, nodeStatus, allNodes, captureList                                                                 *bool
 	logMin, logGrep, logSince, logLines, statsRange, statsRcode, statsClient, statsDomain, statsProto, whoisName, scanAddr, pingAddr, traceAddr, lookupAddr, cacheFlush, dnsLookup, hostRange, captureIface, captureSecs, captureFilter, captureFile, tshootFile *string
 	syslog, syslogOff, syslogOn, syslogTest, syslogInsecure                                                                                                                                                                                                      *bool
 	lldp, lldpOn, lldpOff                                                                                                                                                                                                                                        *bool
@@ -70,7 +70,7 @@ func registerCLIFlags(fs *flag.FlagSet) *cliFlags {
 		canvas: b("canvas"), vmacTest: b("test-vmac"), tshoot: b("tshoot"), tshootCapture: b("tshoot-capture"), tshootFile: s("tshoot-file"), realMACs: s("real-macs"), canvasAdd: s("canvas-add"), canvasDel: s("canvas-del"),
 		canvasSet: s("canvas-set"), canvasMove: s("canvas-move"), pos: fs.Int("to", 0, ""), canvasPause: s("canvas-pause"), canvasResume: s("canvas-resume"), vip6: s("vip6"), ecs: s("ecs"), label: s("label"), anycast: s("anycast"), address: s("address"), scope: s("scope"), node: s("node"),
 		ecsV4: fs.Int("ecs-v4", 0, ""), ecsV6: fs.Int("ecs-v6", 0, ""),
-		serverType: s("server-type"), serverLists: s("lists"), certCheck: s("cert"), fwdRoute: s("fwd-route"), blockUpdate: s("block-update"), blockTest: s("block-test"), blockStatus: b("block-status"),
+		serverType: s("server-type"), serverLists: s("lists"), certCheck: s("cert"), fwdRoute: s("fwd-route"), blockUpdate: s("block-update"), blockTest: s("block-test"), blockStatus: b("block-status"), blockPause: b("block-pause"), blockResume: b("block-resume"),
 		serverStats: s("server-stats"), gatewayStats: s("gateway-stats"), spread: s("spread"), lbMode: s("lb"), spreadBand: fs.Int("spread-band", 0, ""), downPercent: fs.Int("down-percent", 0, ""),
 		failThreshold: fs.Int("fail-threshold", 0, ""), maxAttempts: fs.Int("max-attempts", 0, ""), latencyAlpha: fs.Float64("latency-alpha", 0, ""),
 		vip: s("vip"), ifname: s("interface"), server: s("server"), name: s("name"), qtype: s("type"),
@@ -496,6 +496,13 @@ func (f *cliFlags) run(sock string) bool {
 		var r BlockReport
 		decode(op(sock, "blocklists.status", nil), &r)
 		printBlockReport(r)
+	case *f.blockPause || *f.blockResume:
+		var r struct {
+			PausedUntil int64 `json:"paused_until"`
+			Cleared     int   `json:"cleared"`
+		}
+		decode(op(sock, "blocklists.pause.cluster", map[string]any{"paused": *f.blockPause}), &r)
+		fmt.Printf("%s on every node; %d cached answers dropped\n", blockPauseText(r.PausedUntil), r.Cleared)
 	case *f.blockUpdate != "":
 		id := *f.blockUpdate
 		if id == "all" {

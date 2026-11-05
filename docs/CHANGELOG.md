@@ -1,5 +1,23 @@
 # Changelog
 
+## [v636] - 2026-11-05 — Pause blocking for an hour
+
+### Added
+- **Configure ▸ DNS ▸ Resolution ▸ Block Lists: a *Pause* button at the top right of the card.** It stops every block list blocking on every node of the cluster for an hour and empties the answer cache of every node. While paused the button reads *Resume* (the time blocking comes back is its tooltip); pressing it puts blocking back at once. When the hour is up blocking comes back by itself and each node empties its answer cache again (answers fetched while paused for names a list has must not outlive the pause). A failure leaves the button as it was (the reason is its tooltip); no text is added to the card.
+- **Command line: `--block-pause` and `--block-resume`** (op `blocklists.pause.cluster`; routes `POST /api/blocklists/pause` for the cluster and `/api/blocklists/pause-node` for one node, both under the already relayable `/api/blocklists` prefix; `seconds` is optional, 1 to 86400, default 3600). The Block Lists help, the README and `--help` say so.
+- The block report (`/api/blocklists`, `--block-status`) carries `paused_until` while a pause runs.
+
+### Changed
+- **Topology: the New gateway / Edit gateway form's labels** read *Name*, *IPv4 address / prefix*, *IPv6 address / prefix*, *More IPv4 addresses*, *More IPv6 addresses* and *Listening interface*; the words *optional* and *same subnet:* moved into the placeholders (`optional, e.g. Core`, `optional, 2001:db8::1/64`, `optional, same subnet: 10.0.0.2, 10.0.0.3`). The Gateway help and QUICKSTART use the same labels.
+- Only the block lists are paused. Policy rows that block, the Always allow list, forwarding and the cache settings are untouched. The pause is held in memory on each node: a restart puts blocking back (the safe default). Devices that were already given a blocked answer may keep it for *Blocked answer cache* seconds; DNS cannot recall that.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...`, `go test -race -count=1 ./...` (new `blockpause_test.go`: lookups stop while paused and return on resume, the pause ends by itself and calls back, a replaced or resumed pause never calls back, length limits, the cache is emptied on pause and on resume but not when resuming while not paused), `CGO_ENABLED=0 go vet ./...` and `CGO_ENABLED=0 go test -count=1 ./...`, `GOOS=linux GOARCH=… go build` for amd64, arm64, arm, 386 and riscv64, `node --check` on `app.js` and `help.js`; `apiroutes.go` regenerated. (A first full run failed only in my new test, which assumed no block manager was set globally; fixed and re-run.)
+- **In Chromium** (light and dark, mocked daemon): the button sits in the card header; pressing it posts `{"paused":true,"seconds":3600}` with the CSRF token and turns into *Resume*; pressing that posts `{"paused":false}` and restores *Pause*; a 500 leaves the button as it was, with no text beside it.
+
+### Not verified
+- Against a live daemon or a real cluster: the node-to-node relay of `pause-node` and a pause racing a config reload were exercised only by unit tests, not by running two daemons. The Power/PAM/cluster live checks of the release process were not run for this change.
+
 ## [v635] - 2026-11-03 — Add ▸ Node lists the nodes in a menu of its own
 
 ### Fixed

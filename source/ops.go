@@ -603,6 +603,15 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 			return nil, err
 		}
 		return map[string]any{"ok": true}, nil
+	// pause blocking for a while (an hour unless "seconds" says otherwise) or put it back; empties the answer cache; every node (pause-node: this one only)
+	case "blocklists.pause.cluster":
+		return m.blockPauseCluster(a.Paused, a.Seconds, actor)
+	case "blocklists.pause":
+		d, err := blockPauseSeconds(a.Seconds)
+		if err != nil {
+			return nil, err
+		}
+		return m.blockPauseNode(a.Paused, d, actor)
 	case "blocklists.test":
 		n := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(a.QName), "."))
 		if n == "" {

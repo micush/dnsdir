@@ -1923,7 +1923,7 @@
         { k: "more4", l: "More IPv4 addresses", v: g ? (g.more_vip4 || []).join(", ") : "", ph: "optional, same subnet: 10.0.0.2, 10.0.0.3" },
         { k: "more6", l: "More IPv6 addresses", v: g ? (g.more_vip6 || []).join(", ") : "", ph: "optional, same subnet: 2001:db8::2" },
         { k: "iface", l: "Listening interface", v: g ? g.interface : (base ? base.interface : "eth0") },
-        { k: "ecs", l: "Tell the DNS servers which network the client is on (ECS)", v: ecsOn(g) ? "on" : "off", options: ["off", "on"] },
+        { k: "ecs", l: "DNS ECS", v: ecsOn(g) ? "on" : "off", options: ["off", "on"] },
         { k: "fb", l: "Fallback DNS servers (optional)", v: fallbackOf(g).join(", "), ph: "e.g. 1.1.1.1, 9.9.9.9" },
         { k: "lbmode", l: "Load balancing", v: lbNow(g).own ? LB_OWN : LB_FOLLOW, options: [LB_FOLLOW, LB_OWN], initOn: true, on: (els) => showLB(els) },
         { k: "lb_spread", l: "Spread queries over servers of similar speed", v: lbNow(g).lb.spread ? "on" : "off", options: ["on", "off"] },

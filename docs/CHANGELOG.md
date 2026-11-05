@@ -1,5 +1,16 @@
 # Changelog
 
+## [v637] - 2026-11-05 — New gateway form: "DNS ECS"
+
+### Changed
+- **Topology: the gateway form's *Tell the DNS servers which network the client is on (ECS)* is now *DNS ECS*** (New and Edit gateway; the help's field entry too).
+
+### Verified
+- `gofmt -l .`, `go build -o /dev/null .`, `go vet ./...`, `go test -count=1 ./...` (ok), `node --check` on `app.js` and `help.js`.
+
+### Not verified
+- Not looked at in a browser; no Go code changed.
+
 ## [v636] - 2026-11-05 — Pause blocking for an hour
 
 ### Added

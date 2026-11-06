@@ -711,6 +711,7 @@ table.zones.one th:first-child, table.zones.one td.grip { width: 6rem; }
 
 /* the tables for lists (rowTable) are as wide as their content needs, not the whole card; the number column holds a few digits */
 .policy-box.rows { max-width: 42rem; }
+.policy-box.rows.wide { max-width: 63rem; }
 table.policy.rows { width: 100%; min-width: 0; }
 table.policy.rows th:nth-child(1), table.policy.rows td.grip, table.zones.one.rows th:first-child, table.zones.one.rows td.grip { width: 3.2rem; }
 table.policy.rows th:nth-child(n+2) { width: auto; }
@@ -791,5 +792,14 @@ table.arules tr.flash { outline: 2px solid var(--accent); outline-offset: -2px; 
 .bk-restore label.check { margin-left: .2rem; }
 table.policy.mcpkeytab td.ctext { padding: .45rem .6rem; font-size: .85rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 table.policy.mcpkeytab th:nth-child(3) { width: 5.5rem; }
-.keyshow { display: flex; align-items: center; gap: .6rem; margin: .3rem 0 .8rem; }
-.keyshow code { flex: 1; min-width: 0; word-break: break-all; padding: .45rem .6rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; font-size: .85rem; user-select: all; }
+/* a password box with its Show/Hide button */
+table.policy.rows.mcpkeytab th:nth-child(2) { width: 11rem; }
+table.policy.rows.mcpkeytab th:nth-child(3) { width: 5.5rem; }
+table.policy.rows.mcpkeytab th:nth-child(4) { width: 8rem; }
+table.policy.rows.mcpkeytab th:nth-child(5) { width: auto; }
+table.mcpkeytab td input[readonly] { text-overflow: ellipsis; font-family: var(--mono); font-size: .86rem; line-height: 1.5; padding: .45rem .6rem; height: 2.3rem; box-sizing: border-box; }   /* the same box hidden and shown */
+.reveal-wrap { display: flex; align-items: center; gap: .3rem; min-width: 0; }
+.reveal-wrap > input { flex: 1 1 auto; min-width: 0; }
+.reveal { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 1.7rem; height: 1.7rem; padding: 0; color: inherit; background: transparent; border: 0; border-radius: 4px; opacity: .6; cursor: pointer; }
+.reveal:hover, .reveal:focus-visible, .reveal[aria-pressed="true"] { opacity: 1; }
+.reveal-btn { display: inline-flex; align-items: center; padding: .15rem .4rem; }

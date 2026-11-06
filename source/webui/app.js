@@ -3537,6 +3537,35 @@
   const WELL_KNOWN_KEYS = ["", "dnsdir", "dgw", "ddgw", "change-me", "changeme", "secret", "password", "key", "test", "default"];
   const isWeakKey = (k) => k.length < 12 || WELL_KNOWN_KEYS.includes(k.trim().toLowerCase());
 
+  // A small eye (struck through while the value is shown), drawn with DOM calls: no innerHTML.
+  function eyeIcon(struck) {
+    const NS = "http://www.w3.org/2000/svg";
+    const el = (n, a) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); return e; };
+    const svg = el("svg", { viewBox: "0 0 24 24", width: "14", height: "14", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" });
+    svg.append(el("path", { d: "M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12z" }), el("circle", { cx: "12", cy: "12", r: "3" }));
+    if (struck) svg.append(el("path", { d: "M3 3l18 18" }));
+    return svg;
+  }
+  // a password box with an eye beside it: click to read the value, click again to hide it
+  function revealBox(inp) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "reveal"; b.title = "Show";
+    b.append(eyeIcon(false));
+    b.setAttribute("aria-pressed", "false");
+    b.setAttribute("aria-label", "Show " + (inp.getAttribute("aria-label") || "value"));
+    b.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const on = inp.type === "password";
+      inp.type = on ? "text" : "password";
+      b.title = on ? "Hide" : "Show";
+      b.replaceChildren(eyeIcon(on));
+      b.setAttribute("aria-pressed", String(on));
+    });
+    const wrap = document.createElement("span");
+    wrap.className = "reveal-wrap";
+    wrap.append(inp, b);
+    return wrap;
+  }
   const MCP_NAME_RE = /^[A-Za-z0-9._-]{1,40}$/;
   function randomKey() {
     const b = new Uint8Array(32);
@@ -3582,7 +3611,7 @@
         const acc = h("select", { "aria-label": "Access of " + k.name }, ["ro", "rw"].map((a) => h("option", { value: a }, a)));
         acc.value = k.access || "ro";
         acc.addEventListener("change", () => { k.access = acc.value; });
-        // the key in a password box like every other secret (the eye is added to it like to the others); an old key has none to show
+        // the key in a password box like every other secret with an eye beside it; an old key has none to show
         const keyIn = h("input", { type: shown(k) ? "password" : "text", readonly: true, autocomplete: "off", spellcheck: "false", "aria-label": "Key of " + k.name, class: "mono",
           value: shown(k) ? k.key : k.key || "", placeholder: "not kept: Replace key" });
         const tr = h("tr", {},
@@ -3590,7 +3619,7 @@
           h("td", {}, name),
           h("td", {}, acc),
           h("td", { class: "ctext" }, day(k.created)),
-          h("td", {}, keyIn));
+          h("td", {}, shown(k) ? revealBox(keyIn) : keyIn));
         tr.addEventListener("contextmenu", rowMenu([
           ["Add key", addKey],
           ["Copy key", () => { try { navigator.clipboard.writeText(k.key); } catch (_) { /* nothing to copy to */ } }, "", null, shown(k) ? "" : "No key is kept for this row: Replace key"],

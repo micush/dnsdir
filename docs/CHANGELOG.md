@@ -1,5 +1,18 @@
 # Changelog
 
+## [v640] - 2026-11-06 — MCP keys: the eye to show the key
+
+### Fixed
+- **Configure ▸ Monitoring ▸ MCP ▸ Keys: the Key box had no eye.** v639 kept the key and put it in a password box, but the eye that netdir adds to every password box comes from a page-wide helper this GUI does not have (its other eyes are per field), so the key could not be shown. The key box now gets netdir's eye (same icon: struck through while the key is shown) beside it; a key made before keys were kept still has no box content and reads *not kept: Replace key*. The helper is used for this box only, so the BGP and OSPF password boxes, which already have their own eye, do not get a second one.
+- **The key table's styles were netdir's missing ones:** the column widths, the readonly box look, the wide box (`.policy-box.rows.wide`) and the eye (`.reveal`). The unused styles of the removed show-once window (`.keyshow`) are gone.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...`, `go test -count=1 ./...` (ok), `CGO_ENABLED=0 go vet ./...` and `CGO_ENABLED=0 go test -count=1 ./...` (ok), `node --check` on `app.js` and `help.js`.
+- **In Chromium** (light and dark, mocked daemon, real `app.js`/`style.css`, the real default configuration from `newDaemonConfig`): Configure ▸ Monitoring ▸ MCP shows the key as dots with the eye beside it; a click shows the key and strikes the eye through; a key with only a hash shows the *not kept* placeholder and has no eye.
+
+### Not verified
+- Against a live daemon. Copy key, Replace key and Add key were not clicked through; the page error *Cannot read properties of undefined (reading 'status')* in the browser run comes from the mock (the same error appears with v639's own `app.js`).
+
 ## [v639] - 2026-11-06 — MCP keys can be shown again, as in the MCP Network Director
 
 ### Changed

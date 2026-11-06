@@ -1,5 +1,18 @@
 # Changelog
 
+## [v638] - 2026-11-06 — Add DNS server form: far less text, fields lined up
+
+### Changed
+- **Topology: the Add / Edit / Paste DNS server form lost nearly all its explanatory text.** The hints under *IP address or host name* (the `:port`, `tls://` and `https://` rules), *Name*, *Server type*, *Zone lists*, *Certificate*, *Certificate host name* and *Domain to ask it about* are gone; the address placeholder now reads `8.8.8.8, tls://host, https://host/path`. What they said is in the help panel, which also gained the Internal-server SOA advice under *Domain to ask it about*. Left on the form: *Already on this gateway: use another address.* (pasting a server whose address is taken), *N more copied.* (a paste that carries more domains), and the short lookup notes under the address and name (*Looking up…*, *Found by reverse lookup.*, *Found.*, or the reason). The zone-list box says *Find a zone list* and, with no lists, *No zone lists yet.* Validation messages for the address, zone lists and certificate host name are shorter.
+- **The fields line up.** The *Zone lists* cell was a `div` that the `label.f` styles did not reach, so its label, spacing and size differed from its neighbours and its input sat lower; it now has the same style, and its chosen tags sit below the box instead of above it. A zone-list or certificate-name cell that does not apply is hidden in place (kept in the grid) instead of removed, so the rest of the form no longer slides into the wrong column. An empty hint takes no space.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...`, `go test -race -count=1 ./...` (ok), `CGO_ENABLED=0 go vet ./...` and `CGO_ENABLED=0 go test -count=1 ./...` (ok), `GOOS=linux GOARCH=… go build` for amd64, arm64, arm, 386 and riscv64, `node --check` on `app.js` and `help.js`. The native amd64 build used the PAM headers; the cross-compiles built the fail-closed stub.
+- **In Chromium** (light and dark, mocked daemon, real `app.js`/`style.css`): the form for a `tls://` address (Internal type, Don't check, a zone-list tag chosen and a suggestion open) and for a plain address (Public resolver). Rows pair up, the inputs in a row share a top edge, and nothing is hidden by the layout.
+
+### Not verified
+- Against a live daemon; no Go code changed. The Edit and Paste variants of the form were not opened in a browser.
+
 ## [v637] - 2026-11-05 — New gateway form: "DNS ECS"
 
 ### Changed

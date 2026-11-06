@@ -1266,9 +1266,9 @@
         const names = f.checks, chosen = (f.v || []).slice();
         let off = false;
         const tagsEl = h("div", { class: "tags" });
-        const input = h("input", { type: "text", autocomplete: "off", spellcheck: "false", placeholder: names.length ? "Type to find a zone list to add" : "", "aria-label": f.l });
+        const input = h("input", { type: "text", autocomplete: "off", spellcheck: "false", placeholder: names.length ? "Find a zone list" : "", "aria-label": f.l });
         const sugg = h("div", { class: "sugg", role: "listbox" });
-        const wrapEl = h("div", { class: "checks", role: "group", "aria-label": f.l }, tagsEl, names.length ? input : h("span", { class: "hint" }, f.none || "Nothing to choose from yet."), sugg);
+        const wrapEl = h("div", { class: "checks", role: "group", "aria-label": f.l }, names.length ? input : h("span", { class: "hint" }, f.none || "Nothing to choose from yet."), sugg, tagsEl);
         const matches = () => { const q = input.value.trim().toLowerCase(); return names.filter((n) => !chosen.includes(n) && (!q || n.toLowerCase().includes(q))); };
         const drawSugg = (show) => {
           sugg.replaceChildren();
@@ -1302,7 +1302,7 @@
         hints[f.k] = h("span", { class: "hint" }, f.hint || "");
         // a field may react when it is left (f.on): it gets the fields, and note(key, text) to say something under a field
         if (f.on) els[f.k].addEventListener("change", () => f.on(els, (k, t) => { const o = fields.find((x) => x.k === k); hints[k].textContent = (o && o.hint ? o.hint : "") + (t ? (o && o.hint ? " " : "") + t : ""); }));
-        return h(f.checks ? "div" : "label", { class: "f" + (fields.length === 1 ? " wide" : "") }, f.checks ? h("span", {}, f.l) : f.l, els[f.k], f.hint || f.on ? hints[f.k] : null);
+        return h(f.checks ? "div" : "label", { class: "f" + (f.checks ? " fgroup" : "") + (fields.length === 1 ? " wide" : "") }, f.checks ? h("span", {}, f.l) : f.l, els[f.k], f.hint || f.on ? hints[f.k] : null);
       }));
       for (const f of fields) if (f.on && f.initOn) f.on(els, () => {});
       const err = h("div", { "aria-live": "polite" });
@@ -2021,14 +2021,14 @@
           const q = els.addr.value.trim();
           if (!q) { note("label", ""); if (els.label.value.trim()) await hooks.label(els, note); return; }   // the address was erased: a name that is there gives it back
           if (!IPISH.test(q) || !canFill(els.label, "label")) { note("label", ""); return; }
-          note("label", "Looking up the name…");
+          note("label", "Looking up…");
           try {
             const r = await ask(q);
             if (els.addr.value.trim() !== q || !canFill(els.label, "label")) return;
-            if (r.found) { els.label.value = r.name; auto.label = r.name; note("label", "Name found by reverse lookup; change it if you like."); }
+            if (r.found) { els.label.value = r.name; auto.label = r.name; note("label", "Found by reverse lookup."); }
             else {
               if (els.label.value.trim() === auto.label) { els.label.value = ""; auto.label = ""; }   // the old fill belongs to the old address
-              note("label", r.error + " — type a name if you want one.");
+              note("label", r.error);
             }
           } catch (e) { note("label", "Lookup failed: " + (e.message || e)); }
         },
@@ -2037,12 +2037,12 @@
           if (n === auto.label) return;                       // our own fill, not something typed
           if (!n) { note("addr", ""); if (els.addr.value.trim()) await hooks.addr(els, note); return; }   // the name was erased: the address that is there gives it back
           if (!/^[A-Za-z0-9_\-]+(\.[A-Za-z0-9_\-]+)*$/.test(n) || IPISH.test(n) || !canFill(els.addr, "addr")) { note("addr", ""); return; }
-          note("addr", "Looking up the address…");
+          note("addr", "Looking up…");
           try {
             const r = await ask(n);
             if (els.label.value.trim() !== n || !canFill(els.addr, "addr")) return;
-            if (r.found) { els.addr.value = r.addr; auto.addr = r.addr; note("addr", "Address found for " + n + "."); }
-            else note("addr", r.error + ".");
+            if (r.found) { els.addr.value = r.addr; auto.addr = r.addr; note("addr", "Found."); }
+            else note("addr", r.error);
           } catch (e) { note("addr", "Lookup failed: " + (e.message || e)); }
         },
       };
@@ -2055,36 +2055,36 @@
       const certVis = (els) => {
         const tls = isTLSAddr(els.addr.value);
         els.cert.parentElement.style.display = tls ? "" : "none";
-        els.certname.parentElement.style.display = tls && els.cert.value === CERT_CHOICES[1] ? "" : "none";
+        els.certname.parentElement.style.display = tls ? "" : "none";
+        els.certname.parentElement.style.visibility = els.cert.value === CERT_CHOICES[1] ? "" : "hidden";
       };
       const f0 = edit ? srvForward(g, edit) : pre ? pre.forward : srvForward(g, "");
       const q0 = pre && pre.queries[0] ? pre.queries[0] : { name: "", type: "A" };
       form(edit ? "Edit DNS server" : pre ? "Paste server" : "Add DNS server", [
-        { k: "addr", l: "IP address or host name", v: edit ? shortAddr(edit) : "", ph: "8.8.8.8", hint: pre ? "That server is already on this gateway: give the copy its own address. " : "Add :port for a port other than 53. Write tls://host for DNS over TLS (port 853) or https://host/path for DNS over HTTPS (port 443).", on: (els, note) => { certVis(els); return lk.addr(els, note); } },
-        { k: "label", l: "Name (optional)", v: edit ? srvName(g, edit) : "", ph: "e.g. dns-a", hint: "Shown under the address on the diagram. Fill in the address and its name is looked up; fill in a host name here and its address is.", on: lk.label },
-        { k: "ftype", l: "Server type", v: fwdTypeOf(f0), options: FWD_TYPES, initOn: true, on: (els) => { const pub = els.ftype.value === FWD_TYPES[0]; els.flists.setDisabled(pub); els.flists.parentElement.style.display = pub ? "none" : ""; }, hint: "Public resolver: answers everything except the zones other servers carry. Internal: answers only the zones of its lists (never other names). Public + Internal: answers its zones and everything else." },
-        { k: "flists", l: "Zone lists", v: (f0 || {}).lists || [], checks: forwardListNames(), none: "There are no zone lists yet. Make them under Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding.", hint: "For an Internal or Public + Internal server: type to find the zone lists it serves and add them (they are made under Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding). A Public resolver has none." },
+        { k: "addr", l: "IP address or host name", v: edit ? shortAddr(edit) : "", ph: "8.8.8.8, tls://host, https://host/path", hint: pre ? "Already on this gateway: use another address." : "", on: (els, note) => { certVis(els); return lk.addr(els, note); } },
+        { k: "label", l: "Name (optional)", v: edit ? srvName(g, edit) : "", ph: "e.g. dns-a", on: lk.label },
+        { k: "ftype", l: "Server type", v: fwdTypeOf(f0), options: FWD_TYPES, initOn: true, on: (els) => { const pub = els.ftype.value === FWD_TYPES[0]; els.flists.setDisabled(pub); els.flists.parentElement.style.visibility = pub ? "hidden" : ""; } },
+        { k: "flists", l: "Zone lists", v: (f0 || {}).lists || [], checks: forwardListNames(), none: "No zone lists yet." },
         // tls:// and https:// only: how the server's certificate is checked (hidden for a plain server)
-        { k: "cert", l: "Certificate", v: c0.insecure ? CERT_CHOICES[2] : c0.name ? CERT_CHOICES[1] : CERT_CHOICES[0], options: CERT_CHOICES, initOn: true, on: certVis,
-          hint: "Check: the certificate must be valid for the host in the address. Given by IP address, most public servers fail that (their certificate names the host): check against its host name instead. Don't check only for a server you trust whose certificate cannot be checked (self-signed); the traffic is encrypted, but anyone on the path could answer." },
-        { k: "certname", l: "Certificate host name", v: c0.name || "", ph: "e.g. protective.joindns4.eu", hint: "The name the server's certificate is for. dnsdir still connects to the address above." },
+        { k: "cert", l: "Certificate", v: c0.insecure ? CERT_CHOICES[2] : c0.name ? CERT_CHOICES[1] : CERT_CHOICES[0], options: CERT_CHOICES, initOn: true, on: certVis },
+        { k: "certname", l: "Certificate host name", v: c0.name || "", ph: "e.g. protective.joindns4.eu" },
         ...(edit ? [] : [
-          { k: "name", l: "Domain to ask it about", v: q0.name, ph: "google.com", hint: (pre && pre.queries.length > 1 ? "The other " + (pre.queries.length - 1) + " copied domains are added too: " + pre.queries.slice(1).map((q) => q.name + " (" + q.type + ")").join(", ") + ". " : "") + "A server is checked by asking it a question; add more domains afterwards. For an Internal server, use a name in one of its zones (its zone itself with type SOA works). A domain inside one of its zones decides that zone only." },
+          { k: "name", l: "Domain to ask it about", v: q0.name, ph: "google.com", hint: pre && pre.queries.length > 1 ? (pre.queries.length - 1) + " more copied." : "" },
           { k: "type", l: "Record type", v: q0.type, options: QTYPES }]),
       ], (v) => {
         if (!v.addr) return "Enter an IP address or host name.";
         if (!edit && badDomain(v.name)) return badDomain(v.name);
-        if (!/^(tls:\/\/[A-Za-z0-9_.\-:\[\]]+|https:\/\/[A-Za-z0-9_.\-:\[\]]+(\/[^\s]*)?|[A-Za-z0-9_.\-:\[\]]+)$/i.test(v.addr.trim())) return "That doesn't look like an IP address or host name (or tls://host, https://host/path).";
+        if (!/^(tls:\/\/[A-Za-z0-9_.\-:\[\]]+|https:\/\/[A-Za-z0-9_.\-:\[\]]+(\/[^\s]*)?|[A-Za-z0-9_.\-:\[\]]+)$/i.test(v.addr.trim())) return "Not a valid address.";
         const flists = (v.flists || "").toLowerCase().split(/[\s,]+/).filter(Boolean);
         const haveLists = forwardListNames();
-        if (v.ftype !== FWD_TYPES[0] && !flists.length) return (v.ftype === FWD_TYPES[1] ? "An Internal" : "A Public + Internal") + " server needs at least one zone list. Pick its zone lists (make them under Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding), or choose Public resolver.";
-        if (v.ftype === FWD_TYPES[0] && flists.length) return "A public resolver has no zone lists: choose Internal or Public + Internal, or clear the lists.";
+        if (v.ftype !== FWD_TYPES[0] && !flists.length) return "Pick at least one zone list, or choose Public resolver.";
+        if (v.ftype === FWD_TYPES[0] && flists.length) return "A public resolver has no zone lists.";
         const missing = flists.filter((l) => !haveLists.includes(l));
-        if (missing.length) return "There is no zone list called " + missing.join(", ") + (haveLists.length ? " (the lists are: " + haveLists.join(", ") + ")." : " — there are no zone lists yet. Make them under Configure ▸ DNS ▸ Resolution ▸ Conditional Forwarding.");
+        if (missing.length) return "There is no zone list called " + missing.join(", ") + ".";
         const certName = (v.certname || "").trim().toLowerCase().replace(/\.$/, "");
         const certChoice = isTLSAddr(v.addr) ? v.cert : CERT_CHOICES[0];
         if (certChoice === CERT_CHOICES[1] && !(certName.includes(".") && certName.split(".").every((l) => /^[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?$/.test(l)) && !/^[0-9.]+$/.test(certName)))
-          return "Give the host name the server's certificate is for (e.g. protective.joindns4.eu), or choose Check or Don't check.";
+          return "Give the certificate host name.";
         const nm = (v.label || "").trim();
         const full = nm.toLowerCase();
         const ip = (/^\[([0-9a-f:.]+)\](:\d+)?$/i.exec(v.addr) || /^(\d+\.\d+\.\d+\.\d+)(:\d+)?$/.exec(v.addr) || /^([0-9a-f:]*:[0-9a-f:]*)$/i.exec(v.addr) || [])[1] || "";

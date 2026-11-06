@@ -1,5 +1,18 @@
 # Changelog
 
+## [v639] - 2026-11-06 — MCP keys can be shown again, as in the MCP Network Director
+
+### Changed
+- **Configure ▸ Monitoring ▸ MCP ▸ Keys: the key is kept and can be read back.** It used to be made once, shown once in a window and kept only as its SHA-256 hash. It is now kept in the `dns` block beside its hash (so in the cluster and the configuration history too), as netdir does: the table has a **Key** column with the key in a password box and the eye to show it, and the row menu has **Copy key** and **Replace key** (a new key under the same name and access; whatever used the old one is refused from the next save). The hash is still what a request is checked against. The key is still never shown to an MCP caller or to a read-only account (`key` is already one of the secret keys both hide). A key made before this release has only its hash and cannot be shown: its box reads *not kept: Replace key*.
+- **The window that showed a new key once, with the Claude Code command line, is gone** (netdir has none); the command line is in the help.
+- `mcpkeys.go` keeps `Key` instead of clearing it when it works out `Hash`; the test of it (`mcpkeys_test.go`) is netdir's, for the new rule (kept in the file, in no MCP answer). `webui/app.js`: the key editor is netdir's; `webui/help.js` and the README describe the new behaviour.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...`, `go test -count=1 ./...` (ok), `CGO_ENABLED=0 go vet ./...` and `CGO_ENABLED=0 go test -count=1 ./...`, `node --check` on `app.js` and `help.js`.
+
+### Not verified
+- Not looked at in a browser, and not against a live daemon: the key table and the eye were checked only by comparing the editor with netdir's, which is the same code.
+
 ## [v638] - 2026-11-06 — Add DNS server form: far less text, fields lined up
 
 ### Changed

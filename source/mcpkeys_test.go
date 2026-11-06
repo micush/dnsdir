@@ -4,9 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -23,7 +21,7 @@ func TestNormMCPKeys(t *testing.T) {
 	if err != nil || len(out) != 2 {
 		t.Fatal(err, out)
 	}
-	if out[0].Key != "" || out[0].Hash != mcpKeyHash(k) || out[0].Access != "ro" || out[0].Created == 0 {
+	if out[0].Key != k || out[0].Hash != mcpKeyHash(k) || out[0].Access != "ro" || out[0].Created == 0 {
 		t.Fatalf("new key: %+v", out[0])
 	}
 	if out[1].Access != "rw" || !strings.HasPrefix(out[1].Hash, "sha256:") || out[1].Hash != strings.ToLower(out[1].Hash) || out[1].Created != 0 {
@@ -110,8 +108,8 @@ func TestMCPKeyOpensFromAnyAddress(t *testing.T) {
 	}
 }
 
-// A key added through the configuration is kept only as its hash: not in the file, the history or any answer.
-func TestMCPKeyIsSavedAsAHashOnly(t *testing.T) {
+// A key added through the configuration is kept (to be shown again in the GUI) with its hash, and is in no MCP answer.
+func TestMCPKeyIsKeptAndHidden(t *testing.T) {
 	e, post := mcpEnv(t, "127.0.0.1 rw")
 	k := testMCPKey()
 	set, _ := json.Marshal(map[string]any{"dns": map[string]any{"mcp_keys": []any{map[string]any{"name": "laptop", "access": "rw", "key": k}}}})
@@ -120,17 +118,17 @@ func TestMCPKeyIsSavedAsAHashOnly(t *testing.T) {
 		t.Fatalf("set: %s", txt)
 	}
 	dc, err := loadConfig(e.conf)
-	if err != nil || len(dc.DNS.MCPKeys) != 1 || dc.DNS.MCPKeys[0].Hash != mcpKeyHash(k) || dc.DNS.MCPKeys[0].Key != "" {
+	if err != nil || len(dc.DNS.MCPKeys) != 1 || dc.DNS.MCPKeys[0].Hash != mcpKeyHash(k) || dc.DNS.MCPKeys[0].Key != k {
 		t.Fatalf("saved: %v %+v", err, dc.DNS.MCPKeys)
 	}
-	filepath.WalkDir(filepath.Dir(e.conf), func(p string, d fs.DirEntry, err error) error {
-		if err == nil && !d.IsDir() {
-			if b, _ := os.ReadFile(p); strings.Contains(string(b), k) {
-				t.Errorf("the key is in %s", p)
-			}
-		}
-		return nil
-	})
+	if b, _ := os.ReadFile(e.conf); !strings.Contains(string(b), k) {
+		t.Error("the key is not kept in the configuration, so it could not be shown again")
+	}
+	// but no MCP caller is shown it, and neither is a read-only account
+	_, m = post(mcpCall("get_config", `{}`))
+	if txt, _ := toolResult(t, m); strings.Contains(txt, k) {
+		t.Fatalf("get_config shows the key: %s", txt)
+	}
 	// and it opens the endpoint, once the daemon has the configuration
 	sup := e.ws.status.sup
 	sup.mu.Lock()

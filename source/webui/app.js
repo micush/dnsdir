@@ -3537,16 +3537,38 @@
   const WELL_KNOWN_KEYS = ["", "dnsdir", "dgw", "ddgw", "change-me", "changeme", "secret", "password", "key", "test", "default"];
   const isWeakKey = (k) => k.length < 12 || WELL_KNOWN_KEYS.includes(k.trim().toLowerCase());
 
-  // The MCP keys (Configure ▸ Monitoring ▸ MCP): a name, ro or rw, and only a hash of the key.  Add key makes a random key
-  // here, shows it once, and sends it with the next save; the daemon keeps only its hash.  A change is a "change" event,
+  const MCP_NAME_RE = /^[A-Za-z0-9._-]{1,40}$/;
+  function randomKey() {
+    const b = new Uint8Array(32);
+    crypto.getRandomValues(b);
+    return "dnsdir_" + btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function dialog(title, body) {
+    const d = h("dialog", { class: "cv-dialog", "aria-label": title });
+    const close = () => { try { d.close(); } catch (_) { /* closed */ } d.remove(); };
+    d.addEventListener("close", () => d.remove());
+    d.append(h("h2", {}, title), ...body(close));
+    root.append(d);
+    d.showModal();
+    return d;
+  }
+  // The MCP keys (Configure ▸ Monitoring ▸ MCP): a name, ro or rw, and the key (kept, so Show can display it again; an old key has
+  // only its hash).  Add key makes a random key here, shows it, and sends it with the next save.  A change is a "change" event,
   // so the page saves it like any other field.
   function mcpKeysEditor(list) {
     const keys = (list || []).map((k) => ({ ...k }));
     const el = h("div", { class: "mcpkeys" });
     const changed = () => { draw(); el.dispatchEvent(new Event("change", { bubbles: true })); };
-    const NAME_RE = /^[A-Za-z0-9._-]{1,40}$/;
+    const NAME_RE = MCP_NAME_RE;
     const day = (t) => (t ? new Date(t * 1000).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }) : "");
-    const finger = (k) => (k.hash || "").replace(/^sha256:/, "").slice(0, 12);
+    const shown = (k) => !!k.key && k.key !== "(hidden)";   // a key made before keys were kept has a hash only; a read-only account is not given it
+    // a new key under the same name and access: whatever used the old one is refused from the next save
+    function replaceKey(k) {
+      if (!confirm("Replace the key " + k.name + "?\n\nWhatever uses the old key can no longer connect to /mcp.")) return;
+      const key = randomKey();
+      k.key = key; delete k.hash; k.created = Math.floor(Date.now() / 1000);
+      changed();
+    }
     // the same look as the address list above (rowTable): a numbered table, edited in place, right-click for the rest
     function draw() {
       const tbody = h("tbody", {}, keys.map((k, i) => {
@@ -3560,40 +3582,30 @@
         const acc = h("select", { "aria-label": "Access of " + k.name }, ["ro", "rw"].map((a) => h("option", { value: a }, a)));
         acc.value = k.access || "ro";
         acc.addEventListener("change", () => { k.access = acc.value; });
+        // the key in a password box like every other secret (the eye is added to it like to the others); an old key has none to show
+        const keyIn = h("input", { type: shown(k) ? "password" : "text", readonly: true, autocomplete: "off", spellcheck: "false", "aria-label": "Key of " + k.name, class: "mono",
+          value: shown(k) ? k.key : k.key || "", placeholder: "not kept: Replace key" });
         const tr = h("tr", {},
           h("td", { class: "grip" }, h("span", { class: "rownum" }, String(i + 1))),
           h("td", {}, name),
           h("td", {}, acc),
           h("td", { class: "ctext" }, day(k.created)),
-          h("td", { class: "ctext mono", title: k.hash ? "The start of the key's SHA-256 hash: " + k.hash : "Saved with this change" }, k.key ? (k.fp || "(new)") : finger(k)));
+          h("td", {}, keyIn));
         tr.addEventListener("contextmenu", rowMenu([
           ["Add key", addKey],
-          ["Copy fingerprint", () => { try { navigator.clipboard.writeText((k.hash || "").replace(/^sha256:/, "")); } catch (_) { /* nothing to copy to */ } }],
+          ["Copy key", () => { try { navigator.clipboard.writeText(k.key); } catch (_) { /* nothing to copy to */ } }, "", null, shown(k) ? "" : "No key is kept for this row: Replace key"],
+          ["Replace key", () => replaceKey(k)],
           ["Delete", () => { if (confirm("Delete the key " + k.name + "?\n\nWhatever uses it can no longer connect to /mcp.")) { keys.splice(keys.indexOf(k), 1); changed(); } }, "danger"],
         ]));
         return tr;
       }));
       const tbl = h("table", { class: "policy zones rows mcpkeytab" },
-        h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number" }, "#"), h("th", {}, "Name"), h("th", {}, "Access"), h("th", {}, "Added"), h("th", {}, "Fingerprint"))), tbody);
+        h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number" }, "#"), h("th", {}, "Name"), h("th", {}, "Access"), h("th", {}, "Added"), h("th", {}, "Key"))), tbody);
       const empty = h("div", { class: "policy-empty" }, "No keys: only the sources above may use /mcp. Right-click here ▸ Add key.");
       empty.hidden = keys.length > 0;
       const wrap = h("div", { class: "policy-wrap" }, tbl, empty);
       wrap.addEventListener("contextmenu", (e) => { if (!e.target.closest("tbody tr")) rowMenu([["Add key", addKey]])(e); });
-      clear(el).append(h("div", { class: "policy-box rows" }, wrap));
-    }
-    function randomKey() {
-      const b = new Uint8Array(32);
-      crypto.getRandomValues(b);
-      return "dnsdir_" + btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    }
-    function dialog(title, body) {
-      const d = h("dialog", { class: "cv-dialog", "aria-label": title });
-      const close = () => { try { d.close(); } catch (_) { /* closed */ } d.remove(); };
-      d.addEventListener("close", () => d.remove());
-      d.append(h("h2", {}, title), ...body(close));
-      root.append(d);
-      d.showModal();
-      return d;
+      clear(el).append(h("div", { class: "policy-box rows wide" }, wrap));
     }
     function addKey() {
       const name = h("input", { type: "text", autocomplete: "off", spellcheck: "false", maxlength: "40", placeholder: "e.g. laptop, claude-ops", "aria-label": "Name" });
@@ -3609,28 +3621,12 @@
         keys.push(entry);
         close();
         changed();
-        // the fingerprint the daemon will show (the page is HTTPS, so the browser can hash it too)
-        if (window.crypto && crypto.subtle) crypto.subtle.digest("SHA-256", new TextEncoder().encode(key)).then((d) => { entry.fp = [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, "0")).join("").slice(0, 12); draw(); }, () => {});
-        showKey(n, access.value, key);
       } },
       h("label", { class: "f wide" }, "Name", name, h("span", { class: "hint" }, "Who or what holds the key. Its changes are logged and kept in the configuration history as mcp:NAME@ADDRESS.")),
       h("label", { class: "f wide" }, "Access", access),
       err,
       h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "submit" }, "Create key"), h("button", { class: "btn", type: "button", onclick: close }, "Cancel")))]);
       name.focus();
-    }
-    function showKey(n, acc, key) {
-      const cmd = "claude mcp add --transport http dnsdir " + location.origin + "/mcp --header \"Authorization: Bearer " + key + "\"";
-      const copy = (text, b) => { try { navigator.clipboard.writeText(text); b.textContent = "Copied"; setTimeout(() => { b.textContent = "Copy"; }, 1500); } catch (_) { /* select it by hand */ } };
-      const kb = h("button", { class: "btn small", type: "button" }, "Copy"), cb = h("button", { class: "btn small", type: "button" }, "Copy");
-      kb.onclick = () => copy(key, kb); cb.onclick = () => copy(cmd, cb);
-      dialog("Key " + n + " (" + acc + ")", (close) => [
-        h("p", {}, "Copy it now: it is not shown again. Only its hash is kept; if it is lost, remove it and add another."),
-        h("div", { class: "keyshow" }, h("code", { class: "mono" }, key), kb),
-        h("p", { class: "hint" }, "Claude Code:"),
-        h("div", { class: "keyshow" }, h("code", { class: "mono" }, cmd), cb),
-        h("p", { class: "hint" }, "Any MCP client: the URL " + location.origin + "/mcp with the header Authorization: Bearer KEY. With the self-signed certificate, start Claude Code with NODE_TLS_REJECT_UNAUTHORIZED=0."),
-        h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "button", onclick: close }, "Done"))]);
     }
     draw();
     return { el, get: () => keys.map((k) => (k.key ? { name: k.name, access: k.access || "ro", key: k.key, created: k.created } : { name: k.name, access: k.access || "ro", hash: k.hash, created: k.created })) };

@@ -18,10 +18,12 @@ import (
 // higher of the two.  A key that is sent but matches none is refused outright (401), never quietly ignored, so a typo
 // shows at once.
 //
-// Only a SHA-256 hash of each key is kept in the configuration (and so in the cluster and the configuration history):
-// the key itself is made once, shown once (Configure ▸ Monitoring ▸ MCP ▸ Add key), and cannot be read back.  A new key
-// may be given in "key" (the GUI does this, as may edit_config or a hand-edited file); the check turns it into "hash"
-// before anything is saved or sent to the other nodes.
+// The key is kept in the configuration beside its SHA-256 hash, as the gateway keys and the device logins are (so it
+// is in the cluster and the configuration history too, is never shown to an MCP caller or a read-only account, and
+// can be shown again from Configure ▸ Monitoring ▸ MCP ▸ Keys, where the Key box has an eye).  The hash is what a
+// request is checked against.  A key made before the key was kept has only a hash and cannot be shown: Replace key
+// makes it a new one.  A new key may be given in "key" (the GUI does this, as may edit_config or a hand-edited file);
+// the check works out "hash" from it.
 
 const (
 	mcpKeysMax    = 32
@@ -33,8 +35,8 @@ const (
 type MCPKey struct {
 	Name    string `json:"name"`              // who or what holds it ("laptop", "claude-ops"); the caller is logged as mcp:NAME@ADDRESS
 	Access  string `json:"access"`            // "ro" or "rw"
-	Hash    string `json:"hash,omitempty"`    // "sha256:" and the hex hash of the key
-	Key     string `json:"key,omitempty"`     // a new key, only on the way in: replaced by Hash when the configuration is checked
+	Hash    string `json:"hash,omitempty"`    // "sha256:" and the hex hash of the key (worked out from Key when there is one)
+	Key     string `json:"key,omitempty"`     // the key itself; empty for a key made before it was kept
 	Created int64  `json:"created,omitempty"` // unix time the key was added
 }
 
@@ -79,7 +81,7 @@ func normMCPKeys(list []MCPKey) ([]MCPKey, error) {
 			if strings.TrimSpace(k.Key) != k.Key || len(k.Key) < mcpKeyMinLen {
 				return nil, fmt.Errorf("mcp: key %q: a key is at least %d characters, without spaces (Add key makes one)", k.Name, mcpKeyMinLen)
 			}
-			k.Hash, k.Key = mcpKeyHash(k.Key), ""
+			k.Hash = mcpKeyHash(k.Key)
 			if k.Created == 0 {
 				k.Created = time.Now().Unix()
 			}

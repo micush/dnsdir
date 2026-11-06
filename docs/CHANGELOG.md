@@ -1,5 +1,16 @@
 # Changelog
 
+## [v641] - 2026-11-06 — MCP: a tool's answer may be as large as a request (1 MiB)
+
+### Changed
+- **The most an MCP tool answers is now 1 MiB (1,048,576 bytes; was 200,000), the same as the most a request may send.** `mcpMaxResult` in `mcp.go` is now `mcpMaxBody`, so the two cannot drift apart. An answer longer than that is still cut there, with the note asking for less (fewer log lines, a shorter range). The cut is made after secrets are hidden, so a cut never shows anything hidden.
+
+### Verified
+- `gofmt -l .` (empty), `go build -o /dev/null .`, `go vet ./...`, `go test -count=1 ./...` (ok), `CGO_ENABLED=0 go vet ./...` and `CGO_ENABLED=0 go test -count=1 ./...` (ok).
+
+### Not verified
+- Against a live daemon, and with an answer over the old 200,000: the constant is the only change, and no test sends an answer that long.
+
 ## [v640] - 2026-11-06 — MCP keys: the eye to show the key
 
 ### Fixed

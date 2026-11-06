@@ -36,7 +36,7 @@ import (
 
 const (
 	mcpMaxBody     = 1 << 20
-	mcpMaxResult   = 200_000 // characters of a tool's answer (it goes into the assistant's context)
+	mcpMaxResult   = mcpMaxBody // bytes of a tool's answer (it goes into the assistant's context): the same as the most a request may send
 	mcpLatestProto = "2025-06-18"
 )
 

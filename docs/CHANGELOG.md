@@ -1,5 +1,28 @@
 # Changelog
 
+## [v644] - 2026-11-07 — field descriptions: one line, never longer than the field
+
+### Changed
+- **New rule in CLAUDE.md:** the text under a form field is one line and no longer than the field. The range line under a number field is now `10 to 600 s. Default 30.` (was `Valid: 10 to 600 seconds. Default 30 seconds.`, which wrapped), and a field that has a hint and a range shows both on the one line (`0 = off. 0 to 65535. Default 0.`). `.f > .hint` is `nowrap` with an ellipsis. A few section notes were shortened again.
+- `TestFieldHintsAreShort` fails any `hint` or `note` in `app.js` over 45 characters.
+
+### Verified
+- The new test, `node --check`, the full test suite.
+
+### Not verified
+- Not looked at in a browser (that every range line fits its field).
+
+## [v643] - 2026-11-07 — short descriptions under the fields
+
+### Changed
+- The text under a field is now a few words (for example "Host or host:port." under a syslog server, "PEM file. Empty: system CAs." under a CA file), and the same for the notes under a section heading. Same fields as in netdir, plus the servers, Bootstrap, Probe queries, Sort list, Blocked answer, Always allow, client limits, Randomize case and Pause-this-node descriptions and the notes under Upstream servers, Load Balancing, Listeners, Block Lists, Client Rate Limiting and Client names. The full explanation is in the help pane of each page, which already had it. No Go change.
+
+### Verified
+- `node --check` of `app.js` and `help.js`; the help-coverage test and the full test suite; the leak test where the project has one.
+
+### Not verified
+- Not looked at in a browser.
+
 ## [v642] - 2026-11-07 — defaults shown in the fields, valid range under them
 
 ### Changed

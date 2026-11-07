@@ -248,6 +248,8 @@ README), so the version and changelog describe the final tree.
   If something needs explaining, put it in `webui/help.js` (the "?" panel) and nothing on the page itself.
   A label, a placeholder and at most a few words of hint are the limit. Don't add any text the owner didn't ask for.
 
+- **Field descriptions: one line, never longer than the field.** The text under a form field (its `hint`, and the range line `rangeHint` draws under a number field) is one line and no wider than the field it sits under, about 40 characters, e.g. `Host or host:port.` or `10 to 600 s. Default 30.` Nothing longer, nothing that wraps (`.f .hint` is `nowrap`, so a longer one is cut off). The full explanation goes in `webui/help.js`. `TestFieldHintsAreShort` fails a longer hint. The same holds for the notes under a section heading.
+
 - The process applies to substantive changes (features, fixes, docs,
   refactors). Pure Q&A that changes nothing on disk needs no version bump.
 - A pure packaging fix (archive name, permissions, directory layout) that

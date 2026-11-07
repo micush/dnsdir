@@ -122,6 +122,8 @@ tr.local td { background: var(--surface-2); }
 td.num, th.num { text-align: right; }
 .nowrap { white-space: nowrap; }
 .hint.nomargin { margin: 0; }
+.f > .hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* one line under a field, never longer than the field */
+.f > .hint.weak-key { white-space: normal; }
 tbody tr[data-id] { cursor: pointer; }
 td.wrap { white-space: normal; word-break: break-word; max-width: 28rem; }
 

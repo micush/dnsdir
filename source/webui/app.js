@@ -2451,19 +2451,19 @@
   const LB = ["roundrobin", "weighted", "hostpinned", "failover"];
   const GROUP_FIELDS = [
     { shared: true, k: "name", l: "Name", t: "text", hint: "optional label shown instead of the address" },
-    { shared: true, k: "group_id", l: "Group ID", t: "int", min: 1, max: 255 },
+    { shared: true, k: "group_id", l: "Group ID", t: "int", def: 1, min: 1, max: 255 },
     { k: "interface", l: "Interface", t: "text" },
     { br: true },
     { shared: true, k: "vip4", l: "IPv4 VIP/prefix", t: "text", hint: "e.g. 10.0.0.1/24 — empty to disable" },
     { shared: true, k: "vip6", l: "IPv6 VIP/prefix", t: "text", hint: "e.g. 2001:db8::1/64 — empty to disable" },
     { shared: true, k: "more_vip4", l: "More IPv4 addresses", t: "rows", rows: "morevip4", wide: true, hint: "Same subnet as the VIP, one per row, no prefix length." },
     { shared: true, k: "more_vip6", l: "More IPv6 addresses", t: "rows", rows: "morevip6", wide: true, hint: "Same subnet as the VIP, one per row, no prefix length." },
-    { k: "priority", l: "Priority", t: "int", min: 0, max: 255 },
+    { k: "priority", l: "Priority", t: "int", def: 100, min: 0, max: 255 },
     { shared: true, k: "lb_method", l: "LB method", t: "select", options: LB },
-    { k: "weight", l: "Weight", t: "int", min: 0, max: 255 },
-    { shared: true, k: "hello_ms", l: "Hello interval (ms)", t: "int", min: 1 },
-    { shared: true, k: "hold_ms", l: "Hold time (ms)", t: "int", min: 1 },
-    { shared: true, k: "max_afns", l: "Max forwarders", t: "int", min: 1, max: 255 },
+    { k: "weight", l: "Weight", t: "int", def: 100, min: 0, max: 255 },
+    { shared: true, k: "hello_ms", l: "Hello interval (ms)", t: "int", max: 65535, def: 150, min: 1 },
+    { shared: true, k: "hold_ms", l: "Hold time (ms)", t: "int", max: 65535, def: 750, min: 1 },
+    { shared: true, k: "max_afns", l: "Max forwarders", t: "int", def: 128, min: 1, max: 255 },
     { shared: true, k: "key", l: "HMAC shared key", t: "text", weakKey: true },
     { k: "preempt", l: "Preemption", t: "bool" },
     { shared: true, k: "real_macs", l: "Use real MAC addresses (no virtual MACs)", t: "bool", hint: "On for a gateway you add now (most networks need it: a VMware port group that is not promiscuous, a cloud with one MAC per interface, a switch with port security); gateways that already existed keep their setting. Off is the older way with a virtual MAC per node. On: the VIP is on every node's lo and the controller answers ARP with the real MAC of the node it picks. Failover then depends on the neighbors honoring an unsolicited ARP. Restarts the gateway; set it on every node's cluster together." },
@@ -2477,15 +2477,15 @@
     { shared: true, k: "queries", l: "Probe queries", t: "rows", rows: "queries", wide: true, hint: "Every server is asked each of these to check it works: a name and a record type." },
     { section: "Load Balancing", cols: 3, note: "Applies to every gateway unless that gateway has its own load balancing (Topology ▸ right-click the gateway ▸ Edit)." },
     { shared: true, k: "spread", l: "Spread queries over servers of similar speed (round-robin)", t: "bool" },
-    { shared: true, k: "spread_band", l: "Spread band (% of fastest)", t: "int", min: 1, max: 1000 },
-    { shared: true, k: "down_percent", l: "Down at (% of tests failing)", t: "int", min: 1, max: 100 },
-    { shared: true, k: "fail_threshold", l: "Failures before down", t: "int", min: 1 },
-    { shared: true, k: "max_attempts", l: "Max servers tried", t: "int", min: 1 },
-    { shared: true, k: "latency_alpha", l: "Latency smoothing (0–1]", t: "float" },
+    { shared: true, k: "spread_band", l: "Spread band (% of fastest)", t: "int", def: 20, min: 1, max: 1000 },
+    { shared: true, k: "down_percent", l: "Down at (% of tests failing)", t: "int", def: 100, min: 1, max: 100 },
+    { shared: true, k: "fail_threshold", l: "Failures before down", t: "int", def: 2, min: 1 },
+    { shared: true, k: "max_attempts", l: "Max servers tried", t: "int", def: 3, min: 1 },
+    { shared: true, k: "latency_alpha", l: "Latency smoothing (0–1]", t: "float", range: "above 0 up to 1", def: 0.3 },
     { section: "Listeners", cols: 3, note: "Plain DNS is always on. DNS over TLS (usually 853) and DNS over HTTPS (usually 443, served at /dns-query) present the certificate below; 0 turns one off." },
-    { shared: true, k: "listen_port", l: "DNS port (UDP and TCP)", t: "int", min: 1, max: 65535 },
-    { shared: true, k: "dot_port", l: "DNS over TLS port", t: "int", min: 0, max: 65535 },
-    { shared: true, k: "doh_port", l: "DNS over HTTPS port", t: "int", min: 0, max: 65535 },
+    { shared: true, k: "listen_port", l: "DNS port (UDP and TCP)", t: "int", def: 53, min: 1, max: 65535 },
+    { shared: true, k: "dot_port", l: "DNS over TLS port", t: "int", def: 0, min: 0, max: 65535, hint: "0 = off." },
+    { shared: true, k: "doh_port", l: "DNS over HTTPS port", t: "int", def: 0, min: 0, max: 65535, hint: "0 = off." },
     { shared: true, k: "tls_cert_file", l: "Certificate file (optional)", t: "text" },
     { shared: true, k: "tls_key_file", l: "Key file (optional)", t: "text" },
     { shared: true, k: "listen_local", l: "Local listeners", t: "bool" },
@@ -2496,14 +2496,14 @@
     { section: "Policy-Based Resolution" },
     { shared: true, k: "policy_on", l: "Policy-Based Resolution enabled", t: "bool" },
     { shared: true, k: "policy_log", l: "Log policy matches", t: "bool" },
-    { shared: true, k: "policy_block_ttl", l: "Blocked answer cache (s)", t: "int", min: 0, max: 604800, hint: "0 = 14400" },
+    { shared: true, k: "policy_block_ttl", l: "Blocked answer cache (s)", t: "int", zeroDef: true, def: 14400, min: 0, max: 604800 },
     { shared: true, k: "policy", l: "Policy rows", t: "policy", wide: true },
     { section: "Conditional Forwarding" },
     { shared: true, k: "forward_lists", l: "Zone lists", t: "zones", wide: true },
     { section: "Block Lists", hdr: "blockpause", note: "Tick the lists to block. Every node downloads its own copy (and keeps the last good one if a download fails). A listed domain and every name below it gets the answer chosen below. Order for a query: Always allow, then the policy rows (a row that blocks is skipped for an allowed name), then the block lists, then the servers." },
     { shared: true, k: "block_lists", l: "Lists", t: "blocklists", wide: true },
     { shared: true, k: "block_action", l: "Blocked answer", t: "select", options: ["null", "nxdomain", "nodata", "refused"], hint: "null = 0.0.0.0 and ::, the default. nxdomain = the name does not exist. nodata = no records. refused = REFUSED." },
-    { shared: true, k: "block_update_hours", l: "Update every (hours)", t: "int", min: 0, max: 720, hint: "0 = 24" },
+    { shared: true, k: "block_update_hours", l: "Update every (hours)", t: "int", zeroDef: true, def: 24, min: 0, max: 720 },
     { shared: true, k: "allow_domains", l: "Always allow", t: "rows", rows: "allowdomains", wide: true, hint: "One domain per row. A name here, and every name below it, is never blocked by a block list or by a policy row that blocks (null, nxdomain, nodata, refused). Rows that forward or rewrite still apply." },
     { section: "Client Rate Limiting", note: "Applies to every gateway that uses these settings, over UDP, TCP, DoT and DoH, before the cache. This node itself is always allowed and never limited. Counters are per node." },
     { shared: true, k: "allowed_clients", l: "Allowed clients", t: "rows", rows: "allowedclients", wide: true, hint: "Networks that may use the proxy, one per row: 10.0.0.0/8, 192.168.1.5, 2001:db8::/32. Empty = everyone. Anyone else is answered REFUSED (dynamic updates too)." },
@@ -2515,26 +2515,26 @@
     { shared: true, k: "client_exempt", l: "Never limited", t: "rows", rows: "exempt", wide: true, hint: "Networks exempt from the rate limit (not from the allowed list), same forms." },
     { section: "Client network (ECS)" },
     { shared: true, k: "ecs", l: "Pass the client's network to the servers", t: "bool" },
-    { shared: true, k: "ecs_prefix4", l: "IPv4 prefix bits", t: "int", min: 1, max: 32 },
-    { shared: true, k: "ecs_prefix6", l: "IPv6 prefix bits", t: "int", min: 1, max: 128 },
+    { shared: true, k: "ecs_prefix4", l: "IPv4 prefix bits", t: "int", def: 24, min: 1, max: 32 },
+    { shared: true, k: "ecs_prefix6", l: "IPv6 prefix bits", t: "int", def: 56, min: 1, max: 128 },
     { section: "Cache" },
     { shared: true, k: "cache", l: "Answer repeated queries from a cache", t: "bool" },
-    { shared: true, k: "cache_entries", l: "Most answers kept", t: "int", min: 100, max: 1000000000 },
-    { shared: true, k: "cache_max_ttl", l: "Cache TTL (s)", t: "int", min: 1, max: 604800 },
-    { shared: true, k: "failure_cache_seconds", l: "Failure cache (s)", t: "int", min: 0, max: 300 },
+    { shared: true, k: "cache_entries", l: "Most answers kept", t: "int", def: 1000000, min: 100, max: 1000000000 },
+    { shared: true, k: "cache_max_ttl", l: "Cache TTL (s)", t: "int", def: 3600, min: 1, max: 604800 },
+    { shared: true, k: "failure_cache_seconds", l: "Failure cache (s)", t: "int", def: 60, min: 0, max: 300 },
     { shared: true, k: "cache_prefetch", l: "Refresh popular answers before they expire", t: "bool" },
-    { shared: true, k: "cache_prefetch_percent", l: "TTL refresh percentage", t: "int", min: 1, max: 50, def: 10, hint: "Default 10." },
-    { shared: true, k: "cache_prefetch_hits", l: "Refresh after this many hits", t: "int", min: 1, max: 1000, def: 2, hint: "Default 2." },
+    { shared: true, k: "cache_prefetch_percent", l: "TTL refresh percentage", t: "int", def: 10, min: 1, max: 50 },
+    { shared: true, k: "cache_prefetch_hits", l: "Refresh after this many hits", t: "int", def: 2, min: 1, max: 1000 },
     { section: "Query hardening" },
     { shared: true, k: "randomize_case", l: "Randomize the case of names sent to the servers", t: "bool", hint: "0x20: an answer must come back with the name spelled the same way. Plain UDP servers only; a server that does not keep the case is asked the usual way." },
     { section: "Timing" },
-    { shared: true, k: "probe_interval_ms", l: "Probe interval (ms)", t: "int", min: 1 },
-    { shared: true, k: "probe_timeout_ms", l: "Probe timeout (ms)", t: "int", min: 1 },
-    { shared: true, k: "query_timeout_ms", l: "Forward timeout (ms)", t: "int", min: 1 },
+    { shared: true, k: "probe_interval_ms", l: "Probe interval (ms)", t: "int", def: 5000, min: 1 },
+    { shared: true, k: "probe_timeout_ms", l: "Probe timeout (ms)", t: "int", def: 1000, min: 1 },
+    { shared: true, k: "query_timeout_ms", l: "Forward timeout (ms)", t: "int", def: 1500, min: 1 },
     { section: "Client names", note: "Top Clients ▸ right-click ▸ Name… sends a dynamic update (RFC 2136) for the name and its reverse record to the primary server of the zone." },
     { shared: true, k: "register_key_name", l: "Registration key name", t: "text" },
     { shared: true, k: "register_key", l: "Registration key (base64)", t: "text" },
-    { shared: true, k: "register_ttl", l: "Registered record TTL (s)", t: "int", min: 0, max: 604800 },
+    { shared: true, k: "register_ttl", l: "Registered record TTL (s)", t: "int", zeroDef: true, def: 300, min: 0, max: 604800 },
   ];
   // Configure ▸ Users ▸ SSO: a tab for the settings every provider shares (the console's address, who may sign in) and one for each provider
   const SSO_TABS = [
@@ -2606,15 +2606,15 @@
   }
 
   const WEB_FIELDS = [
-    { k: "listen", l: "Listen address", t: "port" },
+    { k: "listen", l: "Listen address", t: "port", def: "53853" },
     { shared: true, k: "group", l: "Login groups", t: "text" },
     { shared: true, k: "read_group", l: "Read-only groups", t: "text" },
     { k: "pam_service", l: "PAM service", t: "text" },
-    { k: "session_idle_minutes", l: "Session idle timeout (min)", t: "int", min: 1 },
-    { shared: true, k: "max_failed_logins", l: "Failed logins before lockout", t: "int", min: 1 },
-    { shared: true, k: "failed_login_window_minutes", l: "…within this many minutes", t: "int", min: 1 },
-    { shared: true, k: "lockout_minutes", l: "Lockout lasts (minutes)", t: "int", min: 1 },
-    { shared: true, k: "min_password_length", l: "Minimum password length", t: "int", min: 0, max: 128 },
+    { k: "session_idle_minutes", l: "Session idle timeout (min)", t: "int", def: 30, min: 1 },
+    { shared: true, k: "max_failed_logins", l: "Failed logins before lockout", t: "int", max: 1000, def: 3, min: 1 },
+    { shared: true, k: "failed_login_window_minutes", l: "…within this many minutes", t: "int", max: 10080, def: 1, min: 1 },
+    { shared: true, k: "lockout_minutes", l: "Lockout lasts (minutes)", t: "int", max: 10080, def: 15, min: 1 },
+    { shared: true, k: "min_password_length", l: "Minimum password length", t: "int", zeroDef: true, def: 8, min: 0, max: 128 },
   ];
   const SSO_FIELDS = [
     { shared: true, k: "sso_base_url", brk: true, l: "Address of this console", t: "text" },
@@ -2648,9 +2648,9 @@
     { shared: true, k: "mcp_keys", l: "Keys", t: "mcpkeys", wide: true },
   ];
   const CLUSTER_FIELDS = [
-    { k: "listen", l: "Binding address", t: "port" },
+    { k: "listen", l: "Binding address", t: "port", def: "53854" },
     { k: "self", l: "Advertised address", t: "text" },
-    { k: "sync_interval_sec", l: "Sync interval (s)", t: "int", min: 1, max: 3600 },
+    { k: "sync_interval_sec", l: "Sync interval (s)", t: "int", def: 5, min: 1, max: 3600 },
   ];
   // Configure ▸ Settings ▸ Logs: where this node sends its log (per node, never replicated)
   const SYSLOG_FIELDS = [
@@ -3661,6 +3661,13 @@
     return { el, get: () => keys.map((k) => (k.key ? { name: k.name, access: k.access || "ro", key: k.key, created: k.created } : { name: k.name, access: k.access || "ro", hash: k.hash, created: k.created })) };
   }
 
+  // the valid range under a number field, with its default: "Valid: 10 to 600. Default 30."
+  function rangeHint(f) {
+    if (f.t !== "int" && f.t !== "float") return null;
+    const r = f.range ? "Valid: " + f.range + "." : f.min != null && f.max != null ? "Valid: " + f.min + " to " + f.max + "." : f.min != null ? "Valid: " + f.min + " or more." : f.max != null ? "Valid: up to " + f.max + "." : "";
+    const d = f.def != null ? "Default " + f.def + "." : "";
+    return r || d ? h("span", { class: "hint range" }, [r, d].filter(Boolean).join(" ")) : null;
+  }
   function fieldset(specs, obj, asCards) {
     const getters = {};
     let grid = h("div", { class: "grid" });
@@ -3736,11 +3743,11 @@
       } else if (f.t === "port") {
         // a listen address kept as ":53853" in the file is shown as the port alone; one with a host in front is shown as it is
         input = h("input", { type: "text", inputmode: "numeric", autocomplete: "off", spellcheck: "false" });
-        input.value = v == null ? "" : String(v).replace(/^:(\d+)$/, "$1");
+        input.value = v == null || v === "" ? (f.def || "") : String(v).replace(/^:(\d+)$/, "$1");
         get = () => { const t = input.value.trim(); return /^\d+$/.test(t) ? ":" + t : t; };
       } else if (f.t === "int" || f.t === "float") {
         input = h("input", { type: "number", step: f.t === "float" ? "any" : "1", min: f.min, max: f.max });
-        input.value = v == null || (v === 0 && f.def != null) ? (f.def != null ? f.def : "") : v;   // a setting at its default shows that default
+        input.value = v == null || v === "" || (v === 0 && f.def != null && (f.min > 0 || f.zeroDef)) ? (f.def == null ? "" : f.def) : v;   // empty or "the default" is shown as the default itself
         get = () => (input.value === "" ? 0 : Number(input.value));
       } else {
         input = h("input", { type: "text", autocomplete: "off", spellcheck: "false" });
@@ -3754,7 +3761,7 @@
         const upd = () => { weak.textContent = isWeakKey(input.value) ? "Well known or short: anyone on the network can take over this gateway." : ""; };
         input.addEventListener("input", upd); upd();
       }
-      grid.append(h("label", { class: "f" + (f.wide ? " wide" : "") + (f.brk ? " brk" : "") }, h("span", {}, f.l, sharedTag(f)), input, f.hint ? h("span", { class: "hint" }, f.hint) : null, weak));
+      grid.append(h("label", { class: "f" + (f.wide ? " wide" : "") + (f.brk ? " brk" : "") }, h("span", {}, f.l, sharedTag(f)), input, f.hint ? h("span", { class: "hint" }, f.hint) : null, rangeHint(f), weak));
     }
     return { el: wrap, get: () => Object.fromEntries(Object.entries(getters).map(([k, g]) => [k, g()])) };
   }

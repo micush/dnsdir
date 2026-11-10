@@ -45,6 +45,9 @@ type BGPNeighbor struct {
 	// not announced to until enabled again.
 	Disabled  bool `json:"disabled,omitempty"`
 	LegacyBFD bool `json:"bfd,omitempty"` // v41 setting; ignored (BFD is always on), dropped on the next save
+	// Was is only in a request that changes the settings: the address this neighbor had until now, when its address is
+	// being changed, so that it stays switched off if it was.  It is never saved.
+	Was string `json:"was,omitempty"`
 }
 
 // Default BGP keepalive and hold time (seconds) when the settings leave them empty.  The session uses the lower
@@ -817,7 +820,12 @@ func (m *Mgmt) BGPSet(c BGPConfig, actor string) error {
 		}
 	}
 	for i := range c.Neighbors {
-		c.Neighbors[i].Disabled = was[c.Neighbors[i].Peer]
+		n := &c.Neighbors[i]
+		key := n.Peer
+		if _, renamed := was[n.Was]; renamed && n.Was != "" {
+			key = n.Was // its address is being changed: it is the same neighbor
+		}
+		n.Disabled, n.Was = was[key], ""
 	}
 	note := "bgp: "
 	switch {

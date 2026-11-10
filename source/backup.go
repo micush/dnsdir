@@ -1290,6 +1290,11 @@ var backupKeyRe = regexp.MustCompile(`^ssh-ed25519 [A-Za-z0-9+/]+={0,2}( [^\r\n]
 // authorizeKeys adds the keys (public key lines) to the text of an authorized_keys file, as restricted keys, unless they are
 // in it already.  It returns the new text and how many were added.
 func authorizeKeys(existing string, keys []string) (string, int) {
+	return authorizeKeysAs(existing, keys, "restrict")
+}
+
+// authorizeKeysAs is authorizeKeys with the options the added keys get.
+func authorizeKeysAs(existing string, keys []string, options string) (string, int) {
 	have := map[string]bool{}
 	for _, l := range strings.Split(existing, "\n") {
 		f := strings.Fields(l)
@@ -1311,7 +1316,7 @@ func authorizeKeys(existing string, keys []string) (string, int) {
 			continue
 		}
 		have[f[0]+" "+f[1]] = true
-		out += "restrict " + strings.TrimSpace(k) + "\n"
+		out += options + " " + strings.TrimSpace(k) + "\n"
 		added++
 	}
 	return out, added
@@ -1642,9 +1647,10 @@ func (m *Mgmt) backupOp(cmd string, raw json.RawMessage, actor string) (any, err
 	}
 	var a struct {
 		backupServerArg
-		Password string `json:"password"` // the password of the backup, or the account's for install
-		File     string `json:"file"`
-		Source   string `json:"source"` // "upload" or "server"
+		Password string   `json:"password"` // the password of the backup, or the account's for install
+		File     string   `json:"file"`
+		Source   string   `json:"source"` // "upload" or "server"
+		Keys     []string `json:"keys"`   // backup.provision: the backup keys of the nodes
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &a); err != nil {
@@ -1702,6 +1708,10 @@ func (m *Mgmt) backupOp(cmd string, raw json.RawMessage, actor string) (any, err
 			res["connected"], res["test_error"] = false, terr.Error()
 		}
 		return res, nil
+	case "backup.cluster":
+		return m.BackupCluster(actor)
+	case "backup.provision":
+		return m.backupProvision(a.Keys, actor)
 	case "backup.files":
 		t, pw, err := e.resolve(a.backupServerArg)
 		if err != nil {

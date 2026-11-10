@@ -4030,8 +4030,29 @@
       tbody.dispatchEvent(new Event("change", { bubbles: true }));
       pickRow(null);   // the Add button again
     });
+    // Use the cluster nodes: every node makes the account, the directory and the keys itself and becomes a server of the list
+    const clusterBtn = h("button", { type: "button", class: "btn", title: "Every node keeps the backups of the others. The account, keys and directory are made on each." }, "Use the cluster nodes");
+    const clusterOut = h("span", { class: "small bad-text" });
+    clusterBtn.addEventListener("click", async () => {
+      clusterBtn.disabled = true; clusterBtn.textContent = "Setting up…"; clusterOut.textContent = "";
+      try {
+        const r = (await api("POST", "/api/backup/cluster", {})).data;
+        // the server saved the new list: show it, and make it what this page holds, without another save
+        pickRow(null);
+        clear(tbody);
+        (r.targets || []).forEach(addRow);
+        if (!rows().length) addRow();
+        pickRow(null);
+        if (state.cfg && state.cfg.dns) state.cfg.dns.backup = { ...(state.cfg.dns.backup || {}), targets: r.targets || [] };
+        const bad = (r.nodes || []).filter((n) => n.error).map((n) => n.node + ": " + n.error);
+        if (r.full) bad.push(r.full + " node(s) not added: at most 8 servers");
+        clusterOut.textContent = bad.join(" · ");
+        show();
+      } catch (e) { clusterOut.textContent = e.message; }
+      finally { clusterBtn.disabled = false; clusterBtn.textContent = "Use the cluster nodes"; }
+    });
     pickRow(null);
-    const bar = notSetting(h("div", { class: "toolbar tight" }, addBtn, testBtn, keyBtn, delBtn));
+    const bar = notSetting(h("div", { class: "toolbar tight" }, addBtn, testBtn, keyBtn, delBtn, ...(state.clustered ? [clusterBtn, clusterOut] : [])));
     notSetting(keyForm);
     const table = h("div", { class: "scroll" }, h("table", { class: "tight bk-table" },
       h("thead", {}, h("tr", {}, BACKUP_COLS.map((c) => h("th", {}, c[1])))), tbody));
@@ -6654,12 +6675,17 @@
       const desc = h("input", { type: "text", value: n.description || "", maxlength: "60", "aria-label": "Description of " + n.peer });
       const pw = h("input", { type: "password", value: n.password || "", autocomplete: "new-password", "aria-label": "Password for " + n.peer });
       const mh = h("input", { class: "as", type: "text", inputmode: "numeric", pattern: "[0-9]*", autocomplete: "off", value: n.multihop > 1 ? String(n.multihop) : "", placeholder: "off", "aria-label": "Multihop of " + n.peer });
-      const commit = () => {
+      // the address can be changed like the rest of the row; "was" tells the server it is the same neighbor
+      const peer = h("input", { class: "mono", type: "text", value: n.peer, spellcheck: "false", autocomplete: "off", "aria-label": "Address of " + n.peer });
+      const commit = async () => {
+        const addr = peer.value.trim() || n.peer;
         const next = clone(cfg);
-        next.neighbors[idx] = { peer: n.peer, remote_as: Number(as.value) || 0, description: desc.value.trim(), password: pw.value, multihop: Number(mh.value) || 0 };
-        save(next);
+        next.neighbors[idx] = { peer: addr, remote_as: Number(as.value) || 0, description: desc.value.trim(), password: pw.value, multihop: Number(mh.value) || 0 };
+        if (addr === n.peer) { peer.value = n.peer; save(next); return; }
+        next.neighbors[idx].was = n.peer;
+        if (await save(next)) { if (sel === n.peer) sel = addr; drawNeighbors(); }
       };
-      for (const el of [as, desc, pw, mh]) el.addEventListener("change", commit);
+      for (const el of [peer, as, desc, pw, mh]) el.addEventListener("change", commit);
       // on/off for this one neighbor (the same as Operate ▸ Anycast): off shuts the session down and keeps the neighbor
       const on = h("input", { type: "checkbox", checked: !n.disabled, disabled: !!cfg.disabled, title: cfg.disabled ? "BGP is switched off on this node" : "Off: the session is shut down and nothing is announced to this neighbor", "aria-label": "Neighbor " + n.peer + " enabled" });
       on.addEventListener("change", () => {
@@ -6670,7 +6696,7 @@
           await load();
         });
       });
-      return h("tr", { "data-peer": n.peer }, h("td", { class: "mono" }, n.peer), h("td", {}, as), h("td", {}, desc), h("td", {}, withEye(pw)), h("td", {}, mh), h("td", {}, on));
+      return h("tr", { "data-peer": n.peer }, h("td", {}, peer), h("td", {}, as), h("td", {}, desc), h("td", {}, withEye(pw)), h("td", {}, mh), h("td", {}, on));
     }
 
     // the new row: becomes a neighbor once it has an address and an AS

@@ -161,6 +161,7 @@ the web GUI):
                    Configure > DNS proxy > Resolution > Block Lists)
   Upgrade          --update-status  --update-history  --update-upload FILE
   Backup           --backup-status  --backup-now  --restore FILE [--restore-password-file F]
+                   --backup-cluster   (every node keeps the backups of the others)
                    --update-apply  --update-push all|ADDR,...
                    --update-cancel all|ADDR,...  --update-auto on|off
                    --update-repo URL|default   (where "fetch online" downloads from;
@@ -350,6 +351,7 @@ func main() {
 		restorePwF   = fs.String("restore-password-file", "", "")
 		backupNow    = fs.Bool("backup-now", false, "")
 		backupStat   = fs.Bool("backup-status", false, "")
+		backupClus   = fs.Bool("backup-cluster", false, "")
 		cli          = registerCLIFlags(fs)
 	)
 	// install.sh runs this once, as root, before it creates the group and the PAM service, so an
@@ -430,6 +432,9 @@ func main() {
 	case *backupNow:
 		op(*sock, "backup.run", nil)
 		fmt.Println("A backup has started on this node. See how it went with: dnsdir --backup-status")
+		return
+	case *backupClus:
+		runBackupCluster(*sock)
 		return
 	case *backupStat:
 		showBackupStatus(*sock)

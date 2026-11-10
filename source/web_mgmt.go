@@ -21,6 +21,8 @@ func (w *WebServer) mgmtRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/backup/test", w.authed(w.op("backup.test", nil)))
 	mux.HandleFunc("POST /api/backup/install", w.authed(w.op("backup.install", nil)))
 	mux.HandleFunc("POST /api/backup/files", w.authed(w.op("backup.files", nil)))
+	mux.HandleFunc("POST /api/backup/cluster", w.authed(w.op("backup.cluster", nil)))
+	mux.HandleFunc("POST /api/backup/provision", w.authed(w.op("backup.provision", nil)))
 	mux.HandleFunc("POST /api/backup/upload", w.authedCT(w.handleBackupUpload, false))
 	mux.HandleFunc("POST /api/backup/restore/prepare", w.authed(w.op("backup.restore.prepare", nil)))
 	mux.HandleFunc("POST /api/backup/restore/apply", w.authed(w.op("backup.restore.apply", nil)))

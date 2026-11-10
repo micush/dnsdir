@@ -1,5 +1,34 @@
 # Changelog
 
+## [v645] - 2026-11-10 — Back up to the cluster nodes in one step; a BGP neighbor's address can be changed
+
+### Added
+- Configure ▸ Backup ▸ Servers ▸ **Use the cluster nodes** (shown in a cluster) and `dnsdir --backup-cluster` (`POST /api/backup/cluster`), as in MCP Network Director v118. One press replaces doing this by hand on every node: each node makes itself a local account `dnsdirbackup` (no password, key only), a directory `backups` in its home, and an `authorized_keys` with the backup keys of all the nodes; every node is then added to the shared list of servers. No password is typed or kept.
+- The keys are added as `restrict,command="internal-sftp"`: file transfer only, no shell command. The account has a real shell (`/bin/sh`) because many SSH servers start SFTP through the account's shell.
+- It can be pressed again: what is already there is left alone. A node that does not answer is named in red beside the button (and by the CLI, which then exits 1).
+- `POST /api/backup/provision` is what a node sends the others (the keys to authorize), through the cluster's signed relay; refused for read-only users like every other change.
+- Help (Configure ▸ Backup): a step-by-step for it. Usage text: `--backup-cluster`.
+
+### Changed
+- Configure ▸ Anycast ▸ Neighbors: the address of a neighbor can be changed after it is added. The first column of a row is now a box like the others: type the new address and leave it. Until now the address was plain text and the only way was to remove the neighbor and add it again.
+- The neighbor stays the same neighbor: its AS, description, password and multihop are kept, and one that was switched off stays off. The page sends the old address along (`was`) with `PUT /api/bgp`; it is used to carry the on/off state over and is never saved. A bad address or one another neighbor already has is refused and the old one comes back.
+- Help (Configure ▸ Anycast) says so. From the command line the way is unchanged: remove the neighbor and add it with the new address.
+
+### Fixed
+- Configure ▸ Backup ▸ Servers ▸ Install key: clicking the eye beside the password made the box narrower. Its width was set by a rule for `input[type=password]` only, and the eye turns the box into `type=text`. Test `TestPasswordBoxKeepsItsSizeWhenRevealed` fails for any such rule.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...` (with PAM, amd64), `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64` (cgo off: the PAM stub), `node --check` on `app.js` and `help.js`.
+- New tests (`backupcluster_test.go`): the account is made once, the keys are written once with the SFTP-only options, modes 700/600, a second run changes nothing, uid 0 is refused, a linked `.ssh` is not followed, no cluster is an error.
+- New test `TestBGPNeighborAddressCanBeChanged`: the address changes, the neighbor stays switched off, the old address is in neither the answer nor the file, a neighbor added without `was` starts switched on, a duplicate or bad address is refused.
+- Live, as root in the sandbox: a real `sshd`, two real daemons clustered on 127.0.0.1 and 127.0.0.2. `--backup-cluster` on the replica: the account was made with password field `*`, `.ssh` 700, `authorized_keys` 600 with both nodes' keys, `backups` 700; both nodes' config files got the two servers. `--backup-now` on both: each archive arrived and `--backup-status` shows success on both servers. `ssh … id` with a node's key answers "This service allows sftp connections only".
+
+### Not verified
+- The page was not opened in a browser for this version: the button, the neighbor address box and the password box are the same code as in MCP Network Director, where they were driven in headless Chromium against real daemons. Here only `node --check` and the API/CLI were run.
+- The two daemons ran on one host and shared one account; making the account on a separate machine through the relay was not run. Only Ubuntu's OpenSSH and `useradd` were used; RHEL-family hosts and an `sshd` with `AllowUsers`/`AllowGroups` were not tried.
+- A node that is down during the run, and a cluster of more than 8 nodes (the list holds 8 servers), were not run.
+- BGP: no FRR session was watched moving to the new address.
+
 ## [v644] - 2026-11-07 — field descriptions: one line, never longer than the field
 
 ### Changed

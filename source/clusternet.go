@@ -119,6 +119,8 @@ type joinCode struct {
 type announceMsg struct {
 	Epoch       uint64 `json:"epoch"`
 	PrimaryAddr string `json:"primary_addr"`
+	// Home, set when the role is handed over for an update, is the node the new primary gives it back to once the update is over.
+	Home string `json:"home,omitempty"`
 }
 
 type adminMsg struct {
@@ -157,6 +159,7 @@ type Cluster struct {
 	conflict   string
 	// primaryDownSince is when this replica last began failing to reach the primary without a break (zero: it can)
 	primaryDownSince time.Time
+	returnSince      time.Time // since when the update has looked over, so the primary may go back home (handover.go)
 	kick             chan struct{}
 	syncMu           sync.Mutex
 }
@@ -683,6 +686,11 @@ func (c *Cluster) handleAnnounce(rw http.ResponseWriter, r *http.Request, caller
 	}
 	if snap.Epoch != before.Epoch {
 		infof("cluster: epoch %d — %s is primary (this node is now %s)", snap.Epoch, snap.PrimaryAddr, snap.Role)
+		if snap.Role == RolePrimary {
+			c.setPrimaryHome(m.Home) // a handover for an update says where the role goes back to; any other change of primary says nothing
+		} else {
+			c.setPrimaryHome("")
+		}
 		c.syncSoon()
 	}
 	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "epoch": snap.Epoch, "role": snap.Role})
@@ -1083,6 +1091,7 @@ func (c *Cluster) Promote(by string) (ClusterSnapshot, error) {
 		return ClusterSnapshot{}, err
 	}
 	snap := c.node.Promote()
+	c.setPrimaryHome("") // a promotion is the administrator's (or the failover's) choice: nothing takes the role back
 	warnf("cluster: this node was promoted to primary (epoch %d) by %s", snap.Epoch, by)
 	c.announce(snap)
 	return snap, nil
@@ -1096,7 +1105,7 @@ func (c *Cluster) announce(snap ClusterSnapshot) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), peerTimeout)
 			defer cancel()
-			if err := c.call(ctx, p, "POST", "/cluster/announce", announceMsg{snap.Epoch, snap.PrimaryAddr}, nil, peerTimeout); err != nil {
+			if err := c.call(ctx, p, "POST", "/cluster/announce", announceMsg{Epoch: snap.Epoch, PrimaryAddr: snap.PrimaryAddr}, nil, peerTimeout); err != nil {
 				warnf("cluster: could not announce epoch %d to %s: %v (it will learn on its next sync)", snap.Epoch, p.Addr, err)
 			}
 		}(p)
@@ -1820,6 +1829,7 @@ func heldBySafety(addr string, gws []GwState, members []peerGateways) bool {
 // updateTick decides whether this node should update now (see umiss's
 // maybeSelfUpdateManager).  Called every sync interval on every node.
 func (m *Mgmt) updateTick(ctx context.Context) {
+	m.returnPrimaryHome() // after an update, the primary role goes back to the node that had it
 	self := m.cl.selfAddrForEvents()
 	run := version()
 	intent := m.upd.Intent()

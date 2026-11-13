@@ -1,5 +1,19 @@
 # Changelog
 
+## [v646] - 2026-11-13 — After a cluster update the primary role is back where it was
+
+### Changed
+- A primary that restarts into an update still hands the primary role to another member first, but now the role is only lent: the node that was primary when the update began is remembered as its home (`primaryHome`, the file `update/primary_home` in the state directory, carried by the hand-over announcement so it follows the role from node to node in a rolling update, and a node that has to hand the role on prefers the home). When the update is over, the node that holds the role gives it back (`returnPrimaryHome`, run by every sync): nothing queued, nothing installing or restarting, with auto-update every reachable member on the same version (or failed), the home up, not paused and not failed, all for 30 seconds in a row.
+- The home is forgotten when its update failed (the role stays where it is, a warning is logged), when it is no longer a member, after 12 hours, and on any promotion by hand or by failover. A restart, shut down, power action, scheduled task or backup restore hands the role over as before and leaves it where it lands.
+- The announcement of a new primary has an optional `home` field; older nodes ignore it, so a cluster in the middle of the upgrade works as before (the role stays where it lands until every node runs this version).
+- `CLAUDE.md`, the README and the cluster help say that promotion is still never automatic, apart from this planned, administrator-started hand-over and its return. Same change as MCP Network Director v154.
+
+### Verified
+- `TestPrimaryReturnsHomeAfterUpdate` (two in-process nodes), `TestPrimaryHomeSurvivesARollingUpdate` (three nodes, two hand-overs in a row, the role ends at the first node) and `TestPrimaryReturnTarget` (each condition, and the home preferred as successor). Full `go test -race`, `gofmt`, `go vet`, no-cgo vet and tests, cross-compiles.
+
+### Not verified
+- Not run on real daemons with a real `--update-push all`, only with the in-process clusters of the tests; the 30 seconds of settling and the interaction with the canary soak were not exercised live.
+
 ## [v645] - 2026-11-10 — Back up to the cluster nodes in one step; a BGP neighbor's address can be changed
 
 ### Added

@@ -1131,3 +1131,143 @@ func TestUpdaterHoldsSource(t *testing.T) {
 		t.Fatal("released")
 	}
 }
+
+// An update moves the primary role away from the node that had it, and it goes back there when the update is over.
+func TestPrimaryReturnsHomeAfterUpdate(t *testing.T) {
+	old := primaryReturnAfter
+	primaryReturnAfter = 0
+	defer func() { primaryReturnAfter = old }()
+	a, b := newTNode(t, "A"), newTNode(t, "B")
+	b.join(a)
+	for i := 0; i < 2; i++ {
+		a.sync()
+		b.sync()
+	}
+	if to, err := a.mg.cl.HandOverPrimaryForUpdate("test", "an update"); err != nil || to != b.addr {
+		t.Fatalf("hand over: %q %v", to, err)
+	}
+	if h := b.mg.cl.primaryHome(); h != a.addr {
+		t.Fatalf("B's home for the role is %q, want A %q", h, a.addr)
+	}
+	if h := a.mg.cl.primaryHome(); h != "" {
+		t.Fatalf("A kept a home after giving the role away: %q", h)
+	}
+	for i := 0; i < 2; i++ {
+		a.sync()
+		b.sync()
+	}
+	// still queued: the role stays
+	b.mg.upd.Push([]string{b.addr}, "test")
+	b.mg.returnPrimaryHome()
+	if b.mg.cl.node.Snapshot().Role != RolePrimary {
+		t.Fatal("the role went back while an update was still queued")
+	}
+	b.mg.upd.Cancel([]string{b.addr}, "test")
+	b.mg.returnPrimaryHome()
+	as, bs := a.mg.cl.node.Snapshot(), b.mg.cl.node.Snapshot()
+	if as.Role != RolePrimary || bs.Role != RoleReplica || bs.PrimaryAddr != a.addr {
+		t.Fatalf("after the update: A %s, B %s (primary %s)", as.Role, bs.Role, bs.PrimaryAddr)
+	}
+	if a.mg.cl.primaryHome() != "" || b.mg.cl.primaryHome() != "" {
+		t.Fatal("a home is left after the role went back")
+	}
+	// a plain hand over (a restart, not an update) leaves the role where it lands
+	if to, _ := a.mg.cl.HandOverPrimary("test", "a restart"); to != b.addr {
+		t.Fatalf("hand over: %q", to)
+	}
+	b.mg.returnPrimaryHome()
+	if b.mg.cl.node.Snapshot().Role != RolePrimary {
+		t.Fatal("the role went back after a plain restart")
+	}
+	// a promotion by hand drops the home
+	if err := os.WriteFile(b.mg.cl.homePath(), []byte(a.addr+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.mg.cl.Promote("admin"); err != nil || b.mg.cl.primaryHome() != "" {
+		t.Fatalf("promote kept the home: %q %v", b.mg.cl.primaryHome(), err)
+	}
+}
+
+func TestPrimaryReturnTarget(t *testing.T) {
+	pv := func(addr string, mods ...func(*PeerView)) PeerView {
+		p := PeerView{Addr: addr, Reachable: true, Version: "2"}
+		for _, m := range mods {
+			m(&p)
+		}
+		return p
+	}
+	self := pv("10.0.0.2", func(p *PeerView) { p.Self = true; p.IsPrimary = true })
+	for _, tc := range []struct {
+		name        string
+		peers       []PeerView
+		intent      UpdateIntent
+		busy        bool
+		ready, drop bool
+	}{
+		{"all done", []PeerView{self, pv("10.0.0.1"), pv("10.0.0.3")}, UpdateIntent{}, false, true, false},
+		{"home gone", []PeerView{self, pv("10.0.0.3")}, UpdateIntent{}, false, false, true},
+		{"home failed", []PeerView{self, pv("10.0.0.1", func(p *PeerView) { p.UpdateFailed = "x" })}, UpdateIntent{}, false, false, true},
+		{"home down", []PeerView{self, pv("10.0.0.1", func(p *PeerView) { p.Reachable = false })}, UpdateIntent{}, false, false, false},
+		{"queued", []PeerView{self, pv("10.0.0.1")}, UpdateIntent{Pending: []string{"10.0.0.3"}}, false, false, false},
+		{"another node updating", []PeerView{self, pv("10.0.0.1"), pv("10.0.0.3", func(p *PeerView) { p.Updating = true })}, UpdateIntent{}, false, false, false},
+		{"another node restarting", []PeerView{self, pv("10.0.0.1"), pv("10.0.0.3", func(p *PeerView) { p.Restarting = true; p.Reachable = false })}, UpdateIntent{}, false, false, false},
+		{"this node busy", []PeerView{self, pv("10.0.0.1")}, UpdateIntent{}, true, false, false},
+		{"auto, one on the old version", []PeerView{self, pv("10.0.0.1"), pv("10.0.0.3", func(p *PeerView) { p.Version = "1" })}, UpdateIntent{AutoAll: true}, false, false, false},
+		{"auto, the old version failed", []PeerView{self, pv("10.0.0.1"), pv("10.0.0.3", func(p *PeerView) { p.Version = "1"; p.UpdateFailed = "x" })}, UpdateIntent{AutoAll: true}, false, true, false},
+		{"not queued, on another version", []PeerView{self, pv("10.0.0.1"), pv("10.0.0.3", func(p *PeerView) { p.Version = "1" })}, UpdateIntent{}, false, true, false},
+	} {
+		ready, drop, why := primaryReturnTarget(tc.peers, "10.0.0.1", tc.intent, tc.busy)
+		if ready != tc.ready || drop != tc.drop {
+			t.Errorf("%s: ready=%v drop=%v (%s), want %v %v", tc.name, ready, drop, why, tc.ready, tc.drop)
+		}
+	}
+	// the home is preferred when it can take the role
+	peers := []PeerView{self, pv("10.0.0.1"), pv("10.0.0.3", func(p *PeerView) { p.SharedRev = 9 })}
+	if got := pickSuccessorPrefer(peers, "2", "10.0.0.1"); got != "10.0.0.1" {
+		t.Errorf("home not preferred: %q", got)
+	}
+	if got := pickSuccessorPrefer(peers, "2", "10.0.0.9"); got != "10.0.0.3" {
+		t.Errorf("an unknown home changed the pick: %q", got)
+	}
+}
+
+// In a rolling update the role moves on from node to node, and still ends up at the node that had it first.
+func TestPrimaryHomeSurvivesARollingUpdate(t *testing.T) {
+	old := primaryReturnAfter
+	primaryReturnAfter = 0
+	defer func() { primaryReturnAfter = old }()
+	a, b, c := newTNode(t, "A"), newTNode(t, "B"), newTNode(t, "C")
+	b.join(a)
+	c.join(a)
+	all := []*tnode{a, b, c}
+	syncAll := func() {
+		for i := 0; i < 2; i++ {
+			for _, n := range all {
+				n.sync()
+			}
+		}
+	}
+	syncAll()
+	byAddr := map[string]*tnode{a.addr: a, b.addr: b, c.addr: c}
+	first, err := a.mg.cl.HandOverPrimaryForUpdate("test", "an update")
+	if err != nil || first == "" {
+		t.Fatalf("A: %q %v", first, err)
+	}
+	syncAll()
+	x := byAddr[first]
+	// the node that holds it now is updated next; the role goes to A again, or to the third node with A still the home
+	second, err := x.mg.cl.HandOverPrimaryForUpdate("test", "an update")
+	if err != nil || second == "" {
+		t.Fatalf("%s: %q %v", first, second, err)
+	}
+	syncAll()
+	y := byAddr[second]
+	if y.mg.cl.node.Snapshot().Role != RolePrimary || y.mg.cl.primaryHome() != a.addr {
+		t.Fatalf("after two hand overs %s is %s with home %q, want primary with home %s", second, y.mg.cl.node.Snapshot().Role, y.mg.cl.primaryHome(), a.addr)
+	}
+	y.mg.returnPrimaryHome()
+	syncAll()
+	if a.mg.cl.node.Snapshot().Role != RolePrimary {
+		t.Fatalf("the role did not end at A: A is %s", a.mg.cl.node.Snapshot().Role)
+	}
+}

@@ -290,7 +290,7 @@ README), so the version and changelog describe the final tree.
   root-only (`SO_PEERCRED`); cluster requests need the pinned node identity
   *and* the HMAC signature with timestamp/nonce; join codes are single use and
   expire after an hour; promotion is always an explicit admin action (never
-  automatic); only the primary applies shared-config changes; a GUI
+  automatic), apart from the primary role moving on purpose with a planned restart or update and, for an update, going back to the node that had it when the update is over (`primaryHome`, `returnPrimaryHome`); only the primary applies shared-config changes; a GUI
   certificate change must not restart the listener or drop sessions; an update
   never replaces the running binary without keeping `dnsdir.prev` and the boot
   guard (auto rollback after repeated failed starts). The management layer

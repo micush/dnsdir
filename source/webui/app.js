@@ -4902,10 +4902,9 @@
         const lines = (t) => t.value.split("\n").map((s) => s.trim()).filter(Boolean);
         tools = h("div", {},
           section("Upload your own certificate",
-            h("p", { class: "hint" }, "Paste the certificate and its private key, or choose the files. It is used for the next connection — nothing restarts and nobody is logged out. Nodes in a cluster get the same certificate automatically."),
             h("div", { class: "grid2" },
-              h("label", { class: "f" }, "Certificate", cert, certFile),
-              h("label", { class: "f" }, "Private key", key, keyFile)),
+              h("label", { class: "f" }, h("span", {}, "Certificate", sharedTag({ shared: true })), cert, certFile),
+              h("label", { class: "f" }, h("span", {}, "Private key", sharedTag({ shared: true })), key, keyFile)),
             h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "button", onclick: async (ev) => {
               ev.target.disabled = true;
               try {

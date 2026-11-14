@@ -1,5 +1,18 @@
 # Changelog
 
+## [v647] - 2026-11-14 — Certificate page: no description text, equal-sized boxes, "shared" tag
+
+### Changed
+- Web GUI ▸ Certificates ▸ "Upload your own certificate", same change as MCP Network Director v156 and v157: the paragraph under the heading is gone (the same facts — used from the next connection, no restart, nobody signed out, copied to every cluster node — are already in the page's help topic), and the **Certificate** and **Private key** boxes are the same size (both 7 rows; the key box was already 7).
+- The **Certificate** and **Private key** labels carry the same "shared" tag as the other cluster-wide fields (`sharedTag`, shown only when the node is in a multi-node cluster), because the certificate is replicated from the primary.
+- Nothing changed in how the certificate is installed or shared. No Go change.
+
+### Verified
+- `node --check webui/app.js`, `gofmt -l`, `go build`, `go vet ./...` and the full `go test -race -count=1 ./...` (native, with PAM): all pass.
+
+### Not verified
+- The page was not looked at in Chromium (light and dark) or in a clustered GUI.
+
 ## [v646] - 2026-11-13 — After a cluster update the primary role is back where it was
 
 ### Changed

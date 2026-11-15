@@ -1,5 +1,29 @@
 # Changelog
 
+## [v654] - 2026-11-15 — Log page: the filter box looks like the other fields
+
+### Fixed
+- The filter box on the Log page was drawn in the browser's own style (square corners, no border, a different font and height from the lists beside it) because the style rule for fields did not list `type=search`. It now has the same background, border, corners, padding and focus ring as the other fields.
+
+### Verified
+- `gofmt -l`, `go vet`, the full `go test -race -count=1 ./...` and `CGO_ENABLED=0 go test -count=1 ./...`.
+
+### Not verified
+- Not opened in a browser; the look was judged from your screenshot and the style rules. Another page with a `type=search` field would change in the same way (this is the only one in the page script).
+
+## [v653] - 2026-11-15 — DNS page: every number in a tile
+
+### Changed
+- The gateway cards on the DNS page no longer carry numbers in the header. The cache hit rate and entries kept, Fast Lane narrowed, client subnet sent, and the DoT and DoH ports are now a row of tiles at the top of each card, the same kind of tile as the node's totals above them (the cache tile there still has its Clear button). The hover text that was on the old header items is on the tiles.
+- Removed from the header: "N tests per round, down at X% failing", "spread within N%", and the "answering on address:port" line. The header keeps the gateway name and the warnings (every server down, client limit, allowed clients). A gateway that answers on no address of this node shows a "not answering on this node" warning there.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, the full `go test -race -count=1 ./...` and `CGO_ENABLED=0 go test -count=1 ./...`.
+
+### Not verified
+- The page was not opened in a browser; the tile row's spacing and wrapping are unseen.
+- The tests-per-round, down-percent, spread and listen-address values are no longer shown anywhere on this page (they are in Configure ▸ DNS and `--show-dns`).
+
 ## [v652] - 2026-11-15 — Fast Lane: exact-name exclusions
 
 ### Added

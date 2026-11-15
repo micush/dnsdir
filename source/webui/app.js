@@ -2394,27 +2394,21 @@
           const maxE = Math.max(1, ...p.servers.filter((s) => s.healthy).map((s) => s.ewma_ms));
           out.append(h("div", { class: "card" },
             h("header", {}, h("h2", {}, p.key ? "Gateway " + p.key + (p.name ? " · " + p.name : "") : "Shared Pool" + (p.groups.length ? " (Group " + p.groups.join(", ") + ")" : "")),
-              h("span", { class: "muted" }, p.probes + " test" + (p.probes === 1 ? "" : "s") + " per round, down at " + p.down_percent + "% failing"),
-              p.ecs ? pill("client subnet sent · " + p.ecs_sent, "info") : h("span", { class: "muted small" }, "servers see this node's address"),
               p.using_fallback ? pill("every server is down: using the fallback servers", "warn") : null,
               p.client_rate ? pill("limit " + p.client_rate + "/s per client" + (p.limited ? " · " + p.limited.toLocaleString() + " turned away" : ""), p.limited ? "warn" : "info") : null,
               p.allowed_clients ? pill("allowed clients · " + p.allowed_clients + " network" + (p.allowed_clients === 1 ? "" : "s") + (p.denied ? " · " + p.denied.toLocaleString() + " refused" : ""), p.denied ? "warn" : "info") : null,
-              p.dot_port ? pill("DoT · " + p.dot_port, "info") : null,
-              p.doh_port ? pill("DoH · " + p.doh_port, "info") : null,
-              p.spread ? h("span", { class: "muted small", title: "Servers within " + p.spread_band + "% of the fastest one's latency take turns; slower ones are fallbacks." }, "spread within " + p.spread_band + "%") : null,
-              (() => {
-                const c = p.cache, n0 = (n) => Number(n || 0).toLocaleString();
-                if (!c || !c.on) return h("span", { class: "muted small" }, "cache off");
-                const t = c.hits + c.misses;
-                return h("span", { class: "muted small", title: "Answers kept: " + n0(c.entries) + " of " + n0(c.max) + ". Not cacheable (never kept): " + n0(c.bypassed) + ". Pushed out when full: " + n0(c.evicted) + ". Kept at most " + n0(c.max_ttl) + " s. Answered with a remembered failure: " + n0(c.fail_hits) + "." },
-                  "cache " + (t ? (100 * c.hits / t).toFixed(0) + "% hits" : "empty") + " · " + n0(c.entries) + " kept");
-              })(),
-              p.fastlane && p.fastlane.on ? h("span", { class: "muted small", title: "Answers with several addresses of one family are cut down to the fastest one (" + Number(p.fastlane.narrowed || 0).toLocaleString() + " so far). " + Number(p.fastlane.addresses || 0).toLocaleString() + " addresses measured, " + Number(p.fastlane.probes || 0).toLocaleString() + " measurements, " + Number(p.fastlane.probe_failed || 0).toLocaleString() + " without an answer. A client keeps such an answer at most " + p.fastlane.ttl + " s." }, "fast lane · " + Number(p.fastlane.narrowed || 0).toLocaleString() + " narrowed") : null,
-              h("span", { class: "spacer" }),
-              (() => {
-                const on = (p.groups.length ? p.groups : [p.key]).flatMap((g) => addrsOf[g] || []);
-                return on.length ? h("span", { class: "mono small answering" }, "answering on " + on.join(" · ")) : h("span", { class: "muted small" }, "not answering on this node");
-              })()),
+              (p.groups.length ? p.groups : [p.key]).some((g) => (addrsOf[g] || []).length) ? null : pill("not answering on this node", "warn")),
+            (() => {
+              const c = p.cache, n0 = (n) => Number(n || 0).toLocaleString(), fl = p.fastlane;
+              const t = c && c.on ? c.hits + c.misses : 0;
+              return h("div", { class: "stats gwstats" },
+                stat("Cache hits", c && c.on ? (t ? (100 * c.hits / t).toFixed(0) + "%" : "empty") : "off", false,
+                  c && c.on ? "Answers kept: " + n0(c.entries) + " of " + n0(c.max) + ". Not cacheable (never kept): " + n0(c.bypassed) + ". Pushed out when full: " + n0(c.evicted) + ". Kept at most " + n0(c.max_ttl) + " s. Answered with a remembered failure: " + n0(c.fail_hits) + "." : null),
+                stat("Fast Lane narrowed", fl && fl.on ? n0(fl.narrowed) : "off", false,
+                  fl && fl.on ? "Answers with several addresses of one family are cut down to the fastest one. " + n0(fl.addresses) + " addresses measured, " + n0(fl.probes) + " measurements, " + n0(fl.probe_failed) + " without an answer. A client keeps such an answer at most " + fl.ttl + " s." : null),
+                stat("Client subnet sent", p.ecs ? n0(p.ecs_sent) : "off", false, p.ecs ? null : "Servers see this node's address"),
+                stat("DoT / DoH", p.dot_port || p.doh_port ? (p.dot_port || "–") + " / " + (p.doh_port || "–") : "off", false, "Ports of the encrypted listeners"));
+            })(),
             h("div", { class: "scroll" }, h("table", { class: "dns" },
               h("thead", {}, h("tr", {}, ["Rank", "Server name", "Server IP", "State", "Average (ms)", "Last (ms)", "OK", "Fail", "Served"].map((t, i) => h("th", { class: i >= 4 && i <= 8 ? "num" : "", title: i === 4 ? "Average response time. Newer answers count more than older ones (Configure ▸ DNS ▸ Health & balancing ▸ Latency smoothing). Servers are ranked by it." : i === 5 ? "The latest single answer time" : null }, t)))),
               // a failing server's last error goes on a line of its own under its row, as wide as the table

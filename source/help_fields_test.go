@@ -65,7 +65,7 @@ func TestHelpCoversEveryField(t *testing.T) {
 	// section of the page's settings -> panel
 	sections := map[string]string{
 		"Upstream servers": "config_dns0", "Load Balancing": "config_dns1", "Timing": "config_dns1", "Client names": "config_dns1",
-		"Listeners": "config_dns2", "Policy-Based Resolution": "config_dns3_0", "Sort List": "config_dns3_1",
+		"Listeners": "config_dns2", "Policy-Based Resolution": "config_dns3_0", "Sort List": "config_dns3_1", "Fast Lane": "config_dns3_4",
 		"Conditional Forwarding": "config_dns3_2", "Block Lists": "config_dns3_3",
 		"Client network (ECS)": "config_dns4", "Cache": "config_dns4", "Query hardening": "config_dns4", "Client Rate Limiting": "config_dns5",
 	}

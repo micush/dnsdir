@@ -377,6 +377,26 @@ const DNSDIR_HELP = {
       ["cli", "dnsdir --show-config"],
     ],
   },
+  config_dns3_4: {
+    title: "Configure: DNS ▸ Resolution ▸ Fast Lane",
+    body: [
+      "Sends a client only the fastest address of a name that has several. The node times each address with a TCP connection, in the background, and answers with the quickest one.",
+      ["h", "What you can do here"],
+      ["ul", ["Switch Fast Lane on or off. It is off by default.", "Choose how long a client may keep such an answer.", "List names it must never touch."]],
+      ["h", "How it works"],
+      ["ul", ["When an answer holds two or more IPv4 addresses, or two or more IPv6 addresses, for the name asked, each address is timed with an ICMP echo, which any host can answer whatever it serves, and with a TCP connection to port 443 when the echo gets no reply. A refused connection counts as an answer: the host is there, and the refusal took one round trip.", "The timing is never done while a client waits. The first answer for a name goes out as the servers gave it, and the addresses are timed meanwhile. The next answers hold only the fastest address of each family. Until every address of a family has been timed, the answer is left as it came.", "Addresses whose time is within the **Spread band** of the fastest one take turns (Configure ▸ DNS ▸ Health & balancing), so a one-millisecond difference does not send every client to the same host. With **Spread** off, only the single fastest address is used.", "An address that did not answer is not used. If none answered, the answer is left as it came.", "A time is used for ten minutes, and an address that is asked for again after a minute is timed again, smoothed with **Latency smoothing**.", "The records kept get a TTL of at most **Answer TTL**, so a client does not keep a choice that has gone bad for as long as the servers' TTL. The cached answer is not changed; the choice is made as the answer is sent, after the **Sort list**.", "The times are measured by each node from where it is, and are not shared between nodes."]],
+      ["h", "What is never changed"],
+      ["ul", ["An answer that carries signatures (RRSIG, DNSSEC): a client that validates would refuse an address set with records missing.", "An answer with the AA bit (from a server that is authoritative for the name, and a **Policy-Based Resolution** row that answers a name itself), a truncated one, an error, and one that holds anything but CNAME and address records.", "A query for anything but A or AAAA, and a family with a single address.", "Names in **Never narrowed**, and everything below them.", "An answer holding a loopback, link-local, multicast or unspecified address."]],
+      ["h", "Step by step: switch it on"],
+      ["ol", ["Open **Configure ▸ DNS ▸ Resolution ▸ Fast Lane**.", "Tick **Fast Lane enabled**.", "Add any name that must keep all its addresses to **Never narrowed**, for example an internal service that is meant to be spread by the client.", "Watch **Monitor ▸ DNS**: the pool shows *fast lane* and how many answers were narrowed."]],
+      ["h", "Fields"],
+      "Each setting below says **Shared** or **This node only**. A *shared* setting is the same on every node: change it on any node and the cluster copies it everywhere. A setting marked *this node only* belongs to the node you are working on.",
+      ["fields", [["Fast Lane enabled", "Off by default. On cuts an answer with several addresses of one family down to the fastest one, as described above. Shared."], ["Answer TTL (s)", "1–3600, default 30; 0 or empty means 30. The most seconds a client may keep a narrowed answer. A shorter TTL in the answer itself is kept. Shared."], ["Never narrowed", "Names, one per row, that Fast Lane never touches. A name covers itself and everything below it (`example.com` covers `www.example.com`). Shared."]]],
+      ["h", "Good to know"],
+      ["ul", ["The first query for a name is answered as the servers gave it, so the benefit starts with the second one.", "Probing makes this node ping, and open a TCP connection to, the addresses of the names clients ask for. Names nobody asks for again are not timed again, and at most 8 addresses are timed at once.", "Prometheus has `dnsdir_fastlane_addresses`, `_narrowed_total`, `_probes_total` and `_probe_failures_total` per pool."]],
+      ["cli", "dnsdir --show-dns\ndnsdir --show-config\ndnsdir --configure       (interactive wizard)"],
+    ],
+  },
   config_dns4: {
     title: "Configure: DNS ▸ Cache & ECS",
     body: [

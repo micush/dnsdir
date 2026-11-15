@@ -262,6 +262,10 @@ func cloneDNS(d DNSConfig) DNSConfig {
 	if len(d.SortList) == 0 {
 		d.SortList = nil
 	}
+	d.FastLaneExclude = append([]string(nil), d.FastLaneExclude...)
+	if len(d.FastLaneExclude) == 0 {
+		d.FastLaneExclude = nil
+	}
 	d.SNMPCommunities = append([]string(nil), d.SNMPCommunities...)
 	if len(d.SNMPCommunities) == 0 {
 		d.SNMPCommunities = nil

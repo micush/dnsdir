@@ -126,6 +126,12 @@ func (s *StatusServer) metricsText() string {
 			m.add("dnsdir_cache_prefetched_total", "counter", "Answers refreshed in the background before they expired.", pl, float64(cs.Prefetched))
 			m.add("dnsdir_cache_prefetch_failed_total", "counter", "Background refreshes that got no usable answer.", pl, float64(cs.PrefetchFailed))
 		}
+		if fs := p.fl.stats(); fs.On {
+			m.add("dnsdir_fastlane_addresses", "gauge", "Addresses Fast Lane has measured or is measuring.", pl, float64(fs.Addresses))
+			m.add("dnsdir_fastlane_narrowed_total", "counter", "Answers cut down to the fastest address.", pl, float64(fs.Narrowed))
+			m.add("dnsdir_fastlane_probes_total", "counter", "Addresses measured by Fast Lane.", pl, float64(fs.Probes))
+			m.add("dnsdir_fastlane_probe_failures_total", "counter", "Fast Lane measurements that got no answer.", pl, float64(fs.ProbeFails))
+		}
 		for _, sv := range s.namedServers(pi) {
 			l := pl + "," + promLabel("server", sv.Addr)
 			m.add("dnsdir_upstream_healthy", "gauge", "1 when the upstream server passes its tests.", l, b2f(sv.Healthy))

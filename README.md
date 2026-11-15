@@ -106,7 +106,7 @@ The DNS page (Monitor ▸ DNS, or `dnsdir --show-dns`) shows the ranking, health
 
 ![The DNS page: each server's rank, health, latency and share of the queries, with the answer cache above](snaps/dns.png)
 
-In the GUI, the DNS proxy settings are under Configure ▸ DNS, on six tabs: **Servers**, **Health & balancing**, **Listeners**, **Resolution**, **Cache & ECS** and **Clients**. The help panel (the **?** at the top right) has a panel for each tab, and for each of the four Resolution sub-tabs.
+In the GUI, the DNS proxy settings are under Configure ▸ DNS, on six tabs: **Servers**, **Health & balancing**, **Listeners**, **Resolution**, **Cache & ECS** and **Clients**. The help panel (the **?** at the top right) has a panel for each tab, and for each of the five Resolution sub-tabs.
 
 ### Choosing an upstream server
 
@@ -209,6 +209,20 @@ A cache hit counts as a handled query in Statistics and on the DNS page, which a
 It is a list of entries of the form `client-network: preferred-network, preferred-network` (for example `10.1.0.0/16: 10.1.0.0/16, 10.0.0.0/8`), or just a network (`10.20.0.0/16`), which applies to every client; all such entries together give the order, with the one the client is in first. The first entry whose client network contains the asking client is used (`any` matches every client).
 
 The A and AAAA records of a plain answer are put in this order: addresses inside the client network itself first, then those in the first preferred network, then the second, and so on. Addresses in none of them keep their order after those. The sort is stable and per client: the cache is not changed, and an error answer, or one that has record types other than A, AAAA and CNAME, is left as it came. An empty list (the default) keeps the order the servers gave. `sortlist_on` (default true; the **Sort list enabled** tick box) switches it off without deleting the list.
+
+### Fast Lane
+
+`fastlane` in the top-level `dns` block (Configure ▸ DNS ▸ Resolution ▸ Fast Lane, off by default) sends a client only the fastest address of a name that has several. Every gateway uses it, and it is shared by the cluster.
+
+When an answer holds two or more IPv4 addresses, or two or more IPv6 addresses, each address is timed in the background with an ICMP echo (which any host can answer, whatever it serves) and, when that gets no reply, with a TCP connection to port 443 (a refused connection counts: the host is there, and the refusal took one round trip). The first answer for a name goes out as the servers gave it; the next ones hold only the fastest address of each family. Until every address of a family has been timed, and when none of them answered, the answer is left as it came. An address that did not answer is never chosen.
+
+- **Spread.** Addresses within `spread_band` percent of the fastest one's smoothed time take turns, as upstream servers do; with `spread` off only the single fastest is used. `latency_alpha` smooths the times.
+- **Freshness.** A time is used for 10 minutes, and an address asked for again after a minute is timed again. The times are measured by each node from where it stands and are not shared. At most 8 addresses are timed at once.
+- **TTL.** The records kept get a TTL of at most `fastlane_ttl` seconds (default 30, 1-3600), so a client does not keep a choice that has gone bad for as long as the servers' TTL. A shorter TTL in the answer stays.
+- **Where it applies.** After the sort list, on the answer as it is sent: the cached answer is not changed.
+- **What it never changes.** An answer with signatures (RRSIG; a client that validates would refuse an address set with records missing), one with the AA or TC bit (so a name that a policy row or an authoritative server answers is left alone), an error, one holding anything but CNAME and address records, a query for anything but A or AAAA, a family with a single address, an answer holding a loopback, link-local, multicast or unspecified address, and every name in `fastlane_exclude` (a list of names; each covers everything below it).
+
+Switching it on makes the node ping and open TCP connections to the addresses of the names its clients ask for. `--show-dns` prints a `fast lane:` line, the DNS page shows the number of answers narrowed, and Prometheus has `dnsdir_fastlane_addresses`, `_narrowed_total`, `_probes_total` and `_probe_failures_total`. The three keys are left out of the configuration file while they are unused, so a configuration that never used Fast Lane stays readable by older versions.
 
 ### Policy-Based Resolution
 

@@ -2409,6 +2409,7 @@
                 return h("span", { class: "muted small", title: "Answers kept: " + n0(c.entries) + " of " + n0(c.max) + ". Not cacheable (never kept): " + n0(c.bypassed) + ". Pushed out when full: " + n0(c.evicted) + ". Kept at most " + n0(c.max_ttl) + " s. Answered with a remembered failure: " + n0(c.fail_hits) + "." },
                   "cache " + (t ? (100 * c.hits / t).toFixed(0) + "% hits" : "empty") + " · " + n0(c.entries) + " kept");
               })(),
+              p.fastlane && p.fastlane.on ? h("span", { class: "muted small", title: "Answers with several addresses of one family are cut down to the fastest one (" + Number(p.fastlane.narrowed || 0).toLocaleString() + " so far). " + Number(p.fastlane.addresses || 0).toLocaleString() + " addresses measured, " + Number(p.fastlane.probes || 0).toLocaleString() + " measurements, " + Number(p.fastlane.probe_failed || 0).toLocaleString() + " without an answer. A client keeps such an answer at most " + p.fastlane.ttl + " s." }, "fast lane · " + Number(p.fastlane.narrowed || 0).toLocaleString() + " narrowed") : null,
               h("span", { class: "spacer" }),
               (() => {
                 const on = (p.groups.length ? p.groups : [p.key]).flatMap((g) => addrsOf[g] || []);
@@ -2493,6 +2494,10 @@
     { section: "Sort List" },
     { shared: true, k: "sortlist_on", l: "Sort list enabled", t: "bool" },
     { shared: true, k: "sortlist", l: "Sort list", t: "rows", rows: "sortlist", wide: true, hint: "Read from the top." },
+    { section: "Fast Lane" },
+    { shared: true, k: "fastlane", l: "Fast Lane enabled", t: "bool" },
+    { shared: true, k: "fastlane_ttl", l: "Answer TTL (s)", t: "int", zeroDef: true, def: 30, min: 0, max: 3600 },
+    { shared: true, k: "fastlane_exclude", l: "Never narrowed", t: "rows", rows: "fastlaneexclude", wide: true, hint: "One per row. Left as is." },
     { section: "Policy-Based Resolution" },
     { shared: true, k: "policy_on", l: "Policy-Based Resolution enabled", t: "bool" },
     { shared: true, k: "policy_log", l: "Log policy matches", t: "bool" },
@@ -3276,6 +3281,7 @@
     snmpacl: oneCol("snmpacl", "Address or network", "10.1.0.0/24, 192.0.2.5, 2001:db8::/32", "Nobody may ask."),
     metricsacl: oneCol("metricsacl", "Address or network", "10.1.0.0/24, 192.0.2.5, 2001:db8::/32", "Nobody may read /metrics."),
     allowdomains: oneCol("allowdomains", "Domain", "example.com", "No always-allowed names."),
+    fastlaneexclude: oneCol("fastlaneexclude", "Domain", "example.com", "No names are left out."),
     allowedclients: oneCol("allowedclients", "Network", "10.0.0.0/8, 192.168.1.5, 2001:db8::/32", "No restriction: every client may use the proxy."),
     exempt: oneCol("exempt", "Network", "10.0.0.0/8", "Nobody is exempt."),
     // per-client limits: "192.168.1.5 50"
@@ -4273,7 +4279,7 @@
           ["Servers", ["Upstream servers"]],
           ["Health & balancing", ["Load Balancing", "Timing"]],
           ["Listeners", ["Listeners"]],
-          ["Resolution", ["Policy-Based Resolution", "Sort List", "Conditional Forwarding", "Block Lists"]],
+          ["Resolution", ["Policy-Based Resolution", "Sort List", "Conditional Forwarding", "Block Lists", "Fast Lane"]],
           ["Cache & ECS", ["Cache", "Query hardening", "Client network (ECS)"]],
           ["Clients", ["Client Rate Limiting"]],
         ];
@@ -4285,7 +4291,7 @@
         }
         panes[2].append(h("div", { class: "card" }, h("header", {}, h("h2", {}, tc("Certificate for DNS over TLS and HTTPS"))), h("div", { class: "body" }, dnsCertBox)));
         panes[2].append(h("div", { class: "card" }, h("header", {}, h("h2", {}, tc("Get the certificate automatically"))), h("div", { class: "body" }, acmeBox)));
-        // Resolution holds four functions: each gets a tab of its own under the main ones (every card stays in the page)
+        // Resolution holds five functions: each gets a tab of its own under the main ones (every card stays in the page)
         const resI = TABS.findIndex(([n]) => n === "Resolution");
         const subCards = TABS[resI][1].map((n) => [...panes[resI].children].find((c) => titleOf(c).toLowerCase() === n.toLowerCase())).filter(Boolean);
         const subBtns = subCards.map((c, j) => h("button", { type: "button", role: "tab", class: "dtab sub", onclick: () => showSub(j) }, titleOf(c)));

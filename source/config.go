@@ -588,6 +588,13 @@ type DNSConfig struct {
 	SortList []string `json:"sortlist,omitempty"`
 	// SortListOn switches the sort list on (the default) or off without deleting it.
 	SortListOn bool `json:"sortlist_on"`
+	// FastLane answers a name that has several addresses of one family with the fastest of them only (fastlane.go).
+	// Off by default.  FastLaneTTL is the most seconds a client may keep such an answer (0 = 30); FastLaneExclude are
+	// names (and everything below them) it never touches.  All three are shared by the cluster, and left out of the file
+	// while unused so that a configuration that never used them stays readable by older versions.
+	FastLane        bool     `json:"fastlane,omitempty"`
+	FastLaneTTL     int      `json:"fastlane_ttl,omitempty"`
+	FastLaneExclude []string `json:"fastlane_exclude,omitempty"`
 	// Policy is Policy-Based Resolution: rows of client, name and servers; the first row that matches a query sends
 	// it to its own servers instead of the pool's (see policy.go).
 	Policy []PolicyRule `json:"policy,omitempty"`
@@ -1032,6 +1039,17 @@ func (d *DNSConfig) Validate() error {
 		return err
 	}
 	d.SortList = sl
+	if d.FastLaneTTL < 0 || d.FastLaneTTL > flMaxTTL {
+		return fmt.Errorf("dns: fastlane_ttl must be 1-%d seconds (0 = %d)", flMaxTTL, flDefaultTTL)
+	}
+	fx, err := normalizeFastLaneExclude(d.FastLaneExclude)
+	if err != nil {
+		return err
+	}
+	if len(fx) == 0 {
+		fx = nil
+	}
+	d.FastLaneExclude = fx
 	pol, err := normalizePolicy(d.Policy)
 	if err != nil {
 		return err
@@ -1198,6 +1216,11 @@ func (c *DNSConfig) followSettings(shared DNSConfig) {
 	c.ForwardLists = append([]string(nil), shared.ForwardLists...)
 	if len(c.ForwardLists) == 0 {
 		c.ForwardLists = nil
+	}
+	c.FastLane, c.FastLaneTTL = shared.FastLane, shared.FastLaneTTL
+	c.FastLaneExclude = append([]string(nil), shared.FastLaneExclude...)
+	if len(c.FastLaneExclude) == 0 {
+		c.FastLaneExclude = nil
 	}
 	c.SortListOn = shared.SortListOn
 	c.SortList = append([]string(nil), shared.SortList...)

@@ -241,6 +241,11 @@ DNS proxy ("dns" block at the top level of the config):
                      "client-network: preferred-network, ...", e.g. ["10.1.0.0/16: 10.1.0.0/16, 10.0.0.0/8"];
                      "any" matches every client; unmatched addresses keep their order after the preferred ones.
                      A plain network ("10.20.0.0/16") is for every client; the one the client is in comes first
+  fastlane           true sends a client only the fastest address of a name that has several (default false):
+                     each address is timed in the background (an ICMP echo, else a TCP connect to 443), the first
+                     answer for a name goes out as it came; signed, authoritative and truncated answers are never
+                     changed. fastlane_ttl (30) is the most seconds a client may keep such an answer (1-3600);
+                     fastlane_exclude lists names (and everything below them) it never touches
   ecs                true (default) passes the client's network to the servers (EDNS Client
                      Subnet, RFC 7871); ecs_prefix4 (24) / ecs_prefix6 (56) bits only; a server that
                      refuses it (FORMERR/REFUSED) is asked again without and then left alone
@@ -823,26 +828,27 @@ func showDNSTable(sock string) {
 	}
 	var d struct {
 		Pools []struct {
-			Key     int          `json:"key"`
-			Name    string       `json:"name"`
-			Groups  []int        `json:"groups"`
-			Servers []ServerStat `json:"servers"`
-			UsingFB bool         `json:"using_fallback"`
-			DownPct int          `json:"down_percent"`
-			Probes  int          `json:"probes"`
-			ECS     bool         `json:"ecs"`
-			ECSSent uint64       `json:"ecs_sent"`
-			Cache   cacheStats   `json:"cache"`
-			Spread  bool         `json:"spread"`
-			DoT     int          `json:"dot_port"`
-			DoH     int          `json:"doh_port"`
-			Band    int          `json:"spread_band"`
-			Allowed int          `json:"allowed_clients"`
-			Rate    int          `json:"client_rate"`
-			Burst   int          `json:"client_burst"`
-			Action  string       `json:"client_action"`
-			Denied  uint64       `json:"denied"`
-			Limited uint64       `json:"limited"`
+			Key      int          `json:"key"`
+			Name     string       `json:"name"`
+			Groups   []int        `json:"groups"`
+			Servers  []ServerStat `json:"servers"`
+			UsingFB  bool         `json:"using_fallback"`
+			DownPct  int          `json:"down_percent"`
+			Probes   int          `json:"probes"`
+			ECS      bool         `json:"ecs"`
+			ECSSent  uint64       `json:"ecs_sent"`
+			Cache    cacheStats   `json:"cache"`
+			FastLane flStats      `json:"fastlane"`
+			Spread   bool         `json:"spread"`
+			DoT      int          `json:"dot_port"`
+			DoH      int          `json:"doh_port"`
+			Band     int          `json:"spread_band"`
+			Allowed  int          `json:"allowed_clients"`
+			Rate     int          `json:"client_rate"`
+			Burst    int          `json:"client_burst"`
+			Action   string       `json:"client_action"`
+			Denied   uint64       `json:"denied"`
+			Limited  uint64       `json:"limited"`
 		} `json:"pools"`
 		Listeners []string `json:"listeners"`
 		Queries   uint64   `json:"queries"`
@@ -914,6 +920,10 @@ func showDNSTable(sock string) {
 				c.Entries, c.Max, humanBytes(uint64(c.Bytes)), c.Hits, c.Misses, rate, c.Bypassed, c.Evicted, c.MaxTTL)
 		} else {
 			fmt.Println("answer cache: off (every query goes to an upstream server)")
+		}
+		if f := p.FastLane; f.On {
+			fmt.Printf("fast lane: on, answers cut down to the fastest address: %d; addresses measured: %d (%d measurements, %d without an answer); a client keeps such an answer at most %ds\n",
+				f.Narrowed, f.Addresses, f.Probes, f.ProbeFails, f.TTL)
 		}
 		if p.UsingFB {
 			fmt.Println("no configured server is in service (down or paused): answering from the fallback servers")

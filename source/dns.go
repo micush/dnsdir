@@ -314,6 +314,7 @@ type Pool struct {
 
 	avoid    nameAvoid    // servers that timed out on a name lately (slowname.go)
 	sorts    []sortRule   // the dns block's sortlist, parsed (sortlist.go)
+	fl       *fastLane    // nil unless fastlane is on (fastlane.go)
 	policy   []policyRule // the dns block's policy rows, parsed (policy.go)
 	pidx     *policyIndex
 	pidxOnce sync.Once
@@ -331,6 +332,9 @@ func NewPool(cfg DNSConfig) *Pool {
 	p := &Pool{cfg: cfg, lim: newClientLimits(cfg), dlim: newDomainLimits(cfg), sorts: nil}
 	if cfg.SortListOn {
 		p.sorts = buildSortRules(cfg.SortList)
+	}
+	if cfg.FastLane {
+		p.fl = newFastLane(cfg)
 	}
 	if cfg.PolicyOn {
 		p.policy = buildPolicy(cfg.Policy)
@@ -389,6 +393,7 @@ func (p *Pool) Stop() {
 		p.cancel()
 	}
 	p.wg.Wait()
+	p.fl.stop()
 }
 
 // ProbeNow runs one probe round against every server concurrently.

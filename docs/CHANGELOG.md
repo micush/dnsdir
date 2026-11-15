@@ -1,5 +1,48 @@
 # Changelog
 
+## [v649] - 2026-11-14 — Fast Lane times addresses with an ICMP echo first, TCP 443 second
+
+### Changed
+- Fast Lane (v648) timed an address with a TCP connection to port 443, then 80, which made a host that is not a web server and drops every other port look dead. An address is now timed with an **ICMP echo first**, which any host can answer whatever it serves, and, when that gets no reply within a second, with a **TCP connection to port 443** (a refused connection still counts as an answer). Port 80 is no longer tried. Neither probe is optional. A first look still takes the better of two samples, and an address that does not answer is still not asked twice.
+- The echo is sent from a raw socket (`ip4:icmp`, `ip6:ipv6-icmp`; the standard library only, no new module): the daemon runs as root, so no setting is needed. Without the right to open one, the node logs `fast lane: cannot open a raw ICMP socket` once and measures with TCP 443 alone.
+- Text updated to match: README, the Fast Lane help panel, the usage text.
+
+### Verified
+- `TestICMPChecksum` (a worked RFC 1071 value, and a message with its checksum in it sums to zero), `TestFastLaneICMPAndTCPProbes` (a real echo to 127.0.0.1 through a raw socket; an open port, a refused port, and a cancelled probe over TCP). All the v648 tests pass unchanged; they use a fake probe.
+- Live, with a stub upstream and three targets in network namespaces: one that answers ping and has no listener, one that ignores ping (`icmp_echo_ignore_all`) and listens on 443, and one address on the subnet that does not exist. The answers `[dead, B, A]` and `[dead, B]` were narrowed to the one that answers (A, then B through the TCP fallback); `[dead, dead]` stayed as it came. The namespaces' ICMP counters showed A received and answered echoes, and B received them and sent no reply. Nothing was logged about a raw socket.
+- `gofmt -l`, `go build`, `go vet ./...`, `CGO_ENABLED=0 go vet ./...`, `node --check`, cross-compiles for linux/amd64, arm64, arm, 386 and riscv64, the full `go test -race -count=1 ./...` and `CGO_ENABLED=0 go test -count=1 ./...`.
+
+### Not verified
+- ICMPv6 (the sandbox has no IPv6): the echo type codes and the kernel-filled checksum are as the protocol says, but no reply was seen.
+- A host that drops ping **and** port 443 is still taken as not answering, and an address that does not answer is still dropped from a narrowed answer (and the answer is left as it came when none answers). A host that serves only another port and filters both is therefore still unmeasurable: `fastlane_exclude` is the remedy for such a name. A single failed probe still drops an address until it is timed again (a minute at the earliest).
+- Not run as a non-root user, in a container without `CAP_NET_RAW` (the TCP-only fallback is by inspection and the tests of `flTCP`), in a cluster of several nodes, or with the web GUI in a browser (nothing changed there but one help sentence).
+
+## [v648] - 2026-11-14 — Fast Lane: a name with several addresses is answered with the fastest one
+
+### Added
+- **Fast Lane** (`fastlane.go`; Configure ▸ DNS ▸ Resolution ▸ Fast Lane; off by default). When an answer holds two or more IPv4 addresses, or two or more IPv6 addresses, the node times each address with a TCP connection (port 443, else 80; a refused connection counts, it still proves the host is there and takes one round trip) and sends the client only the fastest address of each family. The timing is done by background workers (at most 8 at once, a queue of 512), never while a client waits: the first answer for a name goes out as the servers gave it, and the next ones are narrowed. Until every address of a family has a result, and when none of them answered, the answer is left as it came; an address that did not answer is never chosen. A first look takes the better of two connects, but an address that does not answer is not asked twice. A result is used for 10 minutes, and an address that an answer holds again after a minute is timed again, smoothed with `latency_alpha`. Addresses within `spread_band` percent of the fastest take turns (with `spread` off, only the single fastest), as upstream servers do.
+- The records kept get a TTL of at most `fastlane_ttl` seconds (default 30, 1-3600; a shorter TTL in the answer stays), so a client does not hold on to a choice that has gone bad for as long as the servers' TTL.
+- It works on the answer as it is sent, after the sort list, never on the cache. It leaves alone: an answer with signatures (an RRset with records missing would fail validation), one with the AA or TC bit (so a name answered by a policy row or an authoritative server is left alone), an error, one holding anything but CNAME and address records, a query for anything but A or AAAA, a family with one address, an answer holding a loopback, link-local, multicast or unspecified address, an answer in which a compression pointer aims into the address records, and every name in `fastlane_exclude` (each covers everything below it).
+- Settings `fastlane`, `fastlane_ttl` and `fastlane_exclude` in the shared `dns` block, followed by every gateway's own pool. All three are `omitempty`: a configuration that never used Fast Lane is written exactly as before, so older nodes in a mixed cluster keep reading it.
+- Visible in: the DNS page (a "fast lane · N narrowed" note in the pool header, with the counts in its tooltip), `dnsdir --show-dns` (a `fast lane:` line), the pool statistics (`fastlane` in the status JSON), and Prometheus (`dnsdir_fastlane_addresses`, `_narrowed_total`, `_probes_total`, `_probe_failures_total`, per pool).
+- Help: a new panel for the fifth Resolution sub-tab (`config_dns3_4`); README section "Fast Lane"; usage text for the three keys.
+
+### Changed
+- The Resolution tab has a fifth sub-tab, **Fast Lane**, after Block Lists (appended so the other four help panels keep their names). The README says "five Resolution sub-tabs".
+
+### Verified
+- `gofmt -l`, `go build`, `go vet ./...`, `CGO_ENABLED=0 go vet ./...`, `node --check` on `app.js` and `help.js`, and cross-compiles for linux/amd64, arm64, arm, 386 and riscv64.
+- New tests (`fastlane_test.go`, with a fake connect so no network is used): narrowing to the fastest with the TTL cap and the input left unmodified; a shorter TTL kept; spread taking turns inside the band and never using the slow one; a down address skipped and counted; every address failing leaves the answer; an unmeasured address holds the answer back; old results forgotten after a minute and after ten; each family on its own; the cases that must stay unchanged (AA, TC, not a response, NXDOMAIN, RRSIG, MX, an excluded name and one below it, a short message, one address); loopback never probed; a compression pointer into the dropped records respected; config validation and normalisation, an unused Fast Lane absent from the written file; the gateway pools following the shared settings; pool wiring and nil safety; the metrics. The help tests (`TestEveryPageHasHelp`, `TestHelpCoversEveryField`) cover the new panel and fields.
+- A live run on this node, with a stub upstream over UDP and TCP and three targets in two network namespaces (one answering on 443, one only on 80, one that does not answer): the first answer held all three addresses, then every answer (UDP, TCP, and a CNAME chain whose address records carry their own owner name) held one live address with TTL 30 and the CNAME kept; a cached answer came back unchanged while Fast Lane was off; switching Fast Lane on and off, and adding `fastlane_exclude`, took effect on a file edit without a restart (history recorded "fastlane enabled"); an excluded name kept all its addresses; `--show-dns` printed the counters. The smoke run showed a dead address holding the choice back for about 4 s, which led to the "not asked twice" rule above (now about 2 s).
+- The full `go test -race -count=1 ./...` and `CGO_ENABLED=0 go test -count=1 ./...` pass. One earlier run failed `TestEnsureReadGroupMakesOnlyTheDefaultGroup` only because the live run, as root, had created the real group `dnsdir-ro` on the sandbox; the group was removed and the test passes.
+
+### Not verified
+- The Fast Lane tab, the Settings fields and the DNS page note were not looked at in Chromium (light and dark) or driven in jsdom; only the Go-side help/field tests and `node --check` ran.
+- No real difference in latency was tried: the sandbox has no `netem`, so the live run proved the path (probe, narrow on the wire, TTL, exclude, reload) with targets that answer about equally fast, and the ordering by time is covered by the unit tests only. The addresses of the live run were one reachable on 443, one on 80 and one that never answers.
+- Not run in a cluster of several nodes, with IPv6 targets (the sandbox has no IPv6), with DoT or DoH clients, or with the Prometheus endpoint over HTTPS (the metrics text is tested directly).
+- Probing from a node behind a firewall that drops outbound connections to ports 443 and 80 will see every address as down and leave all answers as they came; that behaviour is by design but untested outside the unit tests.
+- Cross-compiles (cgo off) build the fail-closed PAM stub, as always; only the native amd64 build is checked with PAM.
+
 ## [v647] - 2026-11-14 — Certificate page: no description text, equal-sized boxes, "shared" tag
 
 ### Changed

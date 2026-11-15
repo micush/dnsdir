@@ -66,7 +66,8 @@ type fastLane struct {
 	spread  bool
 	band    float64 // percent
 	alpha   float64
-	exclude nameSet
+	exclude nameSet             // names left alone, with everything below them
+	exact   map[string]struct{} // names left alone, only themselves ("=name" in fastlane_exclude)
 	rr      atomic.Uint64
 
 	Narrowed   atomic.Uint64 // answers cut down to the fastest address
@@ -91,18 +92,18 @@ type flStats struct {
 func newFastLane(cfg DNSConfig) *fastLane {
 	ctx, cancel := context.WithCancel(context.Background())
 	f := &fastLane{
-		addrs:   map[netip.Addr]*flAddr{},
-		q:       make(chan netip.Addr, flQueue),
-		ctx:     ctx,
-		cancel:  cancel,
-		ttl:     uint32(cfg.fastLaneTTL()),
-		spread:  cfg.Spread,
-		band:    float64(cfg.SpreadBand),
-		alpha:   cfg.LatencyAlpha,
-		exclude: newNameSet(cfg.FastLaneExclude),
-		dial:    flDial,
-		now:     time.Now,
+		addrs:  map[netip.Addr]*flAddr{},
+		q:      make(chan netip.Addr, flQueue),
+		ctx:    ctx,
+		cancel: cancel,
+		ttl:    uint32(cfg.fastLaneTTL()),
+		spread: cfg.Spread,
+		band:   float64(cfg.SpreadBand),
+		alpha:  cfg.LatencyAlpha,
+		dial:   flDial,
+		now:    time.Now,
 	}
+	f.setExcludes(cfg.FastLaneExclude)
 	if f.alpha <= 0 || f.alpha > 1 {
 		f.alpha = 0.3
 	}
@@ -110,6 +111,30 @@ func newFastLane(cfg DNSConfig) *fastLane {
 		f.band = 20
 	}
 	return f
+}
+
+// setExcludes reads the fastlane_exclude entries: "name" covers the name and everything below it, "=name" only the name.
+func (f *fastLane) setExcludes(list []string) {
+	var tree []string
+	for _, e := range list {
+		if n, ok := strings.CutPrefix(e, "="); ok {
+			if f.exact == nil {
+				f.exact = map[string]struct{}{}
+			}
+			f.exact[n] = struct{}{}
+			continue
+		}
+		tree = append(tree, e)
+	}
+	f.exclude = newNameSet(tree)
+}
+
+// excluded says whether name is one fastlane_exclude leaves alone.
+func (f *fastLane) excluded(name string) bool {
+	if _, ok := f.exact[name]; ok {
+		return true
+	}
+	return f.exclude.has(name)
 }
 
 // fastLaneTTL is the most seconds a narrowed answer may be kept by a client.
@@ -139,15 +164,23 @@ func (f *fastLane) stats() flStats {
 	return flStats{On: true, TTL: int(f.ttl), Addresses: n, Narrowed: f.Narrowed.Load(), Probes: f.Probes.Load(), ProbeFails: f.ProbeFails.Load()}
 }
 
-// normalizeFastLaneExclude turns the exclude entries into plain lower case names (a name covers everything below it).
+// normalizeFastLaneExclude turns the exclude entries into plain lower case names.  A name covers itself and everything
+// below it; "=name" covers only that name (for the apex of a zone whose hosts below it should still be narrowed).
 func normalizeFastLaneExclude(in []string) ([]string, error) {
 	var out []string
 	seen := map[string]bool{}
 	for _, s := range in {
 		for _, f := range strings.FieldsFunc(s, func(c rune) bool { return c == ',' || c == ' ' || c == '\t' || c == '\n' || c == '\r' }) {
-			n := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(f, "*"), "."), "."))
+			rest, exact := strings.CutPrefix(f, "=")
+			if exact && (strings.HasPrefix(rest, "*") || strings.HasPrefix(rest, ".")) {
+				return nil, fmt.Errorf("dns: fastlane_exclude entry %q: a name with = in front is that name only, without * or a leading dot", f)
+			}
+			n := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(rest, "*"), "."), "."))
 			if !validHostname(n) {
 				return nil, fmt.Errorf("dns: fastlane_exclude entry %q is not a domain name like example.com", f)
+			}
+			if exact {
+				n = "=" + n
 			}
 			if !seen[n] {
 				seen[n] = true
@@ -439,7 +472,7 @@ func (f *fastLane) narrow(resp []byte, qtype uint16, name string, local func() b
 		return resp
 	}
 	an := int(binary.BigEndian.Uint16(resp[6:]))
-	if an < 2 || f.exclude.has(name) {
+	if an < 2 || f.excluded(name) {
 		return resp
 	}
 	rrs, addStart, ok := recordsAfterQuestion(resp)
@@ -454,7 +487,10 @@ func (f *fastLane) narrow(resp []byte, qtype uint16, name string, local func() b
 		case i < an && rr.class == 1 && rr.typ == typeAAAA && rr.rdlen == 16:
 			v6 = append(v6, i)
 		case i < an && rr.typ == typeCNAME:
-		case i >= an && rr.typ == typeOPT:
+		case i >= an && i < addStart && (rr.typ == typeNS || rr.typ == typeSOA):
+			// the authority section of a positive answer from an authoritative server: its zone's NS or SOA records
+		case i >= addStart && (rr.typ == typeOPT || rr.typ == typeA || rr.typ == typeAAAA):
+			// the additional section: the OPT record, and the addresses of the name servers (glue)
 		default:
 			return resp
 		}
@@ -506,16 +542,28 @@ func (f *fastLane) narrow(resp []byte, qtype uint16, name string, local func() b
 		return resp
 	}
 	out := make([]byte, 0, len(resp))
-	out = append(out, resp[:lo]...)
+	out = append(out, resp[:lo]...) // the header, the question and the CNAMEs in front of the addresses
 	for i := range rrs {
 		if i >= an || drop[i] || (rrs[i].typ != typeA && rrs[i].typ != typeAAAA) {
 			continue
 		}
 		out = append(out, resp[rrs[i].start:rrs[i].end]...)
 	}
-	// the block may hold only address records (checked above), so what follows it is the additional section
-	out = append(out, resp[hi:]...)
+	if last := all[len(all)-1]; last+1 < an { // CNAMEs after the addresses
+		out = append(out, resp[rrs[last].end:rrs[an-1].end]...)
+	}
+	// The authority section and the glue addresses go (a client has no use for them in a positive answer, and records
+	// that follow would have to have their compression pointers moved); the OPT record stays.
+	opt := 0
+	for i := addStart; i < len(rrs); i++ {
+		if rrs[i].typ == typeOPT {
+			out = append(out, resp[rrs[i].start:rrs[i].end]...)
+			opt++
+		}
+	}
 	binary.BigEndian.PutUint16(out[6:], uint16(an-len(drop)))
+	binary.BigEndian.PutUint16(out[8:], 0)
+	binary.BigEndian.PutUint16(out[10:], uint16(opt))
 	f.capTTLs(out, an-len(drop))
 	f.Narrowed.Add(1)
 	return out

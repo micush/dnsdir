@@ -498,3 +498,126 @@ func TestPoolAnswersLocally(t *testing.T) {
 		t.Error("a name no row matches is not answered by the node")
 	}
 }
+
+// authMsg is an answer as an authoritative server gives it: the addresses, the zone's SOA in the authority section, and
+// the name server's address (glue, owner compressed to a name inside the SOA) and an OPT record in the additional one.
+func authMsg(addrs ...string) []byte {
+	b := sortMsg(addrs...)
+	b = b[:12+len("\x01a\x07example\x00")+4] // the header and the question only
+	b[2] |= 0x04                             // AA
+	n := 0
+	for _, s := range addrs {
+		a := netip.MustParseAddr(s)
+		b = append(b, 0xC0, 12, 0, 1, 0, 1, 0, 0, 2, 0xC5, 0, 4) // TTL 709
+		b = append(b, a.AsSlice()...)
+		n++
+	}
+	binary.BigEndian.PutUint16(b[6:], uint16(n))
+	// authority: SOA with mname "dc1" + pointer to the question name
+	soa := len(b)
+	b = append(b, 0xC0, 12, 0, 6, 0, 1, 0, 0, 0x0D, 0x51)
+	rd := append([]byte{3, 'd', 'c', '1', 0xC0, 12}, 3, 'h', 'm', 0xC0, 12)
+	rd = append(rd, 0, 0, 0, 11, 0, 0, 3, 0x84, 0, 0, 2, 0x58, 0, 1, 0x51, 0x80, 0, 0, 0x0E, 0x10)
+	b = append(b, byte(len(rd)>>8), byte(len(rd)))
+	dc1 := len(b) // the label "dc1" inside the rdata
+	b = append(b, rd...)
+	binary.BigEndian.PutUint16(b[8:], 1)
+	// additional: glue whose owner points at "dc1" inside the SOA, then an OPT
+	b = append(b, 0xC0|byte(dc1>>8), byte(dc1), 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 192, 168, 5, 1)
+	b = append(b, 0, 0, 41, 0x04, 0xD0, 0, 0, 0, 0, 0, 0)
+	binary.BigEndian.PutUint16(b[10:], 2)
+	_ = soa
+	return b
+}
+
+func TestFastLaneNarrowsAnAnswerWithAuthorityAndGlue(t *testing.T) {
+	x := newFLTest(t, false, map[string]time.Duration{"192.168.5.25": ms(5), "192.168.5.26": ms(9)})
+	msg := authMsg("192.168.5.25", "192.168.5.26")
+	if _, _, ok := recordsAfterQuestion(msg); !ok {
+		t.Fatal("the test message does not parse")
+	}
+	orig := append([]byte(nil), msg...)
+	x.narrow(msg, typeA, "a.example", nil)
+	x.settle(t, 2)
+	out := x.narrow(msg, typeA, "a.example", nil)
+	if got := answerAddrs(t, out); !reflect.DeepEqual(got, []string{"192.168.5.25"}) {
+		t.Fatalf("got %v", got)
+	}
+	if !reflect.DeepEqual(msg, orig) {
+		t.Fatal("the input message was modified")
+	}
+	rrs, _, ok := recordsAfterQuestion(out)
+	if !ok || len(rrs) != 2 || rrs[0].typ != typeA || rrs[1].typ != typeOPT {
+		t.Fatalf("the message after narrowing: ok=%v %+v", ok, rrs)
+	}
+	if an, ns, ar := binary.BigEndian.Uint16(out[6:]), binary.BigEndian.Uint16(out[8:]), binary.BigEndian.Uint16(out[10:]); an != 1 || ns != 0 || ar != 1 {
+		t.Fatalf("counts an=%d ns=%d ar=%d", an, ns, ar)
+	}
+	if out[2]&0x04 == 0 {
+		t.Fatal("the AA bit was lost")
+	}
+	if ttl := binary.BigEndian.Uint32(out[rrs[0].rdataOff-6:]); ttl != flDefaultTTL {
+		t.Fatalf("TTL %d", ttl)
+	}
+}
+
+func TestFastLaneStillRefusesOtherAuthorityAndAdditionalRecords(t *testing.T) {
+	x := newFLTest(t, false, map[string]time.Duration{"192.168.5.25": ms(5), "192.168.5.26": ms(9)})
+	plain := authMsg("192.168.5.25", "192.168.5.26")
+	x.narrow(plain, typeA, "a.example", nil)
+	x.settle(t, 2)
+	// an NSEC (type 47) in the authority section, and an MX in the additional one: not understood, left alone
+	for name, typ := range map[string]int{"authority NSEC": 47, "additional MX": 15} {
+		m := append([]byte(nil), plain...)
+		rrs, addStart, _ := recordsAfterQuestion(m)
+		idx := 2 // the SOA
+		if name == "additional MX" {
+			idx = addStart
+		}
+		binary.BigEndian.PutUint16(m[rrs[idx].rdataOff-10:], uint16(typ))
+		if out := x.narrow(m, typeA, "a.example", nil); &out[0] != &m[0] {
+			t.Errorf("%s: the answer was changed", name)
+		}
+	}
+}
+
+func TestFastLaneExactExclusions(t *testing.T) {
+	// "=name" covers only the name, "name" everything below it too
+	list, err := normalizeFastLaneExclude([]string{"=AD.Cush.Local.", "corp.example, =www.lab.example", "=ad.cush.local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"=ad.cush.local", "corp.example", "=www.lab.example"}; !reflect.DeepEqual(list, want) {
+		t.Fatalf("list %v, want %v", list, want)
+	}
+	for _, bad := range []string{"=*.example.com", "=.example.com", "=", "=not a name!"} {
+		if _, err := normalizeFastLaneExclude([]string{bad}); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+	cfg := DNSConfig{FastLane: true, Spread: false, SpreadBand: 20, FastLaneExclude: list}
+	f := newFastLane(cfg)
+	t.Cleanup(f.stop)
+	for name, want := range map[string]bool{
+		"ad.cush.local": true, "web.ad.cush.local": false, "x.y.ad.cush.local": false,
+		"corp.example": true, "www.corp.example": true,
+		"www.lab.example": true, "lab.example": false, "a.www.lab.example": false,
+		"other.example": false,
+	} {
+		if got := f.excluded(name); got != want {
+			t.Errorf("excluded(%q) = %v, want %v", name, got, want)
+		}
+	}
+	// the whole path: the apex is left whole while a host below it is narrowed
+	x := newFLTest(t, false, map[string]time.Duration{"1.1.1.1": ms(30), "2.2.2.2": ms(5)})
+	x.setExcludes(list)
+	msg := sortMsg("1.1.1.1", "2.2.2.2")
+	x.narrow(msg, typeA, "web.ad.cush.local", nil)
+	x.settle(t, 2)
+	if len(answerAddrs(t, x.narrow(msg, typeA, "web.ad.cush.local", nil))) != 1 {
+		t.Fatal("a host below an exact exclusion was not narrowed")
+	}
+	if out := x.narrow(msg, typeA, "ad.cush.local", nil); &out[0] != &msg[0] {
+		t.Fatal("the excluded name itself was narrowed")
+	}
+}

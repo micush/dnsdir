@@ -2497,7 +2497,7 @@
     { section: "Fast Lane" },
     { shared: true, k: "fastlane", l: "Fast Lane enabled", t: "bool" },
     { shared: true, k: "fastlane_ttl", l: "Answer TTL (s)", t: "int", zeroDef: true, def: 30, min: 0, max: 3600 },
-    { shared: true, k: "fastlane_exclude", l: "Never narrowed", t: "rows", rows: "fastlaneexclude", wide: true, hint: "One per row. Left as is." },
+    { shared: true, k: "fastlane_exclude", l: "Never narrowed", t: "rows", rows: "fastlaneexclude", wide: true, hint: "= in front: that name only." },
     { section: "Policy-Based Resolution" },
     { shared: true, k: "policy_on", l: "Policy-Based Resolution enabled", t: "bool" },
     { shared: true, k: "policy_log", l: "Log policy matches", t: "bool" },
@@ -3086,7 +3086,8 @@
       h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number and order" }, "#"), ...spec.cols.map((c) => h("th", {}, c.name)))), tbody);
     const empty = h("div", { class: "policy-empty" }, "");
     const wrap = h("div", { class: "policy-wrap" }, tbl, empty);
-    const filter = h("input", { type: "text", class: "policy-filter", placeholder: "Filter rows", "aria-label": "Filter rows", autocomplete: "off", spellcheck: "false" });
+    const canTest = spec.key === "fastlaneexclude";   // this list can be tested: test:NAME keeps the rows that leave NAME alone
+    const filter = h("input", { type: "text", class: "policy-filter", placeholder: canTest ? "Filter or test rows" : "Filter rows", title: canTest ? "Type text to keep the rows with it in any cell. test:NAME keeps the rows that stop Fast Lane narrowing that name. =name covers that name only; a name without = covers everything below it too." : "", "aria-label": "Filter rows", autocomplete: "off", spellcheck: "false" });
     const count = h("span", { class: "policy-count muted" }, "");
     const sizeSel = h("select", { "aria-label": "Rows per page" }, [25, 50, 100, 250, 500].map((n) => h("option", { value: String(n) }, n + " per page")));
     sizeSel.value = String(size);
@@ -3099,7 +3100,24 @@
     const box = h("div", { class: "policy-box rows" }, ...(small ? [] : [bar]), wrap);
     bar.addEventListener("change", (e) => e.stopPropagation());   // the filter and paging controls are not settings
     const changed = () => tbl.dispatchEvent(new Event("change", { bubbles: true }));
-    const visible = () => { const q = filter.value.trim().toLowerCase(); return q ? data.filter((r) => r.v.some((x) => x.toLowerCase().includes(q))) : data; };
+    let testing = null;   // while the filter is a test: the name asked about
+    const visible = () => {
+      const raw = filter.value.trim();
+      testing = null;
+      const tm = canTest ? /^test:\s*(\S+)$/i.exec(raw) : null;
+      if (tm) {
+        const name = tm[1].toLowerCase().replace(/\.$/, "");
+        testing = { name };
+        return data.filter((r) => {
+          const e = (r.v[0] || "").trim().toLowerCase().replace(/\.$/, "");
+          if (e === "") return false;
+          if (e[0] === "=") return e.slice(1) === name;
+          return name === e || name.endsWith("." + e);
+        });
+      }
+      const q = raw.toLowerCase();
+      return q ? data.filter((r) => r.v.some((x) => x.toLowerCase().includes(q))) : data;
+    };
     const clearMarks = () => tbody.querySelectorAll(".drop-above, .drop-below").forEach((x) => x.classList.remove("drop-above", "drop-below"));
     const trOf = (row) => [...tbody.children].find((t) => t._row === row);
     const cells = (row) => row.v.map((x) => x.trim());
@@ -3123,6 +3141,11 @@
       first.disabled = prev.disabled = page === 0;
       next.disabled = last.disabled = page >= n - 1;
       empty.hidden = vis.length > 0;
+      if (testing) {
+        count.textContent += vis.length ? ` · ${testing.name} keeps all its addresses` : "";
+        empty.textContent = vis.length ? "" : `${testing.name} is in no row, so Fast Lane narrows it.`;
+        return;
+      }
       empty.textContent = data.length ? "No rows match the filter." : (spec.empty || "No rows.") + " Right-click here ▸ Add row.";
     }
     function moveTo(row, target, after) {
@@ -3281,7 +3304,7 @@
     snmpacl: oneCol("snmpacl", "Address or network", "10.1.0.0/24, 192.0.2.5, 2001:db8::/32", "Nobody may ask."),
     metricsacl: oneCol("metricsacl", "Address or network", "10.1.0.0/24, 192.0.2.5, 2001:db8::/32", "Nobody may read /metrics."),
     allowdomains: oneCol("allowdomains", "Domain", "example.com", "No always-allowed names."),
-    fastlaneexclude: oneCol("fastlaneexclude", "Domain", "example.com", "No names are left out."),
+    fastlaneexclude: oneCol("fastlaneexclude", "Domain", "example.com, or =www.example.com", "No names are left out."),
     allowedclients: oneCol("allowedclients", "Network", "10.0.0.0/8, 192.168.1.5, 2001:db8::/32", "No restriction: every client may use the proxy."),
     exempt: oneCol("exempt", "Network", "10.0.0.0/8", "Nobody is exempt."),
     // per-client limits: "192.168.1.5 50"

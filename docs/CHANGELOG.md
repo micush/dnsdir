@@ -1,5 +1,39 @@
 # Changelog
 
+## [v652] - 2026-11-15 — Fast Lane: exact-name exclusions
+
+### Added
+- `fastlane_exclude` accepts `=name`: the entry covers that one name only. `example.com` still covers itself and everything below it; `=example.com` leaves `example.com` whole and still narrows `www.example.com`. This is for the name of a zone (for instance `ad.cush.local`, whose apex holds the domain controllers) that has web servers below it which should still be narrowed.
+- `=` is stored in the list as written (lower-cased, trailing dot removed, duplicates dropped); `=*.x`, `=.x` and a bare `=` are rejected. The limit of 1000 entries is unchanged. A node on v651 or older validates the list as plain names and is expected to refuse `=` entries (not tried), so upgrade every node before adding one.
+- The **Never narrowed** box says "Filter or test rows", like Conditional Forwarding: `test:NAME` keeps the rows that stop Fast Lane narrowing that name (a plain row covers the name and everything below it, `=name` only the name) and says so in the count line, or that no row covers it.
+- The web UI hint and placeholder, `--help`, the help panel and the README say it.
+
+### Verified
+- New test: normalisation, rejected forms, and exclusion of the exact name only (apex excluded, a host below it narrowed, plain entries still cover subdomains).
+- `gofmt -l`, `go vet`, `CGO_ENABLED=0 go vet`, `node --check`, cross-compiles for linux/amd64, arm64, arm, 386 and riscv64, `go test -race -count=1 ./...` and `CGO_ENABLED=0 go test -count=1 ./...`.
+
+### Not verified
+- The `test:` filter was syntax-checked (`node --check`) but not run in a browser; not run against a real Active Directory zone.
+- Still not built: capping the TTL of the first (unmeasured) answer, so a caching stub keeps all addresses until it expires.
+
+## [v651] - 2026-11-14 — Fast Lane narrows an answer that carries its zone's SOA
+
+### Fixed
+- Fast Lane still never touched an answer from an authoritative server of an internal zone (v650 stopped looking at the AA bit, but not at the records): `dig ad.cush.local` came back with two addresses, `AUTHORITY: 1` (the zone's SOA) and TTL 709, and was left whole whether or not the addresses had been timed. The check that the answer holds nothing it does not understand (copied from the sort list) allowed only CNAME and address records in the answer and an OPT record after them, so any authority section stopped it.
+- The check now has three sections. **Answer:** CNAME and address records, as before. **Authority:** NS and SOA records only (what an authoritative server adds to a positive answer). **Additional:** OPT, and address records (the name servers' glue). Anything else (an NSEC, an MX in the additional section, an RRSIG) still leaves the answer alone, as does a signed answer.
+- A narrowed answer is rebuilt as the header, the question, the CNAMEs and the one address of each family, and the OPT record, with the authority and glue records left out (NSCOUNT 0, ARCOUNT = the OPT record), as a resolver does with minimal responses. Leaving them out also avoids shifting the compression pointers of later records: glue owner names usually point into the authority section. An answer that needs no change is passed on whole, authority section included. The AA and AD bits are kept.
+- README and the help panel say it.
+
+### Verified
+- New tests: an answer built like the authoritative one above (two addresses with AA, an SOA whose rdata is compressed, a glue address whose owner points inside the SOA's rdata, and an OPT record) is narrowed to the fastest address, the message parses, the counts are 1, 0 and 1, the AA bit and the OPT stay, the TTL is capped, and the input is not modified; an NSEC in the authority section and an MX in the additional section still leave the answer alone.
+- Live, with a stub upstream that answers `ad.cush.local` with two addresses, AA and an SOA in the authority section: the first answer went out whole (answer 2, authority 1), and once the addresses were timed every answer had one address (TTL 30, authority 0, AA kept).
+- `gofmt -l`, `go build`, `go vet ./...`, `CGO_ENABLED=0 go vet ./...`, `node --check`, cross-compiles for linux/amd64, arm64, arm, 386 and riscv64, the full `go test -race -count=1 ./...` and `CGO_ENABLED=0 go test -count=1 ./...`.
+
+### Not verified
+- Not run against a real Active Directory or BIND server (the answer was built to the shape in the report); an authoritative answer with other record types in the authority section (for instance a signed zone's NSEC or DS) is still left alone.
+- A client that trusts the AD bit of such an answer now gets a subset of the addresses that were validated, not the whole set; this is also true of a reordered answer, and no RRSIG is ever dropped (a signed answer is not touched).
+- The first answer for a name still goes out whole with the upstream's full TTL (709 above), so a caching stub in front of the node keeps all of the addresses until it runs out; capping that TTL is not done.
+
 ## [v650] - 2026-11-14 — Fast Lane narrows answers from an authoritative server too
 
 ### Fixed

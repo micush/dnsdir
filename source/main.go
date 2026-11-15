@@ -245,7 +245,7 @@ DNS proxy ("dns" block at the top level of the config):
                      each address is timed in the background (an ICMP echo, else a TCP connect to 443), the first
                      answer for a name goes out as it came; signed and truncated answers, and ones a policy row makes, are never
                      changed. fastlane_ttl (30) is the most seconds a client may keep such an answer (1-3600);
-                     fastlane_exclude lists names (and everything below them) it never touches
+                     fastlane_exclude lists names it never touches: "example.com" and everything below it, "=example.com" that name only
   ecs                true (default) passes the client's network to the servers (EDNS Client
                      Subnet, RFC 7871); ecs_prefix4 (24) / ecs_prefix6 (56) bits only; a server that
                      refuses it (FORMERR/REFUSED) is asked again without and then left alone

@@ -1,5 +1,131 @@
 # Changelog
 
+## [v665] - 2026-11-15 — Theme toggle: Light / Dark / Auto
+
+### Added
+- A small icon at the right of the sidebar, just above the "Signed in as" line, switches the theme: **Auto** (half-filled circle; follows the system's light or dark setting, as before), **Light** (sun) and **Dark** (moon). Each click goes to the next one; the icon shows the current choice and its tooltip names it and what a click does. The choice is kept in this browser (localStorage); with storage blocked it lasts until the page is reloaded.
+
+### Changed
+- The stylesheet has `:root[data-theme="light"]` and `:root[data-theme="dark"]` copies of the colour sets, so a forced theme wins over the system's. The "no toggle, no stored preference" rule in `CLAUDE.md` and the stylesheet's header comment now say this.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`.
+- Headless Chromium (system set to dark): Auto → Light turns the page light, Light → Dark turns it dark again, Dark → Auto follows the system, a reload keeps the choice, no page errors.
+
+### Not verified
+- Not looked at with the system set to light, in a real browser, or on a phone-width layout. Charts and drawings that take their colours from the page (the topology, Statistics) were not checked in each theme by eye.
+
+## [v664] - 2026-11-15 — Monitor ▸ Cluster: no subtitle
+
+### Removed
+- The line "Nodes sharing these settings." in the header of the Cluster members card on Monitor ▸ Cluster.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`.
+
+### Not verified
+- Not looked at in a browser (one text line removed).
+
+## [v663] - 2026-11-15 — Monitor ▸ Gateways: VIP and AGC in the same type
+
+### Fixed
+- In a gateway card's header on Monitor ▸ Gateways, "VIP" and its address were both in the monospace font while "AGC" was in the normal font with only its address in monospace. Both now show the label in the normal font and the address in monospace. VIP and AGC also sit a little further right, so they no longer crowd the gateway name.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`.
+
+### Not verified
+- Not looked at in a browser after the change (a one-line markup change).
+
+## [v662] - 2026-11-15 — Right-click on a server works again
+
+### Fixed
+- Right-clicking a server (or a domain) on Topology did nothing. In v661, taking Test virtual MACs out of the menu also removed the code next to it that pauses a server (and a domain), which the server's menu needs, so the menu failed to open. The code is back; the right-click menus of the circle, a server, a domain and an anycast address were opened in a headless browser, and Pause ▸ This node was clicked on a server, with no page errors.
+- v661 should not be used.
+
+### Changed
+- The **[Test]** popup on Monitor ▸ Gateways has no **Run again** button, and no scroll bar: the result wraps in the popup, and its buttons are at the lower right (Close last); the ✕ in its corner is gone. When the gateway already uses real MAC addresses it reads just "Real MAC addresses are on for this gateway: there are no virtual MACs to test".
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`.
+- Headless Chromium against a mocked API: right-click a server shows its menu, Pause ▸ This node / All nodes appear and can be clicked; Monitor ▸ Gateways [Test] still works.
+
+### Not verified
+- Not run against a real daemon. The Go tests do not cover the web page, which is how this got through; only the headless runs above did. Domain and anycast menus were not opened in the headless run.
+
+## [v661] - 2026-11-15 — Test virtual MACs is a [Test] button on Monitor ▸ Gateways
+
+### Changed
+- **Test virtual MACs** is no longer in the gateway's right-click menu on Topology. Each gateway's card on Monitor ▸ Gateways has a **[Test]** button at the right of its header (not shown when the gateway uses real MAC addresses). It opens the same result popup, now with **Run again**, and **Use real MAC addresses** is still offered when the test says virtual MACs are not delivered. Help is updated.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`.
+- Headless Chromium against a mocked API: the button sits at the right of the card header, the popup shows the result, and **Use real MAC addresses** saves `real_macs: true` for that gateway.
+
+### Not verified
+- Not run against a real daemon (the test itself, which needs a router to ask).
+- A read-only user: the button is shown to everyone and the daemon decides whether the test may run.
+
+## [v660] - 2026-11-15 — No menu on the empty drawing
+
+### Removed
+- Right-clicking an empty part of the Topology drawing no longer opens a menu (it held New gateway and a few of the gateway's own items, all of which are on the sidebar's ＋ New gateway and the gateway's circle). The click now only clears the selection. Help, and the "No gateway yet" text, no longer mention it.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`.
+
+### Not verified
+- Not opened in a browser (the handler is one line; the browser's own right-click menu is suppressed there as before).
+
+## [v659] - 2026-11-15 — New gateways run on one node; Add ▸ Node no longer lists nodes that left
+
+### Fixed
+- Right-click the gateway ▸ **Add ▸ Node** listed "A node that left the cluster (xxxxxxxx)" for every stale entry in the gateway's removed-nodes list (a node that was taken off the gateway, or held back when it joined, and later left the cluster). Those entries are not nodes that can be added. The submenu now lists only nodes that are still in the cluster.
+
+### Changed
+- **A new gateway in a cluster runs on the node it was made on, and on no other.** Before, every node in the cluster started serving it at once. The other nodes are put on the gateway's removed-nodes list when it is created (in the web GUI, with the CLI `--canvas-add gateway`, and over MCP); add them where they should serve with right-click the gateway ▸ Add ▸ Node. A gateway that arrives with its own removed-nodes list (a restore, an import, a copy) is left as it is. On a single node nothing changes.
+- A node that joins a cluster already started out serving no gateway (that was already so); the help and README now say both things in the same place.
+
+### Added
+- **Forget N nodes that left the cluster**, at the bottom of Add ▸ Node when there are such entries: clears them from that gateway. The Add ▸ Node item is greyed out only when there is nothing to add and nothing to forget.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`.
+- Headless Chromium (netdir) against a mocked API: with one removed node still in the cluster and two stale IDs, the submenu shows the node and "Forget 2 nodes that left the cluster".
+
+### Not verified
+- The new-gateway rule (above) has no automated test and was not run on a real cluster: it was only compiled. Check it by creating a gateway on one node of a cluster and looking at the other nodes in Monitor ▸ Cluster / the gateway drawing.
+- Not run against a real cluster. The menu code is the same in all three programs but was only opened in netdir's headless run; the Forget click was not followed to a saved config. If the cluster view has not loaded yet (no nodes known), nothing is treated as having left.
+
+## [v658] - 2026-11-15 — Gateway menu: Edit ▸ Gateway | Fallback servers
+
+### Changed
+- The gateway's right-click menu on Topology: **Edit** is now a submenu with **Gateway** (the old Edit) and **Fallback servers**. The menu reads Statistics, Test virtual MACs (when the gateway does not use real MACs), then Edit ▸, Add ▸, Paste ▸, Pause ▸, and Delete. There is no top-level Fallback servers item any more. Help and README name the path as Edit ▸ Fallback servers and Edit ▸ Gateway ▸ Load balancing.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`.
+- Headless Chromium against a mocked API: the menu shows the items above, hovering Edit opens Gateway and Fallback servers, and saving from Fallback servers writes the gateway's own `dns` block with `fallback_servers` and `server_tls`.
+
+### Not verified
+- Not run against a real daemon; the read-only-user menu was not looked at.
+
+## [v657] - 2026-11-15 — Certificate checks for fallback servers; saving DNS settings kept them
+
+### Added
+- **A fallback server's certificate can be set in the GUI.** The Fallback servers table (Configure ▸ DNS ▸ Servers) has two more columns: **Certificate** (Check, Check against a name, Don't check) and **Check against name**. For a gateway with servers of its own, right-click the gateway on Topology ▸ **Edit ▸ Fallback servers** opens the same table in a dialog. The setting is the existing `server_tls` entry of the server (the command line already had it: `--canvas-set fallback … --cert`); only the screen was missing. It applies to `tls://` and `https://` servers; the columns are ignored for a plain address. A row with several addresses gives each the same setting.
+
+### Fixed
+- Saving anything on Configure ▸ DNS sent the configuration without `server_tls`, so the per-server certificate settings made on Topology (a host name to check against, or Don't check) were left out of the saved configuration. The page now keeps the settings of the normal servers and writes the fallback servers' from the table. This was seen in the configuration the page sends (captured from a rendered page with a mocked API); it was not repeated against a running daemon.
+- Monitor ▸ DNS: "certificate not checked" (and "certificate for NAME") is on a line of its own under a server's address and tags, no longer wrapped in the middle of the address column.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...` (one run failed `TestUpdateBelowApexUsesAuthoritySOA` with "address already in use" while a killed earlier run was still shutting down; it passed 15 times on its own and in a clean full run).
+- Headless Chromium against a mocked API: the fallback table shows the settings of an existing configuration; changing a row's certificate and then another field saves `server_tls` with the normal server's entry kept, the changed fallback entry updated and the others as they were; the Topology dialog saves a gateway's fallback servers and their certificate settings into its own `dns` block; Monitor ▸ DNS shows the certificate line on its own row.
+
+### Not verified
+- Not run against a real daemon, and not against real DoT servers (whether a name given in **Check against name** is accepted by a server is the same check as for the normal servers).
+- A fallback server given as a plain address (`4.2.2.2`) ignores the certificate columns by design; a row set to "Check against a name" with the name left empty is saved as a normal check.
+
 ## [v656] - 2026-11-15 — Page number box without the spinner
 
 ### Changed

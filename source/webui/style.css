@@ -1,5 +1,5 @@
-/* Theme follows the operating system / browser: light by default, dark when
-   prefers-color-scheme is dark.  No toggle and no stored preference. */
+/* Theme: Auto follows the operating system / browser (light by default, dark when prefers-color-scheme is dark);
+   the sidebar toggle can force Light or Dark with data-theme on <html> (kept in localStorage). */
 :root {
   color-scheme: light dark;
   --bg: #f4f6f9;
@@ -33,6 +33,39 @@
     --info: #94bbff;   --info-bg: #284575;
     --shadow: 0 1px 2px rgba(0, 0, 0, .3);
   }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --surface-2: #f0f3f7;
+  --text: #151a21;
+  --muted: #5a6573;
+  --border: #dde2e9;
+  --accent: #2457d6;
+  --accent-text: #ffffff;
+  --ok: #11703f;       --ok-bg: #dcf3e6;
+  --warn: #85560a;     --warn-bg: #fcefd0;  --amber: #e0a100;
+  --bad: #b3261e;      --bad-bg: #fde6e4;
+  --info: #1d4f9f;     --info-bg: #e1ecfb;
+  --shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 2px 8px rgba(15, 23, 42, .04);
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #262f3d;
+  --surface: #2f3a4b;
+  --surface-2: #3a4659;
+  --text: #e8ecf2;
+  --muted: #aeb8c7;
+  --border: #4a566c;
+  --accent: #7fa8ff;
+  --accent-text: #0a1020;
+  --ok: #62dba5;     --ok-bg: #1f4d39;
+  --warn: #f5c565;   --warn-bg: #54431a;  --amber: #f5c565;
+  --bad: #ff918a;    --bad-bg: #582a2d;
+  --info: #94bbff;   --info-bg: #284575;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3);
 }
 
 * { box-sizing: border-box; }
@@ -315,6 +348,7 @@ svg.cv text.sm { font-size: 11px; }
 
 /* Canvas: popup form and right-click menu */
 dialog.cv-dialog { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); padding: 1.1rem 1.25rem; width: min(34rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); overflow-y: auto; box-shadow: 0 10px 40px rgba(0, 0, 0, .35); }
+dialog.cv-dialog.fbdlg { width: min(46rem, calc(100vw - 2rem)); }
 dialog.cv-dialog::backdrop { background: rgba(10, 14, 22, .55); }
 dialog.cv-dialog h2 { margin-bottom: .8rem; }
 dialog.cv-dialog .toolbar { margin: 1rem 0 0; position: sticky; bottom: -1.1rem; padding: .6rem 0 1.1rem; background: var(--surface); }
@@ -427,6 +461,16 @@ td input[type=date] { width: 11rem; }
     --q-total: #3987e5; --q-ok: #199e70; --q-nx: #c98500; --q-ref: #d55181; --q-oth: #9085e9; --q-fail: #e66767; --q-upd: #3cc4d8;
     --t1: #3987e5; --t2: #d95926; --t3: #199e70; --t4: #c98500; --t5: #d55181; --t6: #008300; --t7: #9085e9; --t8: #e66767; --t9: #8aa4c4; --t10: #c9a78d; --t-other: #8a93a0;
   }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --q-total: #2a78d6; --q-ok: #1baf7a; --q-nx: #eda100; --q-ref: #e87ba4; --q-oth: #4a3aa7; --q-fail: #e34948; --q-upd: #0e9fb5;
+  --t1: #2a78d6; --t2: #eb6834; --t3: #1baf7a; --t4: #eda100; --t5: #e87ba4; --t6: #008300; --t7: #4a3aa7; --t8: #e34948; --t9: #7f98b8; --t10: #bf9f86; --t-other: #8a93a0;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --q-total: #3987e5; --q-ok: #199e70; --q-nx: #c98500; --q-ref: #d55181; --q-oth: #9085e9; --q-fail: #e66767; --q-upd: #3cc4d8;
+  --t1: #3987e5; --t2: #d95926; --t3: #199e70; --t4: #c98500; --t5: #d55181; --t6: #008300; --t7: #9085e9; --t8: #e66767; --t9: #8aa4c4; --t10: #c9a78d; --t-other: #8a93a0;
 }
 .q-total { --c: var(--q-total); } .q-ok { --c: var(--q-ok); } .q-nx { --c: var(--q-nx); } .q-ref { --c: var(--q-ref); }
 .q-oth { --c: var(--q-oth); } .q-fail { --c: var(--q-fail); } .q-clients, .q-cache { --c: var(--muted); } .q-qps { --c: var(--q-total); } .q-upd { --c: var(--q-upd); }
@@ -811,3 +855,14 @@ table.mcpkeytab td input[readonly] { text-overflow: ellipsis; font-family: var(-
 .reveal { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 1.7rem; height: 1.7rem; padding: 0; color: inherit; background: transparent; border: 0; border-radius: 4px; opacity: .6; cursor: pointer; }
 .reveal:hover, .reveal:focus-visible, .reveal[aria-pressed="true"] { opacity: 1; }
 .reveal-btn { display: inline-flex; align-items: center; padding: .15rem .4rem; }
+
+.vmac-out { margin: .25rem 0 1rem; }
+.vmac-out p { margin: 0 0 .5rem; overflow-wrap: anywhere; }
+.vmac-bar { justify-content: flex-end; margin-bottom: 0; }   /* the buttons of the virtual-MAC popup sit at the lower right, Close last */
+.gw-vip { margin-left: 1.25rem; }   /* Monitor ▸ Gateways: air between the gateway name and its VIP / AGC */
+
+/* Theme toggle (sidebar, above the signed-in line): Auto / Light / Dark.  Light and Dark are forced with data-theme on <html>. */
+.nav-theme { display: flex; justify-content: flex-end; padding: 0 .4rem; margin-top: auto; }
+.nav-theme + .nav-footer { margin-top: .3rem; }
+.theme-btn { appearance: none; background: none; border: 0; color: var(--muted); cursor: pointer; padding: .3rem; border-radius: 6px; line-height: 0; }
+.theme-btn:hover { color: var(--text); background: var(--surface-2); }

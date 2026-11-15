@@ -2301,6 +2301,39 @@ func (c *Cluster) knowsNode(id string) bool {
 	return false
 }
 
+// groupIDSet is the numbers of the gateways in a configuration.
+func groupIDSet(dc *DaemonConfig) map[int]bool {
+	s := map[int]bool{}
+	for _, g := range dc.Groups {
+		s[g.GroupID] = true
+	}
+	return s
+}
+
+// holdBackFromNewGateways makes a gateway that did not exist before (its number is not in known) serve on this node only: every other
+// cluster node is put on its removed-nodes list, so a new gateway does not change what the other nodes do.  An administrator adds
+// the nodes it should run on (right-click the gateway ▸ Add ▸ Node).  A gateway that arrives with its own list is left as it is.
+func (m *Mgmt) holdBackFromNewGateways(dc *DaemonConfig, known map[int]bool) {
+	if m.cl == nil || !m.cl.Enabled() {
+		return
+	}
+	self := localNodeID()
+	var others []string
+	for _, p := range m.cl.View().Peers {
+		if p.NodeID != "" && p.NodeID != self {
+			others = append(others, p.NodeID)
+		}
+	}
+	if len(others) == 0 {
+		return
+	}
+	for i := range dc.Groups {
+		if g := &dc.Groups[i]; !known[g.GroupID] && len(g.ExcludedNodes) == 0 {
+			g.ExcludedNodes = append([]string(nil), others...)
+		}
+	}
+}
+
 // excludeNewNode leaves a node that has just joined the cluster out of every gateway (the shared excluded_nodes list), so
 // that joining does not change which nodes answer for a gateway; an administrator adds it where it should serve.
 func (m *Mgmt) excludeNewNode(id string) {

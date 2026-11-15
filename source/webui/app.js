@@ -8,6 +8,36 @@
     target: null, nodes: [], clustered: false }; // target: address of the node being driven, null = this one
   const root = document.getElementById("app");
 
+  // Theme: Auto follows the system (prefers-color-scheme); Light and Dark force one.  The choice is kept in this browser only.
+  const THEMES = [["auto", "Auto"], ["light", "Light"], ["dark", "Dark"]];
+  const themeGet = () => { try { const t = localStorage.getItem("theme"); return THEMES.some(([k]) => k === t) ? t : "auto"; } catch (_) { return "auto"; } };
+  const themeApply = (t) => { if (t === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t; };
+  themeApply(themeGet());
+  function themeToggle() {
+    const svg = (tag, a) => { const e = document.createElementNS("http://www.w3.org/2000/svg", tag); for (const k in a) e.setAttribute(k, a[k]); return e; };
+    const ICON = {
+      auto: () => [svg("circle", { cx: 8, cy: 8, r: 6 }), svg("path", { d: "M8 2a6 6 0 0 1 0 12z", fill: "currentColor" })],
+      light: () => [svg("circle", { cx: 8, cy: 8, r: 3 }), ...[0, 45, 90, 135, 180, 225, 270, 315].map((a) => svg("path", { d: "M8 1.2v1.6", transform: "rotate(" + a + " 8 8)" }))],
+      dark: () => [svg("path", { d: "M13.4 9.6A5.6 5.6 0 0 1 6.4 2.6a5.6 5.6 0 1 0 7 7z" })],
+    };
+    const btn = h("button", { class: "theme-btn", type: "button" });
+    const draw = () => {
+      const t = themeGet(), i = THEMES.findIndex(([k]) => k === t), next = THEMES[(i + 1) % THEMES.length];
+      const s = svg("svg", { viewBox: "0 0 16 16", width: 16, height: 16, fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "aria-hidden": "true" });
+      for (const e of ICON[t]()) s.append(e);
+      btn.replaceChildren(s);
+      btn.title = "Theme: " + THEMES[i][1] + (t === "auto" ? " (follows the system)" : "") + ". Click for " + next[1] + ".";
+      btn.setAttribute("aria-label", btn.title);
+    };
+    btn.addEventListener("click", () => {
+      const next = THEMES[(THEMES.findIndex(([k]) => k === themeGet()) + 1) % THEMES.length][0];
+      try { if (next === "auto") localStorage.removeItem("theme"); else localStorage.setItem("theme", next); } catch (_) { /* no storage: lasts until reload */ }
+      themeApply(next); draw();
+    });
+    draw();
+    return h("div", { class: "nav-theme" }, btn);
+  }
+
   // The daemon puts its version in BUILD when it serves this file. After an upgrade the daemon restarts with a new
   // interface; a page left open notices (the session says which version answers) and reloads itself, but not while
   // a dialog is open, a field is being typed in, or a Configure page is open (it may hold changes not yet saved).
@@ -362,6 +392,7 @@
       h("div", { class: "mark" }, h("div", { class: "brand" }, "AnyName DNS Director"),
         h("div", { class: "muted small" }, "v" + s.version + (s.hostname && s.hostname.toLowerCase() !== "dnsdir" ? " · " + s.hostname : ""))),
       h("div", { class: "nav-section" }, groups),
+      themeToggle(),
       h("div", { class: "nav-footer" },
         h("div", { class: "who" }, "Signed in as ", h("strong", {}, s.user)),
         h("button", { class: "nav-signout", type: "button", onclick: logout }, "Sign out")));
@@ -770,8 +801,6 @@
     // The gateway circle's tooltip: its name, how long it has been up, each address family's state, and how many
     // nodes serve it.  The overall status line is added only when it says more than the family lines do (a
     // pause, a gateway with one family, a start still waiting); it is the same words as the two together otherwise.
-    const vmacWords = { delivered: "delivered", "not-delivered": "NOT delivered", inconclusive: "inconclusive" };
-    const vmacLine = (r) => "Virtual MACs: " + (vmacWords[r.verdict] || r.verdict) + " — " + r.detail;
     const gwTip = (g, st, dual) => {
       const fam = (af) => (st.fams[af] ? st.fams[af].detail : "not running");
       const together = dual ? "IPv4: " + fam("v4") + "; IPv6: " + fam("v6") : null;
@@ -846,24 +875,6 @@
           : "This node stops serving the gateway — it gives up its address and stops answering DNS — so it can be taken offline. The other cluster nodes carry on. Resume it here when you are done.",
         "Pause gateway", () => quick(() => { g[k] = true; }), "btn primary");
     }
-    // "Test virtual MACs…": asks this node to check that replies addressed to a virtual MAC reach it, and shows what it found.
-    // Nothing changes unless the person presses "Use real MAC addresses".
-    async function vmacTest(g) {
-      const body = h("div", {}, h("p", {}, "Testing… this takes a few seconds."));
-      const toolbar = h("div", { class: "toolbar" }, h("button", { class: "btn", type: "button", onclick: closeEditor }, "Close"));
-      openDialog("Virtual MACs: " + gwLabel(g), body, toolbar);
-      try {
-        const r = await api("POST", "/api/vmactest", { group: g.group_id });
-        const x = (r.data || [])[0];
-        if (!x) throw new Error("no result");
-        clear(body).append(h("p", {}, vmacLine(x)), ...(x.families || []).map((f) => h("p", { class: "hint" }, f.af + ": " + f.detail)));
-        if (x.verdict === "not-delivered") {
-          toolbar.prepend(h("button", { class: "btn primary", type: "button", onclick: () => { closeEditor(); quick(() => { g.real_macs = true; }); } }, "Use real MAC addresses"));
-        }
-      } catch (e) {
-        clear(body).append(h("p", {}, "The test could not run: " + e.message));
-      }
-    }
     // The last server in service stays on unless the gateway has fallback servers to answer from; a server that is down (not answering or
     // paused) is not in service.  "" when it may be paused, otherwise the reason.
     function lastServerWhy(g, addr) {
@@ -896,7 +907,7 @@
       const oldWrap = svgHost.querySelector(".cv-wrap");
       const keep = oldWrap && cv.drawn === cv.gid ? { x: oldWrap.scrollLeft, y: oldWrap.scrollTop } : { x: 0, y: 0 };
       const g = curGroup();
-      if (!g) { clear(svgHost); svgHost.append(h("div", { class: "empty" }, "No gateway yet. Click “＋ New gateway” under Topology in the sidebar (or right-click here) to draw one.")); return; }
+      if (!g) { clear(svgHost); svgHost.append(h("div", { class: "empty" }, "No gateway yet. Click “＋ New gateway” under Topology in the sidebar to draw one.")); return; }
       const st = statusOf(g);
       const servers = (g.dns && g.dns.servers) || [];
       const COLW = 190, SW = 156, DW = 156, DH = 34, DG = 46;
@@ -1575,8 +1586,9 @@
       ...(g.piggyback ? [] : [["Anycast address", () => anycastForm(g)]]),
       ["DNS server", () => serverForm(g)],
       ...(g.piggyback ? [] : addNodeSubs(g))]];
-    const gwItems = (g) => [["Statistics", () => gatewayStats(g)], "-", ["Edit", () => gatewayForm(g)], addGwItem(g), pasteGwItem(g),
-      ...(g.real_macs ? [] : [["Test virtual MACs", () => vmacTest(g)]]),
+    const gwItems = (g) => [["Statistics", () => gatewayStats(g)],
+      "-",
+      ["Edit", null, "", [["Gateway", () => gatewayForm(g)], ["Fallback servers", () => fallbackForm(g)]]], addGwItem(g), pasteGwItem(g),
       ...pauseItems("", (sc) => !!g[sc === "all" ? "paused_all" : "paused"], (sc, p) => pauseGateway(g, sc, p)), "-", ["Delete", delSel, "danger"]];
     // a server's address as the packet filter and the log search want it: the host, and the port its queries go to
     const srvTarget = (addr) => {
@@ -1826,13 +1838,19 @@
       const nodes = statusOf(g).nodes || [];
       return (g.excluded_nodes || []).map((id) => {
         const n = nodes.find((x) => x.node_id === id);
-        return { id, label: n ? n.name + (n.self ? " (this node)" : "") : "A node that left the cluster (" + id.slice(0, 8) + ")" };
+        return { id, gone: !!nodes.length && !n, label: n ? n.name + (n.self ? " (this node)" : "") : "A node that left the cluster (" + id.slice(0, 8) + ")" };
       });
     };
-    const addNodeSubs = (g) => {
-      const l = removedNodes(g);
-      return l.length ? [["Node", null, "", l.map((r) => [r.label, () => quick(() => toggleIn(g, "excluded_nodes", r.id, false))])]] : [["Node", null, "Every node already serves this gateway"]];
+    // Add ▸ Node lists the nodes that were taken off the gateway and are still in the cluster.  An entry for a node that has left the
+    // cluster is not a node that can be added: one item, "Forget nodes that left the cluster", clears them all from this gateway.
+    const nodeSubs = (g) => {
+      const l = removedNodes(g), live = l.filter((r) => !r.gone), gone = l.filter((r) => r.gone);
+      if (!live.length && !gone.length) return ["Node", null, "Every node already serves this gateway"];
+      return ["Node", null, "", [
+        ...live.map((r) => [r.label, () => quick(() => toggleIn(g, "excluded_nodes", r.id, false))]),
+        ...(gone.length ? [["Forget " + gone.length + " node" + (gone.length > 1 ? "s" : "") + " that left the cluster", () => quick(() => { g.excluded_nodes = (g.excluded_nodes || []).filter((id) => !gone.some((r) => r.id === id)); if (!g.excluded_nodes.length) delete g.excluded_nodes; })]] : [])]];
     };
+    const addNodeSubs = (g) => [nodeSubs(g)];
     // The last node in service cannot be paused: the item is greyed out, with the reason as its tooltip.  A node that is not answering or
     // is paused is out of service.
     const lastNodeWhy = (n) => {
@@ -1913,6 +1931,28 @@
     // Every new gateway starts with these public resolvers (remove any you don't want); keep in step with defaultTopologyServers in canvas.go.
     const DEFAULT_SERVERS = [["8.8.8.8", "dns.google"], ["1.1.1.1", "one.one.one.one"], ["9.9.9.9", "dns9.quad9.net"], ["4.2.2.2", "b.resolvers.level3.net"]];   // [address, name]
     const DEFAULT_DOMAINS = ["google.com", "amazon.com"];   // each default server is tested with these; keep in step with defaultTopologyDomains in canvas.go
+    // a gateway's fallback servers, and for each tls:// or https:// one how its certificate is checked
+    function fallbackForm(g) {
+      const rt = rowTable(ROW_TABLES.fallback, fbRows(g.dns || cv.cfg.dns));
+      const err = h("div", { "aria-live": "polite" });
+      const dl = openDialog("Fallback servers", h("form", { onsubmit: (e) => {
+        e.preventDefault();
+        const rows = rt.get(), all = rows.flatMap((r) => r.addr.split(/[\s,;]+/).filter(Boolean));
+        if (all.some((a) => !/^[A-Za-z0-9_.\-:\[\]\/]+$/.test(a))) { errorBox(err, "A fallback server needs to be an IP address or host name."); return; }
+        if (new Set(all).size !== all.length) { errorBox(err, "A fallback server is listed twice."); return; }
+        const named = rows.find((r) => r.cert === FB_CERT[1] && r.name && !(r.name.includes(".") && r.name.split(".").every((l) => /^[A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?$/.test(l)) && !/^[0-9.]+$/.test(r.name)));
+        if (named) { errorBox(err, "The certificate name must be a host name, such as dns.example.com."); return; }
+        ensureDNS(g);
+        const m = fbMerge(rows, g.dns);
+        if (m.list.length) g.dns.fallback_servers = m.list; else delete g.dns.fallback_servers;
+        if (m.tls) g.dns.server_tls = m.tls; else delete g.dns.server_tls;
+        closeEditor(); commit();
+      } },
+      h("p", { class: "hint" }, "Used only while every server above is down. Right-click the table ▸ Add to add a row. Certificate: for tls:// and https:// servers, check it normally, against another host name, or not at all (the traffic is still encrypted, but the server is not authenticated)."),
+      rt.el, err,
+      h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "submit" }, "OK"), h("button", { class: "btn", type: "button", onclick: closeEditor }, "Cancel"))));
+      dl.classList.add("fbdlg");
+    }
     function gatewayForm(g) {
       const base = g || groups()[0];
       form(g ? "Edit gateway" : "New gateway", [
@@ -2275,9 +2315,8 @@
       mount(main) {
         svgHost = h("div", { class: "cv-card",
           onmouseout: (e) => { if (cv.stale && !cv.drag && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest(".shape"))) draw(); },
-          // right-click on empty canvas (shapes and tabs handle their own menus)
-          oncontextmenu: (e) => { cv.sel = null; refresh(); const g = curGroup();
-            openMenu(e, [["New gateway…", () => gatewayForm(null)]].concat(g ? [["Add DNS server…", () => serverForm(g)], pasteGwItem(g)] : [])); } });
+          // right-click on empty canvas: no menu (the shapes and tabs have their own); it only clears the selection
+          oncontextmenu: (e) => { e.preventDefault(); cv.sel = null; refresh(); } });
         const legend = legendEl = h("div", { class: "cv-legend muted small" },
           h("span", { class: "dot st-ok" }), "working ", h("span", { class: "dot st-warn" }), "degraded ", h("span", { class: "dot st-bad" }), "down ", h("span", { class: "dot st-idle" }), "not yet known ", h("span", { class: "dot st-paused" }), "paused ", h("span", { class: "dot line-spread" }), "active");
         main.append(svgHost, legend);
@@ -2295,6 +2334,43 @@
   })();
 
   // Gateways  (CLI: --show-gateways, --show-neighbors)
+  // Virtual MACs (Monitor ▸ Gateways ▸ Test): asks this node to check that replies addressed to a virtual MAC reach it, and shows what
+  // it found.  Nothing changes unless the person presses "Use real MAC addresses", which is offered only when the test says they are not delivered.
+  const vmacWords = { delivered: "delivered", "not-delivered": "NOT delivered", inconclusive: "inconclusive" };
+  const vmacLine = (r) => "Virtual MACs: " + (vmacWords[r.verdict] || r.verdict) + " — " + r.detail;
+  function vmacTestPopup(gid, label) {
+    const out = h("div", { class: "vmac-out", "aria-live": "polite" }, h("p", {}, "Testing… this takes a few seconds."));
+    const useReal = h("button", { class: "btn primary", type: "button", hidden: true, onclick: async () => {
+      useReal.disabled = true;
+      try {
+        const r = await api("GET", "/api/config");
+        const g = (r.config.groups || []).find((x) => x.group_id === gid);
+        if (!g) throw new Error("the gateway is not in the saved configuration");
+        g.real_macs = true;
+        await api("PUT", "/api/config", { config: r.config, note: "Use real MAC addresses" });
+        useReal.textContent = "Real MAC addresses are on";
+      } catch (e) { if (e.message !== "unauthenticated") { useReal.disabled = false; useReal.textContent = "Could not save: " + e.message; } }
+    } }, "Use real MAC addresses");
+    const d = h("dialog", { class: "cv-dialog nt-dialog", "aria-label": "Virtual MACs: " + label });
+    const close = () => { try { d.close(); } catch (_) { /* closed */ } d.remove(); };
+    d.addEventListener("close", () => d.remove());
+    d.append(h("h2", {}, "Virtual MACs: " + label), out,
+      h("div", { class: "toolbar vmac-bar" }, useReal, h("button", { class: "btn", type: "button", onclick: close }, "Close")));
+    root.append(d);
+    d.showModal();
+    (async () => {
+      try {
+        const r = await api("POST", "/api/vmactest", { group: gid });
+        const x = (r.data || [])[0];
+        if (!x) throw new Error("no result");
+        // real MAC addresses on: just say so (the daemon's words, capitalised); otherwise the verdict, then a line per address family
+        const lines = x.verdict === "off" ? [x.detail.charAt(0).toUpperCase() + x.detail.slice(1)] : [vmacLine(x), ...(x.families || []).map((f) => f.af + ": " + f.detail)];
+        clear(out).append(...lines.map((t) => h("p", {}, t)));
+        useReal.hidden = x.verdict !== "not-delivered";
+      } catch (e) { if (e.message !== "unauthenticated") clear(out).append(h("p", {}, "The test could not run: " + e.message)); }
+    })();
+  }
+
   VIEWS.gateways = (() => {
     let body;
     return {
@@ -2324,9 +2400,12 @@
             h("td", { class: "mono" }, m.vmac || "–"),
             h("td", {}, pill(m.dns_listening ? "answering" : "not answering", m.dns_listening ? "ok" : "warn"))));
           out.append(h("div", { class: "card" },
-            h("header", {}, h("h2", {}, g.name ? g.name + " · Group " + g.group_id : "Group " + g.group_id),
-              h("span", { class: "mono muted" }, "VIP " + g.vip),
-              g.agc ? h("span", { class: "muted" }, "AGC ", h("span", { class: "mono" }, g.agc)) : null),
+            h("header", { class: "bar" }, h("h2", {}, g.name ? g.name + " · Group " + g.group_id : "Group " + g.group_id),
+              h("span", { class: "muted gw-vip" }, "VIP ", h("span", { class: "mono" }, g.vip)),
+              g.agc ? h("span", { class: "muted" }, "AGC ", h("span", { class: "mono" }, g.agc)) : null,
+              h("span", { class: "grow" }),
+              g.members.some((m) => m.local && m.real_macs) ? null
+                : h("button", { class: "btn hdr", type: "button", title: "Check that replies addressed to this gateway's virtual MAC reach this node", onclick: () => vmacTestPopup(g.group_id, g.name || "Group " + g.group_id) }, "Test")),
             h("div", { class: "scroll" }, h("table", { class: "tight" },
               h("thead", {}, h("tr", {}, ["Node name", "Node IP", "Pri", "Slot", "Weight", "Role", "State", "Hello avg / max (ms)", "vMAC", "DNS"].map((t, i) => h("th", { class: [2, 3, 4, 7].includes(i) ? "num" : "" }, t)))),
               h("tbody", {}, rows)))));
@@ -2347,7 +2426,7 @@
         if (c && c.data) {
           const v = c.data;
           out.append(h("div", { class: "card" },
-            h("header", {}, h("h2", {}, tc("Cluster members")), h("span", { class: "muted" }, "Nodes sharing these settings."),
+            h("header", {}, h("h2", {}, tc("Cluster members")),
               v.conflict ? pill("conflict", "bad") : null),
             membersTable(v, null, true)));
         }
@@ -2416,8 +2495,8 @@
                 h("td", {}, s.healthy && s.rank ? s.rank : "–"),
                 h("td", { class: "sname", title: s.name || null }, s.name || "–"),   // a long name is cut short; the whole is the tooltip
                 h("td", { class: "mono" }, s.addr, s.fallback ? [h("span", { class: "muted small fb-tag", title: "Used only while every other server is down" }, "fallback")] : null,
-                  s.cert_unchecked ? h("span", { class: "small fb-tag warn-text", title: "Its certificate is not checked: anyone on the path could answer for it (Topology ▸ Edit server ▸ Certificate)" }, "certificate not checked")
-                    : s.cert_name ? h("span", { class: "muted small fb-tag", title: "Its certificate is checked against this host name instead of the address" }, "cert: " + s.cert_name) : null,
+                  s.cert_unchecked ? h("div", { class: "small warn-text", title: "Its certificate is not checked: anyone on the path could answer for it (" + (s.fallback ? "Configure ▸ DNS ▸ Servers, or the gateway's right-click menu ▸ Edit ▸ Fallback servers" : "Topology ▸ Edit server ▸ Certificate") + ")" }, "certificate not checked")
+                    : s.cert_name ? h("div", { class: "muted small", title: "Its certificate is checked against this host name instead of the address" }, "certificate for " + s.cert_name) : null,
                   // a server given by name: its address and where that came from (the host's resolver may be this node itself)
                   s.resolved_via ? h("div", { class: "small " + (s.resolved_via === "host resolver" ? "warn-text" : "muted"), title: s.resolved_via === "host resolver" ? "No server is given by IP address and no bootstrap server is set, so the name comes from this host's resolver. If that is this node, the server can only be reached while another one answers." : null },
                     (s.resolved_ips || []).join(", ") + " via " + s.resolved_via) : null),
@@ -3267,6 +3346,20 @@
     };
   }
 
+  // fallback servers: the rows of the table above (from the list and server_tls of a DNS section), and the list and server_tls to save
+  const FB_CERT = ["Check", "Check against a name", "Don't check"];
+  const fbRows = (d) => ((d || {}).fallback_servers || []).map((a) => ({ addr: a, ...(((d || {}).server_tls || {})[a] || {}) }));
+  const fbMerge = (rows, old) => {
+    const list = [], tls = {}, was = new Set((old || {}).fallback_servers || []), normal = new Set((old || {}).servers || []);
+    // the table decides for the fallback servers; the settings of the other servers stay as they are
+    for (const [k, v] of Object.entries((old || {}).server_tls || {})) if (!(was.has(k) && !normal.has(k))) tls[k] = v;
+    for (const r of rows) for (const a of r.addr.split(/[\s,;]+/).filter(Boolean)) {
+      list.push(a);
+      if (r.cert === FB_CERT[2]) tls[a] = { insecure: true };
+      else if (r.cert === FB_CERT[1] && r.name) tls[a] = { name: r.name.toLowerCase().replace(/\.$/, "") };
+    }
+    return { list, tls: Object.keys(tls).length ? tls : undefined };
+  };
   // one value to a row, one row to a list entry (a row with several, separated by commas or spaces, is saved as several entries)
   const oneCol = (key, name, ph, empty) => ({
     key, empty, cols: [{ name, ph }],
@@ -3288,7 +3381,15 @@
       mark: (c) => !c[1],
     },
     servers: oneCol("servers", "Server", "10.0.0.53, 10.0.1.53:5353, tls://dns.example.com, https://dns.example.com/dns-query", "No servers."),
-    fallback: oneCol("fallback", "Fallback server", "8.8.8.8", "No fallback servers."),
+    // a fallback server and how its certificate is checked (tls:// and https:// only): a row is {addr, insecure, name}, and one
+    // row may hold several addresses (the setting then goes to each); fbMerge writes the rows back
+    fallback: {
+      key: "fallback", empty: "No fallback servers.",
+      cols: [{ name: "Fallback server", ph: "8.8.8.8, tls://dns.example.com" }, { name: "Certificate", opts: FB_CERT }, { name: "Check against name", ph: "host name" }],
+      parse: (l) => (l && typeof l === "object" ? [l.addr || "", l.insecure ? FB_CERT[2] : l.name ? FB_CERT[1] : FB_CERT[0], l.name || ""] : [String(l).trim(), FB_CERT[0], ""]),
+      obj: (c) => ({ addr: c[0].trim(), cert: c[1], name: c[2].trim() }),
+      mark: (c) => !c[0].trim(),
+    },
     bootstrap: oneCol("bootstrap", "Bootstrap server", "1.1.1.1", "No bootstrap servers: the servers given by IP address do it."),
     neighbors: oneCol("neighbors", "Neighbor IP address", "10.0.0.2", "No neighbors: multicast."),
     morevip4: oneCol("morevip4", "IPv4 address", "10.0.0.11", "No more IPv4 addresses."),
@@ -3725,7 +3826,7 @@
         continue;
       }
       if (f.t === "rows") {
-        const rt = rowTable(ROW_TABLES[f.rows], v || []);
+        const rt = rowTable(ROW_TABLES[f.rows], f.rows === "fallback" ? fbRows(obj) : v || []);
         getters[f.k] = rt.get;
         grid.append(h("div", { class: "f wide" }, h("span", {}, f.l, sharedTag(f)), rt.el, f.hint ? h("span", { class: "hint" }, f.hint) : null));
         continue;
@@ -4371,7 +4472,7 @@
         ...general.get(),
         // keep what this form has no fields for (a gateway's own DNS pool, per-server domains)
         groups: groups.map((g) => ({ ...(g.orig.dns ? { dns: g.orig.dns } : {}), ...(g.orig.paused ? { paused: true } : {}), ...(g.orig.paused_all ? { paused_all: true } : {}), ...(g.orig.excluded_nodes ? { excluded_nodes: g.orig.excluded_nodes } : {}), ...(g.orig.node_order ? { node_order: g.orig.node_order } : {}), ...(g.orig.paused_vips ? { paused_vips: g.orig.paused_vips } : {}), ...(g.orig.paused_vips_here ? { paused_vips_here: g.orig.paused_vips_here } : {}), ...(g.orig.extra_vips ? { extra_vips: g.orig.extra_vips } : {}), ...g.fs.get() })),
-        dns: { ...(cfg.dns.schedule ? { schedule: cfg.dns.schedule } : {}), ...(cfg.dns.server_queries ? { server_queries: cfg.dns.server_queries } : {}), ...(cfg.dns.server_names ? { server_names: cfg.dns.server_names } : {}), ...(cfg.dns.server_forward ? { server_forward: cfg.dns.server_forward } : {}), ...(cfg.dns.paused_servers ? { paused_servers: cfg.dns.paused_servers } : {}), ...(cfg.dns.paused_queries ? { paused_queries: cfg.dns.paused_queries } : {}), ...dns.get(), ...snmpShared(), ...lldpShared(), ...alertsShared(), ...backupShared() },
+        dns: { ...(cfg.dns.schedule ? { schedule: cfg.dns.schedule } : {}), ...(cfg.dns.server_queries ? { server_queries: cfg.dns.server_queries } : {}), ...(cfg.dns.server_names ? { server_names: cfg.dns.server_names } : {}), ...(cfg.dns.server_forward ? { server_forward: cfg.dns.server_forward } : {}), ...(cfg.dns.paused_servers ? { paused_servers: cfg.dns.paused_servers } : {}), ...(cfg.dns.paused_queries ? { paused_queries: cfg.dns.paused_queries } : {}), ...(() => { const v = dns.get(), m = fbMerge(v.fallback_servers || [], cfg.dns); return { ...v, fallback_servers: m.list, ...(m.tls ? { server_tls: m.tls } : {}) }; })(), ...snmpShared(), ...lldpShared(), ...alertsShared(), ...backupShared() },
         // the certificate is managed under Web GUI; keep any file paths already in the config
         web: { cert_file: cfg.web.cert_file || "", key_file: cfg.web.key_file || "", ...web.get(), ...sso.get(), ...ldap.get() },
         cluster: cluster.get(),

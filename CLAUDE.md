@@ -59,8 +59,9 @@ file such as `webui/` and `testdata/` are under `source/`, and the CHANGELOG is 
         `colorScheme: "light"` and `"dark"`) when layout or theme changed.
      4. Hard rules for the front end: no inline `<script>`/`style=` and no
         `innerHTML` (the CSP forbids the first and the second is an XSS hole —
-        use `textContent` via the `h()` helper); the theme comes only from the
-        `prefers-color-scheme` media query, no toggle or stored preference;
+        use `textContent` via the `h()` helper); the theme follows the
+        `prefers-color-scheme` media query unless the sidebar toggle (Auto / Light / Dark,
+        kept in localStorage, applied as `data-theme` on `<html>`) forces one;
         every CLI feature must stay reachable from the GUI (see the table in
         the README) — add the GUI side in the same change as any new CLI flag,
         and the other way round.

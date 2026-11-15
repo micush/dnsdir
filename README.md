@@ -798,7 +798,7 @@ A directory account keeps its password and expiry date in the directory. **Add a
 | `--cluster-status` | Monitor ▸ Cluster (the members) |
 | `--show-dns` | DNS tab (ranking, health, latency bars, counters) |
 | `--show-config`, `--configure` | Configure pages (form; every edit saves and applies at once) |
-| `--versions`, `--version-show/-diff/-snapshot/-restore/-export`, `--config-import` | History tab |
+| `--versions`, `--version-show/-diff/-snapshot/-restore/-export`, `--config-import` | Operate ▸ **History** (every saved version; diff, restore, download, upload, snapshot) |
 | `--users`, `--user-add`, `--user-grant`, `--user-revoke`, `--user-passwd`, `--user-expiry`, `--user-del` | Configure ▸ Users |
 | `--tls-status/-install/-csr/-revert/-regenerate` | Configure ▸ Web GUI (certificate) |
 | `--dns-tls-status/-install/-csr/-revert` | Configure ▸ DNS ▸ Listeners (certificate for DNS over TLS and HTTPS) |
@@ -878,7 +878,7 @@ dnsdir --user-del alice
 
 Every change to the configuration, whether from the GUI, the CLI, a cluster sync or a hand edit of the file, is stored as a version in `/var/lib/dnsdir/versions` (one JSON file each; the newest 200 are kept). A version records when it happened, who made it (`alice`, `cli:root`, `file edit`, `cluster sync` and so on) and a one-line summary such as `DNS settings: probe_interval_ms 5000 → 7777`. Secrets (keys) never appear in summaries, and identical saves are not recorded again.
 
-![Configure ▸ History: every saved version, with who made it and what changed](snaps/history.png)
+![Operate ▸ History: every saved version, with who made it and what changed](snaps/history.png)
 
 ```
 dnsdir --versions                         # list
@@ -890,7 +890,7 @@ dnsdir --version-export [ID] > dnsdir.conf  # download
 dnsdir --config-import dnsdir.conf          # validate and apply a file
 ```
 
-In the GUI, the History tab lets you view a version, diff it against the live config, the previous version or two selected ones, restore, download, upload and snapshot. A snapshot note can only be given on the command line. In a cluster, restoring changes the shared part through the primary, like any other edit.
+In the GUI, **Operate ▸ History** lets you view a version, diff it against the live config, the previous version or two selected ones, restore, download, upload and snapshot. A snapshot note can only be given on the command line. In a cluster, restoring changes the shared part through the primary, like any other edit.
 
 ## The GUI certificate
 

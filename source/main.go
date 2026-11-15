@@ -287,8 +287,8 @@ Web GUI ("web" block): everything above is also available in a browser.
   Pages: Topology (--canvas, --canvas-add/-del: draw gateways, DNS servers and
   the domains to test as circle, squares and trapezoids), Gateways (--show-gateways, --show-neighbors),
   Cluster monitor (--cluster-status), DNS (--show-dns), Configure (--show-config,
-  --configure: form), History (--versions...), Certificate
-  (--tls-...), Node (--assert-agc, --node-pause..., --power), Cluster (--cluster-...), Upgrade (--update-...); the ? at the top right
+  --configure: form), Certificate
+  (--tls-...), Node (--assert-agc, --node-pause..., --power), Cluster (--cluster-...), History (--versions...), Upgrade (--update-...); the ? at the top right
   opens help for the page. Version is in the header. A certificate installed through the GUI/CLI is
   picked up without restarting the GUI.
 

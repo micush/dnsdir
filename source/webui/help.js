@@ -773,7 +773,7 @@ const DNSDIR_HELP = {
     ],
   },
   history: {
-    title: "History",
+    title: "Operate: History",
     body: [
       "Every change to the configuration is recorded: from the web console, the command line, a cluster sync or a file edit. Each version shows who made it and a plain summary of what changed. Secrets are hidden in the summaries. The newest 200 versions are kept.",
       ["h", "What you can do here"],

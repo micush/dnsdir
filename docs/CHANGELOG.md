@@ -1,5 +1,29 @@
 # Changelog
 
+## [v656] - 2026-11-15 — Page number box without the spinner
+
+### Changed
+- The page number in the pager under the long lists (policy rows, zones, clients, domains, users and the like) is a plain box: the up and down arrows are gone and the number is centred. You still type a page and press Enter or leave the box to go there. The pagers on History and the query log have no such box and are unchanged.
+
+### Verified
+- `gofmt -l`, `go vet`, the full `go test -race -count=1 ./...` and `CGO_ENABLED=0 go test -count=1 ./...`.
+
+### Not verified
+- Not opened in a browser (the rule is the standard one for Chrome, Edge, Safari and Firefox, but it was not seen drawn).
+
+## [v655] - 2026-11-15 — History moves to Operate
+
+### Changed
+- **History** (every saved version of the configuration: diff, restore, download, upload, snapshot) is now under **Operate**, between Scheduler and Upgrade, no longer last under Configure. It is mostly things you do to the node, not settings you edit. The page, its address (`#history`), its permissions and its command-line commands are unchanged, so a bookmark still works.
+- The help panel is titled "Operate: History"; the README (the CLI table, the screenshot caption and the text), and `--help` name the new place.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, the full `go test -race -count=1 ./...` and `CGO_ENABLED=0 go test -count=1 ./...`.
+
+### Not verified
+- Not opened in a browser. The screenshot `snaps/history.png` in the README was not retaken, so it may still show the old menu.
+- Whether a read-only user's menu shows History under Operate the same way it did under Configure was not tried (the page's access rules were not touched).
+
 ## [v654] - 2026-11-15 — Log page: the filter box looks like the other fields
 
 ### Fixed

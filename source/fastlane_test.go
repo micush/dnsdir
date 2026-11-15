@@ -67,12 +67,12 @@ func TestFastLaneNarrowsToTheFastest(t *testing.T) {
 	orig := append([]byte(nil), msg...)
 
 	// the first answer for a name goes out as it came, and the addresses are measured meanwhile
-	if out := x.narrow(msg, typeA, "a.example"); &out[0] != &msg[0] {
+	if out := x.narrow(msg, typeA, "a.example", nil); &out[0] != &msg[0] {
 		t.Fatal("the first answer was changed before anything was measured")
 	}
 	x.settle(t, 3)
 
-	out := x.narrow(msg, typeA, "a.example")
+	out := x.narrow(msg, typeA, "a.example", nil)
 	if got, want := answerAddrs(t, out), []string{"2.2.2.2"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("addresses %v, want %v", got, want)
 	}
@@ -97,9 +97,9 @@ func TestFastLaneKeepsLowerTTL(t *testing.T) {
 	x := newFLTest(t, false, map[string]time.Duration{"1.1.1.1": ms(30), "2.2.2.2": ms(5)})
 	x.ttl = 90 // more than the 60 of the answer: the answer's own TTL stays
 	msg := sortMsg("1.1.1.1", "2.2.2.2")
-	x.narrow(msg, typeA, "a.example")
+	x.narrow(msg, typeA, "a.example", nil)
 	x.settle(t, 2)
-	out := x.narrow(msg, typeA, "a.example")
+	out := x.narrow(msg, typeA, "a.example", nil)
 	rrs, _, _ := recordsAfterQuestion(out)
 	for _, rr := range rrs {
 		if ttl := binary.BigEndian.Uint32(out[rr.rdataOff-6:]); ttl != 60 {
@@ -111,11 +111,11 @@ func TestFastLaneKeepsLowerTTL(t *testing.T) {
 func TestFastLaneSpreadTakesTurnsWithinTheBand(t *testing.T) {
 	x := newFLTest(t, true, map[string]time.Duration{"1.1.1.1": ms(10), "2.2.2.2": ms(11), "3.3.3.3": ms(40)})
 	msg := sortMsg("1.1.1.1", "2.2.2.2", "3.3.3.3")
-	x.narrow(msg, typeA, "a.example")
+	x.narrow(msg, typeA, "a.example", nil)
 	x.settle(t, 3)
 	seen := map[string]int{}
 	for i := 0; i < 10; i++ {
-		got := answerAddrs(t, x.narrow(msg, typeA, "a.example"))
+		got := answerAddrs(t, x.narrow(msg, typeA, "a.example", nil))
 		if len(got) != 1 {
 			t.Fatalf("got %v", got)
 		}
@@ -129,9 +129,9 @@ func TestFastLaneSpreadTakesTurnsWithinTheBand(t *testing.T) {
 func TestFastLaneSkipsAnAddressThatDoesNotAnswer(t *testing.T) {
 	x := newFLTest(t, false, map[string]time.Duration{"2.2.2.2": ms(20), "3.3.3.3": ms(60)}) // 1.1.1.1 is down
 	msg := sortMsg("1.1.1.1", "2.2.2.2", "3.3.3.3")
-	x.narrow(msg, typeA, "a.example")
+	x.narrow(msg, typeA, "a.example", nil)
 	x.settle(t, 3)
-	if got := answerAddrs(t, x.narrow(msg, typeA, "a.example")); !reflect.DeepEqual(got, []string{"2.2.2.2"}) {
+	if got := answerAddrs(t, x.narrow(msg, typeA, "a.example", nil)); !reflect.DeepEqual(got, []string{"2.2.2.2"}) {
 		t.Fatalf("got %v", got)
 	}
 	st := x.stats()
@@ -143,20 +143,20 @@ func TestFastLaneSkipsAnAddressThatDoesNotAnswer(t *testing.T) {
 func TestFastLaneLeavesAnAnswerWhenEveryAddressFailed(t *testing.T) {
 	x := newFLTest(t, false, map[string]time.Duration{})
 	msg := sortMsg("1.1.1.1", "2.2.2.2")
-	x.narrow(msg, typeA, "a.example")
+	x.narrow(msg, typeA, "a.example", nil)
 	x.settle(t, 2)
-	if out := x.narrow(msg, typeA, "a.example"); &out[0] != &msg[0] {
+	if out := x.narrow(msg, typeA, "a.example", nil); &out[0] != &msg[0] {
 		t.Fatal("an answer whose every address failed was changed")
 	}
 }
 
 func TestFastLaneWaitsForEveryAddress(t *testing.T) {
 	x := newFLTest(t, false, map[string]time.Duration{"1.1.1.1": ms(5), "2.2.2.2": ms(9)})
-	x.narrow(sortMsg("1.1.1.1", "2.2.2.2"), typeA, "a.example")
+	x.narrow(sortMsg("1.1.1.1", "2.2.2.2"), typeA, "a.example", nil)
 	x.settle(t, 2)
 	// a third address no probe has finished for: the answer stays as it came
 	msg := sortMsg("1.1.1.1", "2.2.2.2", "3.3.3.3")
-	if out := x.narrow(msg, typeA, "a.example"); &out[0] != &msg[0] {
+	if out := x.narrow(msg, typeA, "a.example", nil); &out[0] != &msg[0] {
 		t.Fatal("changed while an address was still unmeasured")
 	}
 }
@@ -164,9 +164,9 @@ func TestFastLaneWaitsForEveryAddress(t *testing.T) {
 func TestFastLaneForgetsOldResults(t *testing.T) {
 	x := newFLTest(t, false, map[string]time.Duration{"1.1.1.1": ms(30), "2.2.2.2": ms(5)})
 	msg := sortMsg("1.1.1.1", "2.2.2.2")
-	x.narrow(msg, typeA, "a.example")
+	x.narrow(msg, typeA, "a.example", nil)
 	x.settle(t, 2)
-	if len(answerAddrs(t, x.narrow(msg, typeA, "a.example"))) != 1 {
+	if len(answerAddrs(t, x.narrow(msg, typeA, "a.example", nil))) != 1 {
 		t.Fatal("not narrowed")
 	}
 	// the faster one now answers slowly; after flFresh the next answer starts a new probe, and the result is used once done
@@ -174,14 +174,14 @@ func TestFastLaneForgetsOldResults(t *testing.T) {
 	x.times["2.2.2.2"] = ms(80)
 	x.mu.Unlock()
 	x.advance(flFresh + time.Second)
-	x.narrow(msg, typeA, "a.example") // starts the probes
+	x.narrow(msg, typeA, "a.example", nil) // starts the probes
 	x.settle(t, 4)
-	if got := answerAddrs(t, x.narrow(msg, typeA, "a.example")); !reflect.DeepEqual(got, []string{"1.1.1.1"}) {
+	if got := answerAddrs(t, x.narrow(msg, typeA, "a.example", nil)); !reflect.DeepEqual(got, []string{"1.1.1.1"}) {
 		t.Fatalf("after the change: %v", got)
 	}
 	// results older than flMaxAge are not used at all
 	x.advance(flMaxAge + time.Second)
-	if out := x.narrow(msg, typeA, "a.example"); &out[0] != &msg[0] {
+	if out := x.narrow(msg, typeA, "a.example", nil); &out[0] != &msg[0] {
 		t.Fatal("an out-of-date result was used")
 	}
 }
@@ -190,9 +190,9 @@ func TestFastLaneEachFamilyOnItsOwn(t *testing.T) {
 	x := newFLTest(t, false, map[string]time.Duration{
 		"1.1.1.1": ms(30), "2.2.2.2": ms(5), "2001:db8::1": ms(7), "2001:db8::2": ms(2), "2001:db8::3": ms(9)})
 	msg := sortMsg("1.1.1.1", "2001:db8::1", "2.2.2.2", "2001:db8::2", "2001:db8::3")
-	x.narrow(msg, typeA, "a.example")
+	x.narrow(msg, typeA, "a.example", nil)
 	x.settle(t, 5)
-	got := answerAddrs(t, x.narrow(msg, typeA, "a.example"))
+	got := answerAddrs(t, x.narrow(msg, typeA, "a.example", nil))
 	if !reflect.DeepEqual(got, []string{"2.2.2.2", "2001:db8::2"}) {
 		t.Fatalf("got %v, want the fastest of each family", got)
 	}
@@ -202,9 +202,9 @@ func TestFastLaneLeavesOthersAlone(t *testing.T) {
 	x := newFLTest(t, false, map[string]time.Duration{"1.1.1.1": ms(30), "2.2.2.2": ms(5)})
 	x.exclude = newNameSet([]string{"corp.example"})
 	base := sortMsg("1.1.1.1", "2.2.2.2")
-	x.narrow(base, typeA, "a.example")
+	x.narrow(base, typeA, "a.example", nil)
 	x.settle(t, 2)
-	if len(answerAddrs(t, x.narrow(base, typeA, "a.example"))) != 1 {
+	if len(answerAddrs(t, x.narrow(base, typeA, "a.example", nil))) != 1 {
 		t.Fatal("the plain answer was not narrowed")
 	}
 	withFlags := func(f func(b []byte)) []byte {
@@ -220,7 +220,6 @@ func TestFastLaneLeavesOthersAlone(t *testing.T) {
 		qtype uint16
 		qname string
 	}{
-		{"AA bit", withFlags(func(b []byte) { b[2] |= 0x04 }), typeA, "a.example"},
 		{"TC bit", withFlags(func(b []byte) { b[2] |= 0x02 }), typeA, "a.example"},
 		{"not a response", withFlags(func(b []byte) { b[2] &^= 0x80 }), typeA, "a.example"},
 		{"NXDOMAIN", withFlags(func(b []byte) { b[3] |= 3 }), typeA, "a.example"},
@@ -231,13 +230,13 @@ func TestFastLaneLeavesOthersAlone(t *testing.T) {
 		{"a short message", base[:8], typeA, "a.example"},
 	}
 	for _, c := range cases {
-		if out := x.narrow(c.msg, c.qtype, c.qname); len(out) > 0 && &out[0] != &c.msg[0] {
+		if out := x.narrow(c.msg, c.qtype, c.qname, nil); len(out) > 0 && &out[0] != &c.msg[0] {
 			t.Errorf("%s: the answer was changed", c.name)
 		}
 	}
 	// one address, and a name only its own family has two of
 	single := sortMsg("2.2.2.2")
-	if out := x.narrow(single, typeA, "a.example"); &out[0] != &single[0] {
+	if out := x.narrow(single, typeA, "a.example", nil); &out[0] != &single[0] {
 		t.Error("an answer with one address was changed")
 	}
 }
@@ -245,12 +244,12 @@ func TestFastLaneLeavesOthersAlone(t *testing.T) {
 func TestFastLaneNeverMeasuresTheNodesOwnNetwork(t *testing.T) {
 	x := newFLTest(t, false, map[string]time.Duration{"127.0.0.1": ms(1), "2.2.2.2": ms(5)})
 	msg := sortMsg("127.0.0.1", "2.2.2.2")
-	x.narrow(msg, typeA, "a.example")
+	x.narrow(msg, typeA, "a.example", nil)
 	time.Sleep(50 * time.Millisecond)
 	if x.Probes.Load() != 0 {
 		t.Fatal("a loopback address was probed")
 	}
-	if out := x.narrow(msg, typeA, "a.example"); &out[0] != &msg[0] {
+	if out := x.narrow(msg, typeA, "a.example", nil); &out[0] != &msg[0] {
 		t.Fatal("an answer holding a loopback address was changed")
 	}
 }
@@ -263,9 +262,9 @@ func TestFastLaneCompressionPointerIntoTheBlock(t *testing.T) {
 	first := len(b)
 	b = append(b, 0xC0, 12, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 1, 1, 1, 1)
 	b = append(b, 0xC0, byte(first), 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 2, 2, 2, 2)
-	x.narrow(sortMsg("1.1.1.1", "2.2.2.2"), typeA, "a.example") // the results are in once these two are measured
+	x.narrow(sortMsg("1.1.1.1", "2.2.2.2"), typeA, "a.example", nil) // the results are in once these two are measured
 	x.settle(t, 2)
-	if out := x.narrow(b, typeA, "a.example"); &out[0] != &b[0] {
+	if out := x.narrow(b, typeA, "a.example", nil); &out[0] != &b[0] {
 		t.Fatal("a pointer into the dropped block was not respected")
 	}
 }
@@ -423,5 +422,79 @@ func TestFastLaneICMPAndTCPProbes(t *testing.T) {
 	cancel()
 	if _, ok := flTCP(cctx, lo, port); ok {
 		t.Fatal("a cancelled probe reported an answer")
+	}
+}
+
+func TestFastLaneNarrowsAnAuthoritativeAnswer(t *testing.T) {
+	// a server that is authoritative for an internal zone sets AA on every answer: those are the names this is for
+	x := newFLTest(t, false, map[string]time.Duration{"10.1.0.1": ms(30), "10.2.0.1": ms(5), "10.3.0.1": ms(9)})
+	msg := sortMsg("10.1.0.1", "10.2.0.1", "10.3.0.1")
+	msg[2] |= 0x04
+	x.narrow(msg, typeA, "a.corp", nil)
+	x.settle(t, 3)
+	out := x.narrow(msg, typeA, "a.corp", nil)
+	if got := answerAddrs(t, out); !reflect.DeepEqual(got, []string{"10.2.0.1"}) {
+		t.Fatalf("got %v", got)
+	}
+	if out[2]&0x04 == 0 {
+		t.Fatal("the AA bit was lost")
+	}
+}
+
+func TestFastLaneLeavesWhatTheNodeAnswersItself(t *testing.T) {
+	x := newFLTest(t, false, map[string]time.Duration{"1.1.1.1": ms(30), "2.2.2.2": ms(5)})
+	msg := sortMsg("1.1.1.1", "2.2.2.2")
+	x.narrow(msg, typeA, "a.example", nil)
+	x.settle(t, 2)
+	calls := 0
+	local := func() bool { calls++; return true }
+	if out := x.narrow(msg, typeA, "a.example", local); &out[0] != &msg[0] || calls != 1 {
+		t.Fatalf("an answer the node made was changed (asked %d times)", calls)
+	}
+	// the question is only asked when everything cheaper has passed
+	calls = 0
+	one := sortMsg("2.2.2.2")
+	x.narrow(one, typeA, "a.example", local)
+	x.narrow(msg, 15, "a.example", local)
+	if calls != 0 {
+		t.Fatalf("asked %d times for answers that need no change", calls)
+	}
+	notLocal := func() bool { return false }
+	if len(answerAddrs(t, x.narrow(msg, typeA, "a.example", notLocal))) != 1 {
+		t.Fatal("an answer from a server was not narrowed")
+	}
+}
+
+func TestPoolAnswersLocally(t *testing.T) {
+	cfg := defaultDNS()
+	cfg.Policy = []PolicyRule{
+		{Client: "*", Name: "own.example", Servers: []string{"A 10.5.5.5, 10.5.5.6"}},
+		{Client: "*", Name: "via.example", Servers: []string{"10.9.9.9"}},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	p := NewPool(cfg)
+	t.Cleanup(p.Stop)
+	client := netip.MustParseAddr("192.0.2.1")
+	ask := func(name string) bool {
+		var qi qinfo
+		q := []byte{0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0}
+		for _, l := range strings.Split(name, ".") {
+			q = append(q, byte(len(l)))
+			q = append(q, l...)
+		}
+		q = append(q, 0, 0, 1, 0, 1)
+		parseQuestion(q, &qi)
+		return p.answersLocally(client, &qi)
+	}
+	if !ask("own.example") {
+		t.Error("a row with records answers by itself")
+	}
+	if ask("via.example") {
+		t.Error("a row that sends the query to its own servers does not answer by itself")
+	}
+	if ask("other.example") {
+		t.Error("a name no row matches is not answered by the node")
 	}
 }

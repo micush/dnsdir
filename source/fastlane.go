@@ -25,10 +25,11 @@ import (
 // flFresh is probed again.  Until every address of a family has a result the answer is left as it came, and so it is when
 // every address failed.  The choice is made as the answer is sent, so the cached answer is not changed.
 //
-// What it leaves alone, always: an answer that is not a plain NOERROR answer to an A or AAAA question, one with the AA or
-// TC bit, one with anything but CNAME and address records in it (a signed answer carries RRSIGs, and a client that
-// validates would reject an RRset with records missing), a name in fastlane_exclude, and a family with fewer than two
-// addresses.  The records kept get a TTL of at most fastlane_ttl seconds, so that a client does not keep a choice that
+// What it leaves alone, always: an answer that is not a plain NOERROR answer to an A or AAAA question, a truncated one,
+// one with anything but CNAME and address records in it (a signed answer carries RRSIGs, and a client that validates would
+// reject an RRset with records missing), an answer the node makes itself (a policy row with records, a block list), a name
+// in fastlane_exclude, and a family with fewer than two addresses.  An answer with the AA bit is NOT left alone: a server
+// that is authoritative for an internal zone sets it on every answer, and those are the names this is for.  The records kept get a TTL of at most fastlane_ttl seconds, so that a client does not keep a choice that
 // has gone bad for as long as the servers' TTL.
 
 const (
@@ -416,15 +417,25 @@ func (f *fastLane) sweepLocked(now time.Time) {
 
 // ---- the answer ----
 
+// answersLocally says whether the node makes the answer to this query itself: a policy row that answers, or a block
+// list.  (The same test the forwarding path makes.)
+func (p *Pool) answersLocally(client netip.Addr, qi *qinfo) bool {
+	r := p.policyFor(client, qi)
+	return r != nil && r.action != ""
+}
+
 // narrow returns resp with only the fastest address of each family that has several, or resp itself when nothing is
 // to change.  resp is never modified (it may be a cached message).
-func (f *fastLane) narrow(resp []byte, qtype uint16, name string) []byte {
+//
+// local, when not nil, says whether the node made this answer itself (a policy row that answers, a block list); it is
+// asked only once everything cheaper has passed.
+func (f *fastLane) narrow(resp []byte, qtype uint16, name string, local func() bool) []byte {
 	if f == nil || len(resp) < 12 || (qtype != typeA && qtype != typeAAAA) {
 		return resp
 	}
 	flags := binary.BigEndian.Uint16(resp[2:])
-	// a response (QR), a query opcode, no AA, no TC, NOERROR
-	if flags&0x8000 == 0 || flags&0x7800 != 0 || flags&0x0400 != 0 || flags&0x0200 != 0 || flags&0x000F != 0 {
+	// a response (QR), a query opcode, no TC, NOERROR
+	if flags&0x8000 == 0 || flags&0x7800 != 0 || flags&0x0200 != 0 || flags&0x000F != 0 {
 		return resp
 	}
 	an := int(binary.BigEndian.Uint16(resp[6:]))
@@ -467,6 +478,9 @@ func (f *fastLane) narrow(resp []byte, qtype uint16, name string) []byte {
 		if rr.typ == typeCNAME && ptrInto(resp, rr.rdataOff, lo, hi) {
 			return resp
 		}
+	}
+	if local != nil && local() { // asked last: most answers never get this far
+		return resp
 	}
 	drop := map[int]bool{}
 	for _, fam := range [][]int{v4, v6} {

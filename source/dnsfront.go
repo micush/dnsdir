@@ -257,7 +257,7 @@ func (f *DNSFrontend) resolveVia(query []byte, tcp bool, via uint8, client netip
 		resp = p.sortAnswer(resp, client)
 	}
 	if p := f.pool(); p != nil && p.fl != nil && !probe && qi.ok {
-		resp = p.fl.narrow(resp, qi.qtype, qi.name())
+		resp = p.fl.narrow(resp, qi.qtype, qi.name(), func() bool { return p.answersLocally(client, &qi) })
 	}
 	if timed && f.ctx.Err() == nil {
 		f.gw.lat(time.Since(t0))

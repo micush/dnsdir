@@ -1,5 +1,23 @@
 # Changelog
 
+## [v650] - 2026-11-14 — Fast Lane narrows answers from an authoritative server too
+
+### Fixed
+- Fast Lane (v648) left every answer with the AA bit alone, to keep clear of names the node answers itself. But a server that is authoritative for an internal zone (Active Directory, BIND) sets AA on **every** answer, so the internal names a LAN resolver most wants narrowed were never touched: an eight-address answer for `mcp-m.net.74sw.corp` came back whole with its full TTL on a node where Fast Lane was on.
+- The AA bit is no longer looked at. What is left alone is what the node answers itself, found the way the forwarding path finds it (`Pool.answersLocally`, the same `policyFor` test): a Policy-Based Resolution row that answers with records, and a block list's answer. The question is asked last, after the address count, so an answer that needs no change costs no policy lookup; a name the node answers itself is also never timed. A policy row that sends the query to its own servers is not local: its answers are narrowed like the pool's.
+- Signed answers (RRSIG), truncated ones, errors, other record types, names in `fastlane_exclude`, and the loopback/link-local rules are unchanged. `narrow` takes the new `local` callback as its fourth argument.
+- README, the help panel and the usage text say it.
+
+### Verified
+- New tests: an answer with AA set is narrowed and keeps the bit; an answer the node made is left alone, the question is asked once and only when the answer could change; `answersLocally` for a row with records (true), a row with its own servers (false) and a name no row matches (false). The first version of that second test showed the lookup was run before the address count; it was moved. The v648/v649 tests pass with the extra argument.
+- Live: a stub upstream that sets AA on every answer, and a policy row that answers `own.example` with three addresses. The upstream's name went from three addresses (TTL 300) to one (TTL 30, AA kept) once the addresses were timed; the policy row's answer kept all three addresses and its TTL of 60 on every query.
+- `gofmt -l`, `go build`, `go vet ./...`, `CGO_ENABLED=0 go vet ./...`, `node --check`, cross-compiles for linux/amd64, arm64, arm, 386 and riscv64, the full `go test -race -count=1 ./...` and `CGO_ENABLED=0 go test -count=1 ./...`.
+
+### Not verified
+- Not run against a real Active Directory or BIND zone; the AA answers came from a stub.
+- The first answer for a name still goes out whole with the upstream's full TTL, so a caching stub in front of the node (systemd-resolved, a browser) keeps all the addresses until that TTL runs out; capping the TTL of answers that are held back for want of a measurement is not done.
+- A dynamically registered name or other answer the node builds outside a policy row or block list would not be recognised as local; none is known to exist (the only place the daemon sets AA is a policy row's records).
+
 ## [v649] - 2026-11-14 — Fast Lane times addresses with an ICMP echo first, TCP 443 second
 
 ### Changed

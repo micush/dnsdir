@@ -243,7 +243,7 @@ DNS proxy ("dns" block at the top level of the config):
                      A plain network ("10.20.0.0/16") is for every client; the one the client is in comes first
   fastlane           true sends a client only the fastest address of a name that has several (default false):
                      each address is timed in the background (an ICMP echo, else a TCP connect to 443), the first
-                     answer for a name goes out as it came; signed, authoritative and truncated answers are never
+                     answer for a name goes out as it came; signed and truncated answers, and ones a policy row makes, are never
                      changed. fastlane_ttl (30) is the most seconds a client may keep such an answer (1-3600);
                      fastlane_exclude lists names (and everything below them) it never touches
   ecs                true (default) passes the client's network to the servers (EDNS Client

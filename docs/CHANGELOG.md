@@ -1,5 +1,33 @@
 # Changelog
 
+## [v667] - 2026-11-15 — Family filter also takes the family out of ANY and other answers
+
+### Fixed
+- **Family filter** only answered a question for the filtered type with no records: `dig any` still returned both the A and the AAAA record. Now the records of the filtered family (and the RRSIGs that cover them) are taken out of every answer, authority and additional section a filtered client gets. An answer whose compressed names would break by the removal is sent as it is (rare; it needs a record that stays to point into the removed area).
+
+### Changed
+- The **Leave out** column of the Family filter offers IPv4 and IPv6, not no-ipv4 and no-ipv6 (a double negative); the stored form is unchanged.
+
+### Verified
+- gofmt, go vet and go test -race; a test for the removal (ANY with CNAME, A and AAAA; counts updated; the cached message untouched).
+
+### Not verified
+- Not run against a live resolver; signed (DNSSEC) answers were not tried.
+
+## [v666] - 2026-11-15 — Family filter: leave IPv4 or IPv6 out of a client's answers
+
+### Added
+- **Family filter** (`familyfilter`, `familyfilter_on` in the `dns` block; Configure ▸ DNS ▸ Resolution ▸ Sort List, below the sort list). Rows are `client-network: no-ipv4` or `client-network: no-ipv6` (`any` for every client); the first row holding the client decides. A question for the filtered type (A or AAAA) is answered NOERROR with no records, so the client uses the other family. Nothing is resolved or cached for it, and it is counted in the statistics like any answer. Shared by every gateway.
+
+### Changed
+- CLAUDE.md: the "every CLI feature must stay reachable from the GUI" rule is gone.
+
+### Verified
+- gofmt, go vet, go test -race pass, including a new test of the rules.
+
+### Not verified
+- Not run against a live resolver with real clients; the GUI rows were not looked at in a browser.
+
 ## [v665] - 2026-11-15 — Theme toggle: Light / Dark / Auto
 
 ### Added

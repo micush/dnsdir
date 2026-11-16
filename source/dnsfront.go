@@ -252,9 +252,17 @@ func (f *DNSFrontend) resolveVia(query []byte, tcp bool, via uint8, client netip
 	if p := f.pool(); !probe && p != nil && p.dlim != nil && qi.ok && p.admitDomain(qi.name(), client) != admitOK {
 		return p.turnedAwayDomain(query, tcp)
 	}
-	resp := f.resolveRaw(query, tcp, client, &qi)
+	var resp []byte
+	if p := f.pool(); !probe && p != nil && qi.ok && p.familyDrops(client, qi.qtype) {
+		resp = errorResponse(query, rcodeNoError) // the family this client does not get: no records, counted like any answer
+	} else {
+		resp = f.resolveRaw(query, tcp, client, &qi)
+	}
 	if p := f.pool(); p != nil && len(p.sorts) > 0 {
 		resp = p.sortAnswer(resp, client)
+	}
+	if p := f.pool(); p != nil && len(p.fams) > 0 {
+		resp = dropFamily(resp, p.familyDropFor(client)) // what an ANY answer or the glue of an MX answer holds
 	}
 	if p := f.pool(); p != nil && p.fl != nil && !probe && qi.ok {
 		resp = p.fl.narrow(resp, qi.qtype, qi.name(), func() bool { return p.answersLocally(client, &qi) })

@@ -258,6 +258,10 @@ func cloneDNS(d DNSConfig) DNSConfig {
 		d.AllowedClients = nil
 	}
 	d.Policy = clonePolicy(d.Policy)
+	d.FamilyFilter = append([]string(nil), d.FamilyFilter...)
+	if len(d.FamilyFilter) == 0 {
+		d.FamilyFilter = nil
+	}
 	d.SortList = append([]string(nil), d.SortList...)
 	if len(d.SortList) == 0 {
 		d.SortList = nil

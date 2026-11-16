@@ -241,6 +241,10 @@ DNS proxy ("dns" block at the top level of the config):
                      "client-network: preferred-network, ...", e.g. ["10.1.0.0/16: 10.1.0.0/16, 10.0.0.0/8"];
                      "any" matches every client; unmatched addresses keep their order after the preferred ones.
                      A plain network ("10.20.0.0/16") is for every client; the one the client is in comes first
+  familyfilter_on    true (default) uses familyfilter; false keeps the list but filters nothing
+  familyfilter       clients that get no IPv4 or no IPv6 answers, one entry each: "client-network: no-ipv4" or
+                     "client-network: no-ipv6", e.g. ["10.1.0.0/16: no-ipv6"]; "any" matches every client; the first
+                     entry holding the client decides. A question for the filtered type is answered with no records, and the family is taken out of other answers (ANY, glue)
   fastlane           true sends a client only the fastest address of a name that has several (default false):
                      each address is timed in the background (an ICMP echo, else a TCP connect to 443), the first
                      answer for a name goes out as it came; signed and truncated answers, and ones a policy row makes, are never

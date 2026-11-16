@@ -314,6 +314,7 @@ type Pool struct {
 
 	avoid    nameAvoid    // servers that timed out on a name lately (slowname.go)
 	sorts    []sortRule   // the dns block's sortlist, parsed (sortlist.go)
+	fams     []familyRule // the dns block's familyfilter, parsed (familyfilter.go)
 	fl       *fastLane    // nil unless fastlane is on (fastlane.go)
 	policy   []policyRule // the dns block's policy rows, parsed (policy.go)
 	pidx     *policyIndex
@@ -332,6 +333,9 @@ func NewPool(cfg DNSConfig) *Pool {
 	p := &Pool{cfg: cfg, lim: newClientLimits(cfg), dlim: newDomainLimits(cfg), sorts: nil}
 	if cfg.SortListOn {
 		p.sorts = buildSortRules(cfg.SortList)
+	}
+	if cfg.FamilyFilterOn {
+		p.fams = buildFamilyRules(cfg.FamilyFilter)
 	}
 	if cfg.FastLane {
 		p.fl = newFastLane(cfg)

@@ -2567,6 +2567,8 @@
     { section: "Sort List" },
     { shared: true, k: "sortlist_on", l: "Sort list enabled", t: "bool" },
     { shared: true, k: "sortlist", l: "Sort list", t: "rows", rows: "sortlist", wide: true, hint: "Read from the top." },
+    { shared: true, k: "familyfilter_on", l: "Family filter enabled", t: "bool" },
+    { shared: true, k: "familyfilter", l: "Family filter", t: "rows", rows: "familyfilter", wide: true, hint: "Read from the top." },
     { section: "Fast Lane" },
     { shared: true, k: "fastlane", l: "Fast Lane enabled", t: "bool" },
     { shared: true, k: "fastlane_ttl", l: "Answer TTL (s)", t: "int", zeroDef: true, def: 30, min: 0, max: 3600 },
@@ -3379,6 +3381,17 @@
       },
       format: (c) => (c[0] ? [c[0] + ": " + c[1].split(/[\s,]+/).filter(Boolean).join(", ")] : c[1].split(/[\s,]+/).filter(Boolean)),
       mark: (c) => !c[1],
+    },
+    // Family filter: "client network: no-ipv4" or "no-ipv6" ("any" for every client)
+    familyfilter: {
+      key: "familyfilter", empty: "No clients filtered.",
+      cols: [{ name: "Client network", ph: "any" }, { name: "Leave out", opts: ["IPv4", "IPv6"] }],
+      parse: (line) => {
+        const t = line.trim(), m = t.indexOf(": "), w = m < 0 ? "" : t.slice(m + 1).trim().toLowerCase();
+        return [m < 0 ? t : t.slice(0, m).trim(), w === "no-ipv4" ? "IPv4" : "IPv6"];
+      },
+      format: (c) => (c[0].trim() ? [c[0].trim() + ": no-" + c[1].toLowerCase()] : []),
+      mark: (c) => !c[0].trim(),
     },
     servers: oneCol("servers", "Server", "10.0.0.53, 10.0.1.53:5353, tls://dns.example.com, https://dns.example.com/dns-query", "No servers."),
     // a fallback server and how its certificate is checked (tls:// and https:// only): a row is {addr, insecure, name}, and one

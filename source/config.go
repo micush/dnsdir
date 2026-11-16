@@ -588,6 +588,11 @@ type DNSConfig struct {
 	SortList []string `json:"sortlist,omitempty"`
 	// SortListOn switches the sort list on (the default) or off without deleting it.
 	SortListOn bool `json:"sortlist_on"`
+	// FamilyFilter leaves IPv4 or IPv6 out of the answers of clients: "10.1.0.0/16: no-ipv6", "any: no-ipv4" (see
+	// familyfilter.go). Empty means every client gets both.
+	FamilyFilter []string `json:"familyfilter,omitempty"`
+	// FamilyFilterOn switches the family filter on (the default) or off without deleting it.
+	FamilyFilterOn bool `json:"familyfilter_on"`
 	// FastLane answers a name that has several addresses of one family with the fastest of them only (fastlane.go).
 	// Off by default.  FastLaneTTL is the most seconds a client may keep such an answer (0 = 30); FastLaneExclude are
 	// names (and everything below them) it never touches.  All three are shared by the cluster, and left out of the file
@@ -751,6 +756,7 @@ func defaultDNS() DNSConfig {
 		ListenPort:          53,
 		ForwardUpdates:      true,
 		SortListOn:          true,
+		FamilyFilterOn:      true,
 		PolicyOn:            true,
 		PolicyLog:           true,
 		Spread:              true,
@@ -1039,6 +1045,11 @@ func (d *DNSConfig) Validate() error {
 		return err
 	}
 	d.SortList = sl
+	ff, err := normalizeFamilyFilter(d.FamilyFilter)
+	if err != nil {
+		return err
+	}
+	d.FamilyFilter = ff
 	if d.FastLaneTTL < 0 || d.FastLaneTTL > flMaxTTL {
 		return fmt.Errorf("dns: fastlane_ttl must be 1-%d seconds (0 = %d)", flMaxTTL, flDefaultTTL)
 	}
@@ -1221,6 +1232,11 @@ func (c *DNSConfig) followSettings(shared DNSConfig) {
 	c.FastLaneExclude = append([]string(nil), shared.FastLaneExclude...)
 	if len(c.FastLaneExclude) == 0 {
 		c.FastLaneExclude = nil
+	}
+	c.FamilyFilterOn = shared.FamilyFilterOn
+	c.FamilyFilter = append([]string(nil), shared.FamilyFilter...)
+	if len(c.FamilyFilter) == 0 {
+		c.FamilyFilter = nil
 	}
 	c.SortListOn = shared.SortListOn
 	c.SortList = append([]string(nil), shared.SortList...)

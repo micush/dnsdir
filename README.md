@@ -210,6 +210,12 @@ It is a list of entries of the form `client-network: preferred-network, preferre
 
 The A and AAAA records of a plain answer are put in this order: addresses inside the client network itself first, then those in the first preferred network, then the second, and so on. Addresses in none of them keep their order after those. The sort is stable and per client: the cache is not changed, and an error answer, or one that has record types other than A, AAAA and CNAME, is left as it came. An empty list (the default) keeps the order the servers gave. `sortlist_on` (default true; the **Sort list enabled** tick box) switches it off without deleting the list.
 
+### Family filter
+
+`familyfilter` in the top-level `dns` block (Configure ▸ DNS ▸ Resolution ▸ Sort List, below the sort list; `familyfilter_on` switches it off without deleting it) leaves IPv4 or IPv6 out of the answers for some clients. Every gateway uses it.
+
+Each entry is `client-network: no-ipv4` or `client-network: no-ipv6` (for example `10.1.0.0/16: no-ipv6`); `any` matches every client. The first entry whose network holds the client decides. A question for the filtered type (A for `no-ipv4`, AAAA for `no-ipv6`) is answered NOERROR with no records, as for a name that has none, without resolving or caching anything. In every other answer, such as ANY or the address records that come with an MX answer, the records of that family (and the RRSIGs covering them) are taken out; an answer whose compressed names would break by that is sent as it is.
+
 ### Fast Lane
 
 `fastlane` in the top-level `dns` block (Configure ▸ DNS ▸ Resolution ▸ Fast Lane, off by default) sends a client only the fastest address of a name that has several. Every gateway uses it, and it is shared by the cluster.

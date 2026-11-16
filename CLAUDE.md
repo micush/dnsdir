@@ -61,10 +61,7 @@ file such as `webui/` and `testdata/` are under `source/`, and the CHANGELOG is 
         `innerHTML` (the CSP forbids the first and the second is an XSS hole —
         use `textContent` via the `h()` helper); the theme follows the
         `prefers-color-scheme` media query unless the sidebar toggle (Auto / Light / Dark,
-        kept in localStorage, applied as `data-theme` on `<html>`) forces one;
-        every CLI feature must stay reachable from the GUI (see the table in
-        the README) — add the GUI side in the same change as any new CLI flag,
-        and the other way round.
+        kept in localStorage, applied as `data-theme` on `<html>`) forces one.
    - **Touched config history, cluster, certificates or updates
     (`configver.go`, `cluster*.go`, `shared.go`, `certmgr.go`, `update.go`,
     `mgmt.go`, `ops.go`, `cli.go`, `web_mgmt.go`)?** The in-process tests are

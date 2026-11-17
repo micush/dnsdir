@@ -998,13 +998,30 @@ func parseMatch(text string) matchExpr {
 			group = nil
 		}
 	}
+	pend := false // a "not" waits for the word it applies to
 	for _, w := range strings.Fields(strings.ToLower(text)) {
 		switch w {
 		case "and":
 			endTerm()
+			pend = false
 		case "or":
 			endGroup()
+			pend = false
+		case "not":
+			pend = !pend
 		default:
+			bare := strings.TrimLeft(w, "!")
+			if bang := len(w) - len(bare); bang > 0 || pend {
+				endTerm()
+				if bare != "" {
+					if (bang%2 == 1) != pend {
+						bare = "!" + bare
+					}
+					group = append(group, bare)
+				}
+				pend = false
+				continue
+			}
 			term = append(term, w)
 		}
 	}
@@ -1018,14 +1035,15 @@ func (e matchExpr) matches(texts ...string) bool {
 	for _, group := range e {
 		all := true
 		for _, term := range group {
+			neg := strings.HasPrefix(term, "!")
 			found := false
 			for _, t := range texts {
-				if strings.Contains(t, term) {
+				if strings.Contains(t, strings.TrimPrefix(term, "!")) {
 					found = true
 					break
 				}
 			}
-			if !found {
+			if found == neg {
 				all = false
 				break
 			}

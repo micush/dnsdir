@@ -59,6 +59,22 @@
   }, 15000);
 
   // ── DOM helper ────────────────────────────────────────────────────────────
+  // A filter box: words must all match (AND, also written out); OR makes alternatives; a ! before a word (!x), or NOT, means "does not match".
+  // "a AND !b" and "a !b" both find what has a and not b; "a OR c" finds either.  `match(test)` asks test(word) for each word.
+  function parseFilter(text) {
+    const groups = [[]];
+    let pend = false;   // a "not" waits for the word it applies to
+    for (const raw of String(text || "").toLowerCase().split(/\s+/).filter(Boolean)) {
+      if (raw === "and") { pend = false; continue; }
+      if (raw === "or") { pend = false; if (groups[groups.length - 1].length) groups.push([]); continue; }
+      if (raw === "not") { pend = !pend; continue; }
+      const w = raw.replace(/^!+/, ""), neg = ((raw.length - w.length) % 2 === 1) !== pend;
+      pend = false;
+      if (w) groups[groups.length - 1].push({ w, neg });
+    }
+    const gs = groups.filter((g) => g.length);
+    return { empty: !gs.length, match: (test) => !gs.length || gs.some((g) => g.every((t) => !!test(t.w) !== t.neg)) };
+  }
   function h(tag, attrs, ...kids) {
     const el = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs || {})) {
@@ -2868,8 +2884,8 @@
         if (testing.bad) return [];
         return data.filter((r) => nameMatches(r.v[1] || "", name) && (!cl || clientMatches(r.v[0] || "", cl)));
       }
-      const q = raw.toLowerCase();
-      return q ? data.filter((r) => r.v.some((x) => x.toLowerCase().includes(q))) : data;
+      const flt = parseFilter(raw);
+      return flt.empty ? data : data.filter((r) => flt.match((w) => r.v.some((x) => x.toLowerCase().includes(w))));
     };
     const mark = (tr, row) => { tr.classList.toggle("incomplete", !row.v[2].trim() && !row.v[3].trim()); };
     const copyText = (vals) => vals.join("\t");
@@ -3190,8 +3206,8 @@
           return name === e || name.endsWith("." + e);
         });
       }
-      const q = raw.toLowerCase();
-      return q ? data.filter((r) => r.v.some((x) => x.toLowerCase().includes(q))) : data;
+      const flt = parseFilter(raw);
+      return flt.empty ? data : data.filter((r) => flt.match((w) => r.v.some((x) => x.toLowerCase().includes(w))));
     };
     const clearMarks = () => tbody.querySelectorAll(".drop-above, .drop-below").forEach((x) => x.classList.remove("drop-above", "drop-below"));
     const trOf = (row) => [...tbody.children].find((t) => t._row === row);
@@ -3523,8 +3539,8 @@
         testing = { name, win, lists: [...new Set(rows.map((r) => r.v[0].trim().toLowerCase() || "?"))] };
         return rows;
       }
-      const q = raw.toLowerCase();
-      return q ? data.filter((r) => r.v.some((x) => x.toLowerCase().includes(q))) : data;
+      const flt = parseFilter(raw);
+      return flt.empty ? data : data.filter((r) => flt.match((w) => r.v.some((x) => x.toLowerCase().includes(w))));
     };
     const mark = (tr, row) => { tr.classList.toggle("incomplete", !row.v[0].trim() && !!row.v[1].trim()); };
     const copyText = (vals) => vals.join("\t");
@@ -6020,7 +6036,7 @@
         h("button", { class: "btn small", type: "button", "aria-label": "Next page", disabled: topPage[pk] >= pages - 1, onclick: go(1) }, "›"));
       const mine = withHost ? "Client" : "Domain";
       return h("div", { class: "card qcard" }, h("header", { class: "bar" }, h("h2", {}, tc(title)), h("span", { class: "grow" }),
-        h("input", { type: "text", class: "qfilter", placeholder: "Filter (AND, OR)", "aria-label": "Filter " + (withHost ? "clients" : "domains") + ", words may be joined by AND or OR", autocomplete: "off", spellcheck: "false",
+        h("input", { type: "text", class: "qfilter", placeholder: "Filter (AND, OR, !not)", "aria-label": "Filter " + (withHost ? "clients" : "domains") + ", words may be joined by AND or OR, and ! or NOT leaves a word out", autocomplete: "off", spellcheck: "false",
           value: withHost ? cFilter : dFilter, oninput: (ev) => onFilter(withHost, ev.currentTarget.value),
           onkeydown: (ev) => { if (ev.key === "Escape" && ev.currentTarget.value) { ev.currentTarget.value = ""; onFilter(withHost, ""); } } }),
         items.length ? csvButton(title, () => withHost
@@ -6488,7 +6504,7 @@
         level = sel("Level", [["", "All levels"], ["info", "Info and above"], ["warn", "Warnings and errors"], ["error", "Errors only"]], kept.level, () => { kept.level = level.value; load(); });
         span = sel("Time range", [["15m", "Last 15 minutes"], ["1h", "Last hour"], ["6h", "Last 6 hours"], ["1d", "Last 24 hours"], ["7d", "Last 7 days"], ["all", "All of it"]], kept.span, () => { kept.span = span.value; load(); });
         count = sel("Lines", [["200", "200 lines"], ["1000", "1000 lines"], ["5000", "5000 lines"]], kept.count, () => { kept.count = count.value; load(); });
-        search = h("input", { type: "search", placeholder: "Filter words…", "aria-label": "Filter text", spellcheck: "false", class: "grow",
+        search = h("input", { type: "search", placeholder: "Filter words (AND, OR, !not)…", "aria-label": "Filter text", spellcheck: "false", class: "grow",
           oninput: () => { kept.q = search.value; clearTimeout(timer); timer = setTimeout(load, 300); } });
         if (state.prefill.log != null) { kept.q = state.prefill.log; state.prefill.log = null; }   // sent here from a server's menu
         search.value = kept.q;
@@ -7479,8 +7495,8 @@
     function drawList() {
       const real = listBox; listBox = h("div", { class: "ulist" });
       try {
-        const q = filterIn ? filterIn.value.trim().toLowerCase() : "";
-        const shown = users.filter((u) => !q || u.name.toLowerCase().includes(q));
+        const flt = parseFilter(filterIn ? filterIn.value : "");
+        const shown = users.filter((u) => flt.match((w) => u.name.toLowerCase().includes(w)));
         if (!users.length) listBox.append(h("div", { class: "empty" }, "Nobody is in the " + group + " group, so nobody can sign in."));
         else if (!shown.length) listBox.append(h("div", { class: "empty" }, "No user matches."));
         shown.forEach((u) => {

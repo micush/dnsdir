@@ -1,5 +1,19 @@
 # Changelog
 
+## [v669] - 2026-11-16 — AND, OR and ! in every filter box
+
+### Added
+- Every filter box in the GUI (the Configure tables, the user lists, the query-statistics filter and the Log) reads `AND`, `OR` and `!`: `a AND !b` shows what has a and not b. `AND` is optional (`a !b` is the same), `OR` takes either side (AND binds first) and `!word`, or `NOT word`, leaves out whatever contains the word. In the Configure tables the words are now matched in any column, not as one phrase in one column. Note: a plain word `not` in a filter is now an operator, not a word to find.
+- The server side (the Log and the query statistics) already had AND and OR; it now has `!` and `NOT` too.
+
+### Verified
+- gofmt, vet, `go test -race ./...`, no-cgo, cross-compiles; the filter parser checked on its own in Node.
+
+### Not verified
+- Clicking through each box in a browser.
+
+---
+
 ## [v668] - 2026-11-16 — Topology and the Gateways/DNS pages no longer wait for a node that does not answer
 
 ### Fixed

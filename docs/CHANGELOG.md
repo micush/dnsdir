@@ -1,5 +1,19 @@
 # Changelog
 
+## [v668] - 2026-11-16 — Topology and the Gateways/DNS pages no longer wait for a node that does not answer
+
+### Fixed
+- The Topology page (`viaServing`), Monitor ▸ Gateways (`gatewaysVia`) and Monitor ▸ DNS (`dnsVia`) fill in what this node does not run from the nodes that serve it, asking them one after another with a 4-second limit each and keeping nothing between requests. A node that is up but does not answer in time therefore cost every poll (2 s) the whole limit again: up to 4 s per such node, and a page load, which asks several things at once, several times over. The asks now go through one helper (`peerBody`): the last good answer of a node is kept 3 s and an older one is used at once while a new one is fetched in the background; a node that has never answered is waited for at most 1.5 s, once; a node that fails is retried in the background about once a second and never waited for again. The same change was made in netdir v191, where it took a page load from about 15 s to about 2 s.
+- A log line `topology: node <addr> took <t> to answer <path>` names a node that took over a second.
+
+### Verified
+- Tests: a node that does not answer is waited for once and not again (a retry of it holds no request); a good answer is kept for the polls that follow (one ask for six); the first fails without the `tried` rule. `gofmt -l .`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet` and `go test`, the 5-arch cross-compile.
+
+### Not verified
+- No live multi-node cluster run: the in-process tests do not start daemons that relay to each other. The cluster channel itself is unchanged (`Relay` is called the same way, now from a background goroutine).
+
+---
+
 ## [v667] - 2026-11-15 — Family filter also takes the family out of ANY and other answers
 
 ### Fixed

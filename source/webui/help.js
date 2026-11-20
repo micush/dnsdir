@@ -152,6 +152,25 @@ const DNSDIR_HELP = {
       ["cli", "dnsdir --show-config\ndnsdir --show-gateways\ndnsdir --show-neighbors"],
     ],
   },
+  config_dns: {
+    title: "Configure: Settings ▸ DNS",
+    body: [
+      "The **DNS** tab of **Configure ▸ Settings** makes this node put its own addresses into DNS by itself, so its name always points at the address it has now. It uses RFC 2136 dynamic updates, signed with a TSIG key.",
+      "**Every change saves and applies as soon as you leave the field or tick the box.** There is no Save button. If dnsdir refuses a value, a red *Not saved* message says why and nothing is changed until you correct it.",
+      ["h", "What you can do here"],
+      ["ul", ["Switch on the registration of this node's addresses and give it the TSIG key the DNS server expects.", "Choose the domain, the server, how often it checks and which interfaces to leave out.", "Run a check at once, see what it found and what failed, and take this node's records out of DNS."]],
+      ["h", "What it registers"],
+      ["ul", ["`host.domain`: the node's first address of each kind, an **A** record for IPv4 and an **AAAA** record for IPv6.", "`host-interface.domain`: every address of that interface, for example `node1-eth0.example.com`.", "A **PTR** record for each address, pointing at the first of its names, in the reverse zone (a /24 for IPv4, a /64 for IPv6).", "Not registered: loopback, link-local and multicast addresses, the shared addresses of the gateways (they move between nodes), interfaces that are down, and the interfaces you leave out."]],
+      ["h", "Step by step: turn it on"],
+      ["ol", ["Open **Configure ▸ Settings ▸ DNS**.", "Put the **TSIG key** your DNS server gave you into the **TSIG key** box: either `name:base64secret` (add `:hmac-sha512` and so on for another algorithm than the default `hmac-sha256`), or the path of a BIND key file on this node.", "Leave **Domain** and **Server** empty to use the search domain in `/etc/resolv.conf` and the primary server named in the zone's SOA record. Fill them in when the node has no search domain or the server must be a particular one.", "Tick **Register this node's addresses in DNS**. The first check runs a few seconds later; **Register now** runs it at once.", "Read the line under the buttons: how many records were already right, how many were updated, and what failed and why."]],
+      ["h", "Fields"],
+      "Every setting here is **This node only**: each node registers its own addresses with its own settings.",
+      ["fields", [["Register this node's addresses in DNS", "Switches the check on or off. Your settings stay when it is off, and so do the records already in DNS."], ["TSIG key", "The key that signs the updates: `name:base64secret[:algorithm]`, or the path of a BIND key file (`key \"name\" { algorithm hmac-sha256; secret \"…\"; };`). The algorithm is `hmac-md5`, `hmac-sha1`, `hmac-sha256` (default), `hmac-sha384` or `hmac-sha512`. Empty: unsigned updates, for a server that allows them. The box hides what you type, and a read-only account is not shown the key."], ["Domain", "The domain the names are made in. Empty: the first search domain in `/etc/resolv.conf`."], ["Server", "The DNS server that takes the updates, `host` or `host:port`. Empty: the primary named by the SOA record of the domain, and the same for each reverse zone (a reverse zone with no SOA of its own is updated on the domain's server)."], ["Check every (s)", "Seconds between checks, 30 to 86400 (default 300). Up to 30 % is added at random each time so a rack of nodes does not all ask in the same second."], ["TTL (s)", "Time to live of the records written (default 900)."], ["Leave out interfaces", "Interface names, or patterns with `*`, separated by commas, for example `docker*, veth*, br-*`."]]],
+      ["h", "Good to know"],
+      ["ul", ["A check only sends an update for a record that is wrong or missing; when everything is right nothing is sent. A name's whole set of addresses is replaced in one message, so a client never sees it half done.", "Turning registration off does not delete the records. **Remove records** (or `--dnsreg-remove`) takes this node's records out: the A and AAAA records of its names, and each PTR record that still points at one of them. While registration is still on, the next check puts them back, so turn it off first when the node is going away.", "The update goes to the zone's primary over TCP port 53, so the node needs to reach it there. **REFUSED** means the server wants a TSIG key or does not accept this one for the zone; **NOTAUTH** means the server is not the primary of the zone or the key is wrong.", "The answer of the server is not checked for its own signature; the update is."]],
+      ["cli", "dnsdir --dnsreg\ndnsdir --dnsreg-key ddns-key:c2VjcmV0c2VjcmV0 --dnsreg-enable\ndnsdir --dnsreg-domain lab.example.com --dnsreg-server 10.0.0.2 --dnsreg-skip 'docker*,veth*'\ndnsdir --dnsreg-interval 600 --dnsreg-ttl 300\ndnsdir --dnsreg-now\ndnsdir --dnsreg-remove\ndnsdir --dnsreg-disable | --dnsreg-enable"],
+    ],
+  },
   config_general: {
     title: "Configure: Settings ▸ General",
     body: [

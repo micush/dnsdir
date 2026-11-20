@@ -149,6 +149,10 @@ the web GUI):
                    --syslog-server HOST[:PORT]  [--syslog-protocol udp|tcp|tls]  [--syslog-facility daemon|local0..local7]
                    [--syslog-format rfc5424|rfc3164]  [--syslog-ca FILE]  [--syslog-tls-insecure]   (- = default / none)
                    --syslog-disable | --syslog-enable   (settings kept)   --syslog-test   (send a test message)
+  DNS registration --dnsreg   (this node puts its interface addresses into DNS: A, AAAA and PTR, by dynamic update)
+                   --dnsreg-key FILE|NAME:SECRET[:ALG]  [--dnsreg-domain D] [--dnsreg-server HOST[:PORT]]  [--dnsreg-interval S] [--dnsreg-ttl S]
+                   [--dnsreg-skip PATTERN,...]   (- = default / none)    --dnsreg-enable | --dnsreg-disable   (settings kept, records stay)
+                   --dnsreg-now   (register now, list the records)    --dnsreg-remove   (take this node's records out of DNS)
   LLDP             --lldp   (neighbor discovery: the setting, lldpd on this node, and the switch port of each interface)
                    --lldp-enable | --lldp-disable   (every node of the cluster runs lldpd, or none does; off by default)
   Cluster          --cluster-status  --cluster-token  --cluster-join CODE

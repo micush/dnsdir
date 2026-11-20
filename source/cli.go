@@ -37,6 +37,8 @@ type cliFlags struct {
 	logMin, logGrep, logSince, logLines, statsRange, statsRcode, statsClient, statsDomain, statsProto, whoisName, scanAddr, pingAddr, traceAddr, lookupAddr, cacheFlush, dnsLookup, hostRange, captureIface, captureSecs, captureFilter, captureFile, tshootFile *string
 	syslog, syslogOff, syslogOn, syslogTest, syslogInsecure                                                                                                                                                                                                      *bool
 	lldp, lldpOn, lldpOff                                                                                                                                                                                                                                        *bool
+	dnsOn, dnsOff, dnsNow, dnsRemove, dnsShow                                                                                                                                                                                                                    *bool
+	dnsKey, dnsDomain, dnsServer, dnsInterval, dnsTTL, dnsSkip                                                                                                                                                                                                   *string
 	syslogServer, syslogProto, syslogFacility, syslogFormat, syslogCA                                                                                                                                                                                            *string
 	ospf, ospfDisable, ospfEnable                                                                                                                                                                                                                                *bool
 	ospfRouterID, ospfIfAdd, ospfIfDel, ospfIfDisable, ospfIfEnable, ospfArea, ospfNetwork, ospfKey, ospfHello, ospfDead, ospfMetric                                                                                                                             *string
@@ -84,6 +86,8 @@ func registerCLIFlags(fs *flag.FlagSet) *cliFlags {
 		nbrAdd: s("bgp-neighbor-add"), nbrDel: s("bgp-neighbor-del"), remoteAS: s("remote-as"), descr: s("description"),
 		syslog: b("syslog"), syslogOff: b("syslog-disable"), syslogOn: b("syslog-enable"), syslogTest: b("syslog-test"), syslogInsecure: b("syslog-tls-insecure"),
 		lldp: b("lldp"), lldpOn: b("lldp-enable"), lldpOff: b("lldp-disable"),
+		dnsShow: b("dnsreg"), dnsOn: b("dnsreg-enable"), dnsOff: b("dnsreg-disable"), dnsNow: b("dnsreg-now"), dnsRemove: b("dnsreg-remove"),
+		dnsKey: s("dnsreg-key"), dnsDomain: s("dnsreg-domain"), dnsServer: s("dnsreg-server"), dnsInterval: s("dnsreg-interval"), dnsTTL: s("dnsreg-ttl"), dnsSkip: s("dnsreg-skip"),
 		syslogServer: s("syslog-server"), syslogProto: s("syslog-protocol"), syslogFacility: s("syslog-facility"), syslogFormat: s("syslog-format"), syslogCA: s("syslog-ca"),
 		ospf: b("ospf"), ospfDisable: b("ospf-disable"), ospfEnable: b("ospf-enable"), ospfRouterID: s("ospf-router-id"), ospfIfAdd: s("ospf-interface-add"), ospfIfDel: s("ospf-interface-del"),
 		ospfIfDisable: s("ospf-interface-disable"), ospfIfEnable: s("ospf-interface-enable"), ospfArea: s("ospf-area"), ospfNetwork: s("ospf-network"), ospfKey: s("ospf-key"),
@@ -480,6 +484,9 @@ func (f *cliFlags) run(sock string) bool {
 	case *f.syslog || *f.syslogServer != "" || *f.syslogProto != "" || *f.syslogFacility != "" || *f.syslogFormat != "" || *f.syslogCA != "" ||
 		*f.syslogOff || *f.syslogOn || *f.syslogTest || *f.syslogInsecure:
 		runSyslog(sock, f)
+	// ── dns registration ──
+	case *f.dnsShow || *f.dnsOn || *f.dnsOff || *f.dnsNow || *f.dnsRemove || *f.dnsKey != "" || *f.dnsDomain != "" || *f.dnsServer != "" || *f.dnsInterval != "" || *f.dnsTTL != "" || *f.dnsSkip != "":
+		runDNSReg(sock, f)
 	// ── lldp ──
 	case *f.lldp || *f.lldpOn || *f.lldpOff:
 		runLLDP(sock, f)

@@ -1,5 +1,29 @@
 # Changelog
 
+## [v670] - 2026-11-20 — each node can register its own addresses in DNS
+
+### Added
+- **DNS registration** (Configure ▸ Settings ▸ DNS, `--dnsreg`, `dns_register` in the node's config file): the `autoregdns` script, built in. A node puts its own interface addresses into DNS with RFC 2136 dynamic updates over TCP, signed with a TSIG key: `host.domain` for its first IPv4 and IPv6 address, `host-interface.domain` for every address of an interface, and a PTR record for each address. The domain defaults to the first search domain in `/etc/resolv.conf`, the server to the primary in the zone's SOA record (each reverse zone has its own SOA lookup and falls back to the forward zone's server). A check runs every 300 s plus up to 30 % jitter (both settable) and sends an update only for a record that is wrong or missing.
+- The key is a BIND key file or `name:base64secret[:algorithm]` (hmac-md5, -sha1, -sha256 default, -sha384, -sha512). It is hidden from read-only accounts, from MCP and from the troubleshooting bundle, and the GUI box hides what is typed.
+- **Register now** and **Remove records** buttons and `--dnsreg-now` / `--dnsreg-remove`; the state of the last run (right, updated, removed, failed, the error of each failed record) is shown under the settings and by `--dnsreg`. Help topic for the new tab, `--dnsreg*` in `--help`, README section, `dnsdir/dnsreg.json` in the troubleshooting bundle.
+- The setting is per node and never replicated, and leaves no key in the file until it is used, so older versions still read the file.
+
+### Changed (compared with the script)
+- A name's whole address set is replaced in one UPDATE message, so a second address on an interface no longer overwrites the first, and a client never sees a name half done. `host.domain` gets the first address of *each* family (the script gave the first address only to one family).
+- Not registered: the gateways' VIPs and anycast addresses (they move between nodes), interfaces that are down, IPv4 loopback of the whole 127/8, and interfaces matching `skip_interfaces` (for `docker*`, `veth*` and the like).
+- A zone is found from the SOA record in the answer or, for a name below the apex, in the authority section; an SOA of the root or of `in-addr.arpa` / `ip6.arpa` is not taken for a zone of this network.
+- Remove deletes a PTR record only while it still points at this node's name.
+- The result of an update is the reply's result code, with a hint for REFUSED (no or wrong TSIG key) and NOTAUTH (not the primary).
+
+### Verified
+- `go test`: a fake authoritative server that checks the TSIG signature on its own (the MAC recomputed from the message) covers first registration, an unchanged second run sending nothing, one changed record put right, remove leaving other nodes' records alone, no key / wrong key refused and nothing written, the server and domain settings, the zone lookup through a resolver file, reverse names for IPv4 and IPv6, key formats (file and `name:secret:alg`), validation, an unused setting leaving no key, the loop starting and stopping, VIPs excluded.
+- A real daemon (CGO off) driven through the CLI against a small stdlib DNS server: `--dnsreg-key … --dnsreg-enable` registers A, A and PTR with signed updates, the loop starts again after a daemon restart from the saved file, `--dnsreg-now` finds all three right, `--dnsreg-remove` removes them, `--dnsreg-disable` and clearing the settings leave no `dns_register` key, a bad key is refused with a message, the troubleshooting bundle shows `<removed>` for the key.
+- The Settings page in headless Chromium against a mocked API: the new DNS tab, the key box hides its text, the saved block carries the key and the interface patterns (defaults are not written), emptying every box leaves no `dns_register` key, Register now and the two-click Remove records call the right routes. gofmt, `go vet`, `go test ./...` (all but `TestUpdateBuildApplyAndRollbackGuard`, which needs the PAM headers).
+
+### Not verified
+- Against a real BIND, Knot or Windows DNS server (only the fake and the TSIG maths of RFC 8945 were checked), and IPv6 reverse zones delegated at a different length than /64. The reply's own TSIG signature is not checked.
+- `go test -race` (cgo and the PAM headers are not available here), the real PAM login and a multi-node cluster run.
+
 ## [v669] - 2026-11-16 — AND, OR and ! in every filter box
 
 ### Added

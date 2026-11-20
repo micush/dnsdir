@@ -43,6 +43,7 @@ func TestHelpCoversEveryField(t *testing.T) {
 		{"CLUSTER_FIELDS", "config_cluster"},
 		{"LOG_FIELDS", "config_logs"},
 		{"SYSLOG_FIELDS", "config_logs"},
+		{"DNSREG_FIELDS", "config_dns"},
 		{"GENERAL_FIELDS", "config_general"},
 	}
 	type span struct {

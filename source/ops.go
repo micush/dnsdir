@@ -282,6 +282,20 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 			return nil, err
 		}
 		return st, nil
+	// DNS registration
+	case "dnsreg.status":
+		return m.DNSRegState()
+	case "dnsreg.set":
+		var c DNSRegConfig
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return nil, fmt.Errorf("bad arguments: %w", err)
+		}
+		if err := m.DNSRegSet(c, actor); err != nil {
+			return nil, err
+		}
+		return m.DNSRegState()
+	case "dnsreg.now", "dnsreg.remove":
+		return m.DNSRegRun(cmd == "dnsreg.remove", actor)
 	// log
 	case "log.read", "log.view":
 		q, err := logQueryFromArgs(a.LogLevel, a.LogText, a.LogSince, a.LogN)
